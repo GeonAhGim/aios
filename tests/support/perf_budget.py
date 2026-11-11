@@ -46,7 +46,7 @@ class PerfBudget:
     최소값을 더해 노이즈를 한 번 더 걷어낸다; `samples`는 p95/p99처럼
     분포 자체가 필요한 테스트를 위해 원시 샘플 목록을 돌려준다."""
 
-    def sample(self, fn: Callable[[], _T], *, batch: int = 1) -> PerfSample:
+    def sample(self, fn: Callable[[], _T], *, batch: int = 1, collect: bool = True) -> PerfSample:
         """`batch`>1이면 `fn`을 연속 `batch`회 호출한 총 시간을 `batch`로
         나눠 1회 호출당 시간을 추정한다. `time.process_time()`은 Windows에서
         약 15.6ms(64Hz) 해상도로 양자화된다(`GetProcessTimes` 클록 틱) —
@@ -80,7 +80,8 @@ class PerfBudget:
         active_tracer = sys.gettrace()
         gc_was_enabled = gc.isenabled()
         if gc_was_enabled:
-            gc.collect()
+            if collect:
+                gc.collect()
             gc.disable()
         virtual_cpu0, virtual_wall0 = virtual_totals_ns()
         wall_start = time.perf_counter()
@@ -167,7 +168,12 @@ class PerfBudget:
     ) -> list[PerfSample]:
         for _ in range(warmup):
             fn()
-        return [self.sample(fn, batch=batch) for _ in range(n)]
+        # 전체 gc.collect()는 시리즈당 한 번만 한다 -- 샘플마다 하면 힙이 큰 스위트 워커에서
+        # 한 번에 수 초라 500샘플이 120s 타임아웃(os._exit)으로 워커를 죽였다(2026-11-11).
+        # 측정 구간의 GC 정지는 샘플별로 그대로 유지한다.
+        if gc.isenabled():
+            gc.collect()
+        return [self.sample(fn, batch=batch, collect=False) for _ in range(n)]
 
     def best_of(
         self, fn: Callable[[], _T], *, n: int = 5, warmup: int = 1, batch: int = 1
