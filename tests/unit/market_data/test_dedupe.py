@@ -131,10 +131,10 @@ def test_dedupe_cpu_time_converges_to_zero_for_small_input(
     perf_budget: PerfBudget,
 ) -> None:
     """0 수렴 검증: 단일 dedupe 호출(고유 캔들 100개)의 CPU 시간이 1ms 미만이어야
-    한다 — Windows의 time.process_time() 약 15.6ms 양자화 오차 내에서
-    사실상 0ms에 수렴한다."""
+    한다 — Windows의 time.process_time() 약 15.6ms 양자화 오차를 줄이기 위해
+    batch=100으로 측정해 호출당 평균을 추정하고, 1ms 미만임을 단언한다."""
     small = [_candle(open_time=_OPEN + timedelta(minutes=i)) for i in range(100)]
-    sample = perf_budget.sample(lambda: dedupe(small), batch=1)
+    sample = perf_budget.sample(lambda: dedupe(small), batch=100)
     assert sample.cpu_ms < 1.0, (
         f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
         "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
