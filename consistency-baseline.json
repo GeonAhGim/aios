@@ -1,6 +1,6 @@
 {
   "authority_duplication": 4,
-  "env_key_undocumented": 4,
+  "env_key_undocumented": 0,
   "event_type_unconsumed": 4,
   "feature_flag_undocumented": 0,
   "migration_hygiene": 0,

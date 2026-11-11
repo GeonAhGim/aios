@@ -156,7 +156,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if decreased:
-        print(f"OK: 감소했으나 baseline 유지(--update로 반영) {baseline} (현재 {current})")
+        for metric in sorted(decreased):
+            print(f"WARN: {metric} {baseline[metric]}개 -> {current[metric]}개 (감소)")
+        print(f"baseline이 오래됨: `--update`로 현재값 반영 권장 (현재 {current})")
         return 0
 
     print(f"OK: {current} (baseline {baseline})")
