@@ -449,3 +449,46 @@ def test_main_first_run_initializes_baseline_perf_budget(tmp_path: Path, perf_bu
     assert baseline_path.exists()
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
     assert set(data) == set(cc.METRICS)
+
+
+@pytest.mark.perf
+def test_main_first_run_initializes_baseline_perf_gate_red_virtual_delay(
+    tmp_path: Path, perf_budget
+) -> None:
+    """gate-red + perf: perf_inject 가상 지연 0.05s 주입 후 best_of(5) 측정.
+
+    virtual_delayed_sync가 main() 호출에 50ms cpu+wall 지연을 추가하면
+    perf_budget가 그 지연을 측정값에 합산한다. best_of(5)로 여러 번 중
+    최소 CPU 시간을 선택하고 budget 5000ms 이내를 단언한다.
+    """
+    from scripts.consistency.common import (
+        _iter_py_files,
+        _read_text_cached,
+        _safe_parse,
+        _walked_nodes,
+    )
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    for fn in (_iter_py_files, _read_text_cached, _safe_parse, _walked_nodes):
+        fn.cache_clear()
+    _write(tmp_path, "src/foo.py", "import datetime\nx = datetime.datetime.utcnow()\n")
+    baseline_path = tmp_path / "consistency-baseline.json"
+    original_main = cc.main
+
+    def _delayed(argv: list[str]) -> int:
+        return virtual_delayed_sync(original_main, 0.05)(argv)
+
+    sample = perf_budget.best_of(
+        lambda: _delayed(["--root", str(tmp_path), "--baseline", str(baseline_path)]),
+        n=5,
+    )
+    assert sample.cpu_ms < 5000.0
+
+
+def test_main_first_run_initializes_baseline_adversarial_invalid_json(tmp_path: Path) -> None:
+    """adversarial 1: baseline JSON이 완전히 무효하면 exit 1로 중단한다."""
+    baseline_path = tmp_path / "consistency-baseline.json"
+    baseline_path.write_text("<html>not json</html>", encoding="utf-8")
+    _write(tmp_path, "src/clean.py", "x = 1\n")
+    assert cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)]) == 1
