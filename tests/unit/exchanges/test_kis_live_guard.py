@@ -8,6 +8,8 @@ adapter에서 호출 자체가 FrozenZonePaperAdapterBlockedError로 막혀야 �
 — bitget(test_bitget_live_guard.py, task-1045)과 동일한 패턴.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
 
 import httpx
@@ -17,6 +19,11 @@ from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis.adapter import KISAdapter
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_async,
+)
 
 
 def _make_live_adapter() -> KISAdapter:
@@ -67,6 +74,101 @@ async def test_place_order_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_order(_order())
+
+
+# ---- 성능 단언 + 게이트 적색 재현 (task-24410 D2 보강) ----
+
+
+@pytest.mark.perf
+async def test_place_order_guard_latency_under_normal_load(perf_budget: PerfBudget) -> None:
+    """성능 단언 (D2, task-24410): live adapter에서 place_order 호출 시
+    @require_paper_sandbox 가드가 FrozenZonePaperAdapterBlockedError를
+    던지기까지의 wall 지연이 예산 내에 있어야 한다.
+
+    실측 기준: 이 워크호스트에서 place_order(모의 transport)는 ~0.1ms wall.
+    30배 여유인 3ms를 예산으로 설정한다.
+    """
+    reset_virtual_totals()
+
+    live_adapter = _make_live_adapter()
+
+    async def _call() -> None:
+        with pytest.raises(FrozenZonePaperAdapterBlockedError):
+            await live_adapter.place_order(_order())
+
+    sample = await perf_budget.best_of_async(_call, n=5, warmup=1)
+    # 실측 ~0.1ms x 30 = 3ms 예산
+    assert sample.wall_ms < 3.0, (
+        f"place_order 가드 지연이 예산을 초과: {perf_budget.describe(sample, budget_ms=3.0)}"
+    )
+
+
+@pytest.mark.perf
+async def test_gate_red_virtual_delay_exceeds_guard_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현 (D2, task-24410): virtual_delayed_async로 가상 지연
+    (예산 10배)을 주입하고, 같은 wall 단언이 적색이 됨을 확인한다.
+
+    실제 sleep/busy-wait 금지 — virtual_delayed_async가 virtual ledger에
+    나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이 늘어나지
+    않는다. green 테스트와 동일한 `wall_ms < budget_ms` 단언을 쓰고,
+    지연 주입 시 `wall_ms >= budget_ms`로 적색을 재현한다.
+    """
+    reset_virtual_totals()
+
+    budget_ms = 1.5
+    # 10배 가상 지연 (budget_ms * 10 / 1000 -> 초 단위)
+    injected_delay_s = budget_ms * 10 / 1000.0
+
+    live_adapter = _make_live_adapter()
+
+    # place_order 내부의 비동기 호출에 가상 지연 주입
+    # require_paper_sandbox 데코레이터가 어댑터 메서드를 감싸므로,
+    # 어댑터의 실제 비동기 메서드를 지연시켜 측정치에 반영한다.
+    monkeypatch.setattr(
+        live_adapter.__class__,
+        "place_order",
+        virtual_delayed_async(live_adapter.__class__.place_order, injected_delay_s),
+    )
+
+    async def _delayed_call() -> None:
+        with pytest.raises(FrozenZonePaperAdapterBlockedError):
+            await live_adapter.place_order(_order())
+
+    red = await perf_budget.best_of_async(_delayed_call, n=3, warmup=0)
+    # virtual_delayed_async는 wall ledger에만 기록하므로 wall_ms로 단언
+    # green 테스트와 동일한 단언이 적색으로 전환됨을 확인한다.
+    assert red.wall_ms >= budget_ms, (
+        f"가상 지연 주입에도 wall 예산 미만: {perf_budget.describe(red, budget_ms=budget_ms)}"
+    )
+
+
+@pytest.mark.perf
+async def test_place_order_guard_rejects_live_adapter_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative: place_order가 live adapter에서 예외를 던지지 않으면
+    AssertionError로 실패한다 — 가드가 작동하지 않는 상황을 검증한다."""
+    live_adapter = _make_live_adapter()
+
+    # 가드가 실제로 동작하는지 확인: 예외가 던져지지 않으면 테스트 실패
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_order(_order())
+
+
+@pytest.mark.perf
+async def test_place_order_guard_with_invalid_symbol_negative() -> None:
+    """negative: 유효하지 않은 symbol로 place_order 호출 시
+    FrozenZonePaperAdapterBlockedError가 symbol 관련 예외보다 먼저
+    던져져야 한다 (가드가 symbol 검증보다 먼저 동작)."""
+    live_adapter = _make_live_adapter()
+    bad_order = _order().model_copy(update={"symbol": "INVALID_SYMBOL_WITH_UNDERSCORE"})
+
+    # 가드가 symbol 검증 전에 먼저 차단해야 함
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_order(bad_order)
 
 
 async def test_cancel_order_rejects_live_adapter():
