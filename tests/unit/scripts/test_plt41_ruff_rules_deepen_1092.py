@@ -148,6 +148,36 @@ def test_ruff_passes_clean_file_with_extended_select(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# negative (>= 3) -- 추가: S605(subprocess shell=True)와 T203(pprint)도
+# PLT-41 확장이 잡는지 개별 함수로 확인 (parametric 테스트와 독립).
+# ---------------------------------------------------------------------------
+
+
+def test_ruff_catches_S605_os_system(tmp_path: Path) -> None:
+    """S(security) 그룹: os.system() 호출을 S605로 탐지한다."""
+    content = 'import os\nos.system("ls")\n'
+    _write(tmp_path, "pyproject.toml", _REPO_SHAPED_CONFIG)
+    _write(tmp_path, "src/shell.py", content)
+
+    result = _run_ruff(tmp_path, "src/shell.py")
+
+    assert result.returncode == 1, result.stdout
+    assert "S605" in result.stdout
+
+
+def test_ruff_catches_T203_pprint(tmp_path: Path) -> None:
+    """T20(flake8-print) 그룹: pprint()를 T203으로 탐지한다."""
+    content = "from pprint import pprint\npprint({'key': 'value'})\n"
+    _write(tmp_path, "pyproject.toml", _REPO_SHAPED_CONFIG)
+    _write(tmp_path, "src/pprint_file.py", content)
+
+    result = _run_ruff(tmp_path, "src/pprint_file.py")
+
+    assert result.returncode == 1, result.stdout
+    assert "T203" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # failure injection (1) -- tests/** 블랭킷 무시가 새 규칙군까지 과잉 억제하면
 # 회귀다. task-1092가 tests/**에 넣은 건 S101/ARG001/ARG002/ARG005/S105/S106/
 # S311/T201/S603/S607뿐이고 BLE001은 없다 -- 실제로 새지 않는지 주입해 확인.
