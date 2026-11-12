@@ -202,6 +202,137 @@ async def test_paused_mandate_rejects(pool, repo, trust_repo):
     assert "STATE_MANDATE_PAUSED" in decision.reason_codes
 
 
+# --- test_paused_mandate_rejects 보강: negative 3, failure_injection 1, perf 1, gate_red 1 ---
+
+
+async def test_paused_mandate_does_not_reject_other_tenant(pool, repo, trust_repo):
+    """음성 1 — 한 tenant의 mandate 정지는 다른 tenant의 제출에 영향을 주지
+    않는다. 다른 tenant의 mandate가 활성이면 ALLOW된다."""
+    paused_user = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=paused_user)
+    await pause_mandate(repo, tenant_id=paused_user)
+
+    other_user = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=other_user)
+    other_mandate = await repo.get_mandate(other_user)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    decision = await gate(
+        _context(other_user, other_mandate.active_revision_id, execution_id=_unique_execution_id())
+    )
+
+    assert decision.outcome == GateOutcome.ALLOW
+
+
+async def test_paused_mandate_reject_is_execution_scoped(pool, repo, trust_repo):
+    """음성 2 — pause된 mandate의 DENY는 execution_id마다 독립적으로 평가된다.
+    같은 tenant, 같은 PAUSED mandate라도 execution_id가 다르면 각각 독립적인
+    게이트 평가를 받는다(캐시 미스 포함). 두 execution_id 모두 DENY여야 한다."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    execution_id_a = _unique_execution_id()
+    execution_id_b = execution_id_a + 1 if execution_id_a < 2**31 - 1 else execution_id_a - 1
+
+    decision_a = await gate(_context(user_id, None, execution_id=execution_id_a))
+    decision_b = await gate(_context(user_id, None, execution_id=execution_id_b))
+
+    assert decision_a.outcome == GateOutcome.DENY
+    assert "STATE_MANDATE_PAUSED" in decision_a.reason_codes
+    assert decision_b.outcome == GateOutcome.DENY
+    assert "STATE_MANDATE_PAUSED" in decision_b.reason_codes
+
+
+async def test_paused_mandate_state_is_read_from_db_not_cache(pool, repo, trust_repo):
+    """음성 3 — pause 전 게이트가 ALLOW 캐시를 데워도, pause 이후의 게이트
+    호출은 캐시 대신 DB의 실제 PAUSED 상태를 읽어야 한다. 캐시가 stale ALLOW를
+    반환하면 이 테스트는 실패한다(fail-closed 검증)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    # pause 전 — ALLOW로 캐시 데우기
+    pre_pause = await gate(
+        _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+    )
+    assert pre_pause.outcome == GateOutcome.ALLOW
+
+    # pause 실행
+    await pause_mandate(repo, tenant_id=user_id)
+
+    # 같은 context로 다시 호출 — 캐시가 있더라도 DB의 PAUSED 상태를 읽어야 DENY
+    post_pause = await gate(
+        _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+    )
+    assert post_pause.outcome == GateOutcome.DENY
+    assert "STATE_MANDATE_PAUSED" in post_pause.reason_codes
+
+
+@pytest.mark.perf
+async def test_paused_mandate_gate_perf_budget(perf_budget: PerfBudget, pool, repo, trust_repo):
+    """성능 단언 — paused mandate 게이트 wall 지연이 예산 미만.
+    실측 약 5ms(로컬, best-of-5). 예산은 실측의 30배 이상."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    async def _run():
+        return await gate(_context(user_id, None, execution_id=_unique_execution_id()))
+
+    sample = await perf_budget.best_of_async(_run, n=5, warmup=1)
+    # 성능 예산: 실측 5ms의 30배 = 150ms, 여유 두어 200ms
+    assert sample.wall_ms < 200.0, perf_budget.describe(sample, budget_ms=200.0)
+
+
+async def test_paused_mandate_gate_failure_injection(pool, repo, trust_repo):
+    """실패 주입 — 게이트 내부 DB 조회 중 ConnectionError가 발생해도
+    게이트는 ALLOW를 반환하지 않는다(예외 전파 또는 DENY)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    class _BrokenPool:
+        def __getattr__(self, name):
+            raise ConnectionError(f"injected pool failure: {name}")
+
+    gate = make_foundation_pre_submit_gate(_BrokenPool(), require_mandate=True)
+    try:
+        decision = await gate(_context(user_id, None, execution_id=_unique_execution_id()))
+    except Exception:  # noqa: BLE001 - propagation is fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+@pytest.mark.perf
+async def test_paused_mandate_gate_perf_gate_red_with_10x_injection(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """게이트 적색 재현 — 예산의 10배 가상 지연을 주입하면 같은 단언이 적색이
+    된다(단언이 실제로 지연을 잡는다)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    delay_s = 200.0 * 10 / 1000  # 예산 200ms의 10배 = 2s 가상 지연
+
+    async def _run():
+        return await virtual_delayed_async(
+            lambda: gate(_context(user_id, None, execution_id=_unique_execution_id())),
+            delay_s,
+        )()
+
+    reset_virtual_totals()
+    sample = await perf_budget.best_of_async(_run, n=5, warmup=1)
+    assert not (sample.wall_ms < 200.0)
+    reset_virtual_totals()
+
+
 async def test_expired_revision_rejects(pool, repo, trust_repo):
     """만료 revision — 이 주문이 관측했던 revision(A)이 그사이 새 개정(B)으로
     대체돼 더 이상 active가 아니면(task-1806 observed-vs-current), 새
