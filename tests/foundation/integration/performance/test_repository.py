@@ -118,6 +118,95 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
     assert fetched.evidence_refs == ("audit:1",)
 
 
+async def test_round_trip_unknown_methodology_version_is_rejected(pool, repo):
+    """negative: an unregistered methodology_version violates the FK."""
+    tenant_id = await create_test_tenant(pool)
+    statement = await _statement(tenant_id, methodology_version="nonexistent-version")
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await repo.insert_statement(statement)
+
+
+async def test_round_trip_duplicate_statement_key_is_rejected(pool, repo):
+    """negative: the same (tenant, scope, ref, period, revision) cannot be stored twice."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    await repo.insert_statement(await _statement(tenant_id))
+
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await repo.insert_statement(await _statement(tenant_id))
+
+
+async def test_get_statement_unknown_id_returns_none(repo):
+    """negative: a never-inserted id yields None, not a fabricated statement."""
+    assert await repo.get_statement(uuid4()) is None
+
+
+async def test_insert_statement_pool_failure_persists_nothing(pool, repo, monkeypatch):
+    """failure injection: a pool.acquire failure propagates and leaves no row behind."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    statement = await _statement(tenant_id)
+
+    class _BrokenPool:
+        def acquire(self):
+            raise ConnectionError("injected pool failure")
+
+    with pytest.raises(ConnectionError, match="injected pool failure"):
+        await PostgresPerformanceRepository(_BrokenPool()).insert_statement(statement)
+
+    assert await repo.list_statements(tenant_id=tenant_id) == ()
+
+
+@pytest.mark.perf
+async def test_round_trip_latency_within_budget(pool, repo, perf_budget):
+    """perf: insert+get round trip, best of 5 (new budget 500ms).
+
+    Local measurement (Windows, shared dev Postgres): 1.65 ms best-of-5
+    wall. Budget leaves >=30x headroom."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    counter = iter(range(1, 1000))
+
+    async def _round_trip():
+        stmt = await _statement(tenant_id, revision_no=next(counter))
+        inserted = await repo.insert_statement(stmt)
+        return await repo.get_statement(inserted.id)
+
+    sample = await perf_budget.best_of_async(_round_trip, n=5, warmup=1)
+
+    assert sample.result is not None
+    assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+
+@pytest.mark.perf
+async def test_round_trip_latency_gate_goes_red_with_10x_injected_delay(
+    pool, repo, perf_budget, monkeypatch
+):
+    """gate-red reproduction: a virtual delay of 10x the budget makes the same
+    assertion fail, proving it catches a slow round trip."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    monkeypatch.setattr(repo, "get_statement", virtual_delayed_async(repo.get_statement, 5.0))
+    counter = iter(range(1, 1000))
+
+    async def _round_trip():
+        inserted = await repo.insert_statement(
+            await _statement(tenant_id, revision_no=next(counter))
+        )
+        return await repo.get_statement(inserted.id)
+
+    sample = await perf_budget.best_of_async(_round_trip, n=3)
+    reset_virtual_totals()
+
+    assert sample.wall_ms >= 5000
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+
 async def test_list_statements_scoped_to_tenant(pool, repo):
     tenant_a = await create_test_tenant(pool)
     tenant_b = await create_test_tenant(pool)
