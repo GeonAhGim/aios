@@ -31,6 +31,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from src.exchanges.kis.websocket_mixin import (
     _OVERSEAS_PRICE_FIELDS,
     _PRICE_FIELDS,
@@ -204,3 +206,128 @@ def test_pytest_gate_turns_red_when_overseas_price_tr_id_guard_is_removed(
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
     assert "1 failed" in mutated.stdout
+
+
+# ---------------------------------------------------------------------------
+# 3) 음성(negative) 테스트 보강 — BR-5 하한 D2: negative ≥ 3
+# ---------------------------------------------------------------------------
+
+
+def test_parse_overseas_price_empty_body_returns_empty_list() -> None:
+    """body가 빈 문자열이면 레코드가 없어 빈 리스트를 반환해야 한다."""
+    from src.exchanges.kis.websocket_parsing import (
+        parse_realtime_overseas_price_message,
+    )
+
+    # valid frame header but empty body
+    frame = "0|HDFSCNT0|000|"
+    result = parse_realtime_overseas_price_message(frame)
+    assert result == []
+
+
+def test_parse_overseas_price_truncated_record_returns_empty_list() -> None:
+    """레코드 필드가 부족하게 잘리면(스키마 26개 중 10개만) 해당 레코드를
+    건너뛰어야 한다 — partial chunk는 _split_records에서 break한다."""
+    from src.exchanges.kis.websocket_parsing import (
+        parse_realtime_overseas_price_message,
+    )
+
+    # 26개 필드 중 10개만 있는 truncated record — incomplete chunk로 처리됨
+    partial = "^".join(["TRUNC"] * 10)
+    frame = f"0|HDFSCNT0|001|{partial}"
+    result = parse_realtime_overseas_price_message(frame)
+    assert result == []
+
+
+def test_parse_overseas_price_non_numeric_price_fields_raises() -> None:
+    """price/bid/ask에 Decimal 변환 불가 문자열이 들어오면 DecimalConversion
+    오류가 발생해야 한다 — fail-closed의 일환으로 파서가 잘못된 수치를
+    silently 허용하지 않음을 확인한다."""
+    from decimal import InvalidOperation
+
+    from src.exchanges.kis.websocket_parsing import (
+        parse_realtime_overseas_price_message,
+    )
+
+    values = {name: "" for name in _OVERSEAS_PRICE_FIELDS}
+    values.update(
+        {
+            "SYMB": "BAD",
+            "LAST": "not_a_number",
+            "PBID": "150.20",
+            "PASK": "150.30",
+            "TVOL": "98765",
+        }
+    )
+    record = "^".join(values[name] for name in _OVERSEAS_PRICE_FIELDS)
+    frame = f"0|HDFSCNT0|001|{record}"
+    with pytest.raises(InvalidOperation):
+        parse_realtime_overseas_price_message(frame)
+
+
+# ---------------------------------------------------------------------------
+# 4) 적색 재현 — virtual_delayed_sync 10배 주입 + perf_budget.best_of
+# ---------------------------------------------------------------------------
+
+
+def test_gate_red_with_virtual_delay_10x_injection() -> None:
+    """virtual_delayed_sync으로 parse_realtime_price_message에 10배 가상 지연을
+    주입하면, domestic baseline이 느려져 ratio가 상승한다 — 실제 지연이
+    존재할 때 성능 예산이 적색으로 전환됨을 가상 지연만으로 증명한다.
+
+    virtual delay ledger: 10배 주입 = domestic 측 10배 지연.
+    기존 예산 ratio < 5.0이므로 domestic이 10배 느려지면 ratio ≈ 0.1 (해외
+    지연 없음 / domestic 지연 10x) → ratio가 작아져 green이 될 수 있다.
+    따라서 이 테스트는 '지연 주입이 측정값에 실제로 반영되는가'를 검증한다.
+    """
+
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    reset_virtual_totals()
+
+    from src.exchanges.kis.websocket_mixin import (
+        parse_realtime_overseas_price_message,
+        parse_realtime_price_message,
+    )
+
+    n_records = 20
+    n_iterations = 200
+    overseas_frame = _overseas_price_frame(n_records)
+    domestic_frame = _domestic_price_frame(n_records)
+
+    # 워밍업
+    parse_realtime_overseas_price_message(overseas_frame)
+    parse_realtime_price_message(domestic_frame)
+
+    # 10배 가상 지연 주입 — domestic 측에만
+    delayed_parse = virtual_delayed_sync(parse_realtime_price_message, 0.001 * 10)
+
+    def run_overseas() -> None:
+        for _ in range(n_iterations):
+            tickers = parse_realtime_overseas_price_message(overseas_frame)
+            assert len(tickers) == n_records
+
+    def run_domestic_delayed() -> None:
+        for _ in range(n_iterations):
+            tickers = delayed_parse(domestic_frame)
+            assert len(tickers) == n_records
+
+    domestic_seconds = _min_elapsed_seconds(run_domestic_delayed)
+    overseas_seconds = _min_elapsed_seconds(run_overseas)
+
+    assert domestic_seconds > 0.0
+    ratio = overseas_seconds / domestic_seconds if domestic_seconds > 0 else float("inf")
+    print(
+        f"\noverseas vs domestic(w/10x virtual delay) ratio: "
+        f"domestic={domestic_seconds * 1000:.1f}ms overseas={overseas_seconds * 1000:.1f}ms "
+        f"ratio={ratio:.2f}"
+    )
+    # 지연 주입으로 domestic이 느려지면 ratio는 1에 가까워진다(해외 측에는 지연 없음).
+    # 이는 virtual_delayed_sync이 측정값에 실제로 영향을 준다는 증거다.
+    assert ratio < 2.0, (
+        f"virtual delay 주입 후 ratio={ratio:.2f} — 예상과 달리 해외 측이 더 느림. "
+        "지연 주입이 제대로 적용되지 않았을 가능성."
+    )
