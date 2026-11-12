@@ -89,7 +89,14 @@ async def test_explain_real_denied_decision_reproduces_red_gate_verdict(pool, re
         reset_virtual_totals()
 
 
+@pytest.mark.perf
 async def test_explain_real_allowed_decision_reproduces_green_gate_verdict(pool, repo, trust_repo):
+    """ALLOW 경로에도 CPU 예산 150ms를 적용한다. best-of-5로 측정하고,
+    동일 단언에 예산의 10배 CPU 가상 지연(1.5s)을 주입하여 성능 회귀가
+    실제 적색임을 검증한다."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    reset_virtual_totals()
     tenant_id = await _active_tenant(pool, repo, trust_repo)
 
     evaluated = await evaluate_pre_trade(
@@ -105,6 +112,26 @@ async def test_explain_real_allowed_decision_reproduces_green_gate_verdict(pool,
 
     assert explained.verdict == ComplianceVerdict.ALLOW
     assert explained.rule_hits == []
+
+    async def replay():
+        result = await explain(repo, evaluated.compliance_decision_id)
+        assert result.model_dump() == explained.model_dump()
+        return result
+
+    def assert_budget(sample):
+        assert sample.cpu_ms < 150.0, "ALLOW replay CPU budget exceeded"
+
+    pb = PerfBudget()
+    sample = await pb.best_of_async(replay, n=5, warmup=1, batch=10)
+    print(f"ALLOW replay cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms")
+    assert_budget(sample)
+    try:
+        delayed_replay = virtual_delayed_sync(replay, seconds=1.5)
+        delayed_sample = await pb.best_of_async(delayed_replay, n=3, warmup=1)
+        with pytest.raises(AssertionError, match="ALLOW replay CPU budget exceeded"):
+            assert_budget(delayed_sample)
+    finally:
+        reset_virtual_totals()
 
 
 # --- real DB/network failure injection (DEEPEN task-2866) --------------------
@@ -163,6 +190,7 @@ async def test_explain_meets_throughput_budget_over_repeated_real_calls(pool, re
 # --- D3 multi-instance/replay proof (DEEPEN task-2866) -----------------------
 
 
+@pytest.mark.perf
 async def test_concurrent_multi_instance_explain_replays_byte_identical_output(
     pool, repo, trust_repo
 ):
@@ -170,7 +198,13 @@ async def test_concurrent_multi_instance_explain_replays_byte_identical_output(
     "인스턴스")을 가진 호출자 N명이 동일한 decision_id를 `asyncio.gather`로
     진짜 동시에 재현한다. explain()은 순수 읽기라 경합할 쓰기가 없으므로,
     CM-13의 실질("같은 입력엔 항상 같은 판정")이 단일 프로세스뿐 아니라 진짜
-    다중 커넥션 동시 실행 아래서도 바이트 단위로 깨지지 않는지 증명한다."""
+    다중 커넥션 동시 실행 아래서도 바이트 단위로 깨지지 않는지 증명한다.
+
+    best-of-5로 CPU 150ms 예산을 측정하고, 동일 단언에 10배 가상 지연(1.5s)을
+    주입하여 성능 회귀가 실제 적색임을 검증한다."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    reset_virtual_totals()
     tenant_id = await _active_tenant(pool, repo, trust_repo)
     evaluated = await evaluate_pre_trade(
         repo,
@@ -190,13 +224,32 @@ async def test_concurrent_multi_instance_explain_replays_byte_identical_output(
         results = await asyncio.gather(
             *(explain(r, evaluated.compliance_decision_id) for r in repos)
         )
+        json_bytes = {r.model_dump_json() for r in results}
+        assert len(json_bytes) == 1, "다중 인스턴스 간 explain() 출력이 바이트 단위로 갈렸다"
+        assert {r.verdict for r in results} == {ComplianceVerdict.DENY}
+
+        async def replay():
+            replayed = await asyncio.gather(
+                *(explain(r, evaluated.compliance_decision_id) for r in repos)
+            )
+            assert {r.model_dump_json() for r in replayed} == json_bytes
+            return replayed
+
+        def assert_budget(sample):
+            assert sample.cpu_ms < 150.0, "concurrent replay CPU budget exceeded"
+
+        pb = PerfBudget()
+        sample = await pb.best_of_async(replay, n=5, warmup=1, batch=10)
+        print(f"concurrent replay cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms")
+        assert_budget(sample)
+        delayed_replay = virtual_delayed_sync(replay, seconds=1.5)
+        delayed_sample = await pb.best_of_async(delayed_replay, n=3, warmup=1)
+        with pytest.raises(AssertionError, match="concurrent replay CPU budget exceeded"):
+            assert_budget(delayed_sample)
     finally:
         for p in pools:
             await p.close()
-
-    json_bytes = {r.model_dump_json() for r in results}
-    assert len(json_bytes) == 1, "다중 인스턴스 간 explain() 출력이 바이트 단위로 갈렸다"
-    assert {r.verdict for r in results} == {ComplianceVerdict.DENY}
+        reset_virtual_totals()
 
 
 # --- D3 adversarial proof (DEEPEN task-2866) ----------------------------------
