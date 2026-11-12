@@ -90,6 +90,7 @@ async def test_register_rejects_unknown_platform_service_failure(client, monkeyp
     assert "injected pool failure" not in response.text
 
 
+@pytest.mark.perf
 async def test_register_rejects_unknown_platform_perf(client):
     # p95 응답 시간 ≤ 500ms — 10회 반복 측정.
     # 미지원 플랫폼은 DB 쿼리 없이 pydantic/서비스 레벨에서 즉시 거부되므로 빠르다.
@@ -106,8 +107,6 @@ async def test_register_rejects_unknown_platform_perf(client):
             headers=headers,
         )
         latencies.append(time.perf_counter() - start)
-        # perf: perf_marker_guard requires a perf marker on wall-clock assertions.
-        _ = latencies[-1]  # perf: wall_ms=500
 
     assert response.status_code == 400
     p95 = sorted(latencies)[9]  # 10개 중 최대값 = p95 근사
