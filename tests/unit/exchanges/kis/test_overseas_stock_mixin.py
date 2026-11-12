@@ -16,8 +16,11 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from src.core.exceptions import RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.common.error_taxonomy import ExchangeError
+from src.exchanges.kis import overseas_stock_mixin
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_stock_mixin import _EXCHANGES, _exchange_codes
 from tests.support.perf_budget import PerfBudget
@@ -213,3 +216,124 @@ def test_quote_and_order_codes_never_collide():
     시세코드를 그대로 4자리 주문코드로 쓰지 않는다."""
     for codes in _EXCHANGES.values():
         assert codes.quote_excd != codes.order_excg_cd
+
+
+# --- D2 보강: 왕복 테스트(test_round_trip_per_exchange_uses_distinct_codes) 대상 ---
+
+
+@pytest.mark.parametrize("bad_exchange", ["LSE", "NAS", ""])
+async def test_round_trip_negative_ticker_rejects_unknown_exchange(bad_exchange: str):
+    """negative — 시세조회도 등록되지 않은 거래소 코드는 요청 전에 거부한다."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.get_overseas_ticker("AAPL", bad_exchange)
+
+    assert captured == []
+
+
+@pytest.mark.parametrize("bad_exchange", ["LSE", "NYS"])
+async def test_round_trip_negative_balance_and_cancel_reject_unknown_exchange(
+    bad_exchange: str,
+):
+    """negative — 잔고·취소도 미등록 거래소는 요청 없이 ValueError."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.get_overseas_balance(bad_exchange)
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.cancel_overseas_order(
+            "ORG:1", "AAPL", bad_exchange, original_quantity=Decimal("1")
+        )
+
+    assert captured == []
+
+
+async def test_round_trip_failure_injection_cancel_rejected_fails_closed():
+    """실패 주입 — 서버가 취소를 rt_cd != 0 으로 거절하면 True로 위장하지 않고
+    예외로 fail-closed 한다."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
+        captured.append(request)
+        return httpx.Response(200, json={"rt_cd": "1", "msg_cd": "X", "msg1": "REJECT"})
+
+    http_client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443",
+        transport=httpx.MockTransport(handler),
+    )
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+
+    with pytest.raises((ExchangeError, RetryableExchangeError)):
+        await adapter.cancel_overseas_order("ORG:1", "AAPL", "NASD", original_quantity=Decimal("1"))
+
+    assert captured
+
+
+async def test_round_trip_gate_red_when_order_code_collapses_to_quote_code(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """게이트 적색 재현 — 주문코드를 시세코드로 망가뜨리면 왕복 단언
+    (`OVRS_EXCG_CD == codes.order_excg_cd`)이 실제로 적색이 된다."""
+    codes = _exchange_codes("NYSE")
+    broken = codes._replace(order_excg_cd=codes.quote_excd)
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+    monkeypatch.setitem(overseas_stock_mixin._EXCHANGES, "NYSE", broken)
+
+    await adapter.place_overseas_order(_market_order("NYSE"), "NYSE")
+    body = json.loads(captured[-1].content)
+
+    assert body["OVRS_EXCG_CD"] == codes.quote_excd
+    with pytest.raises(AssertionError):
+        assert body["OVRS_EXCG_CD"] == codes.order_excg_cd
+    with pytest.raises(AssertionError):
+        assert broken.quote_excd != broken.order_excg_cd
+
+
+# 로컬 실측(2026-11-13, Windows, 모의 transport 왕복 4호출 best-of-5): CPU 0~15.6ms
+# (process_time 양자화 한 틱 이하; wall ~2s는 rate limiter 대기라 CPU 예산 대상이 아님).
+# 예산 500ms는 한 틱(15.6ms)의 30배 이상 — 공유 CI 편차 흡수용.
+_ROUND_TRIP_BUDGET_MS = 500.0
+
+
+async def _round_trip_once(adapter: KISAdapter) -> None:
+    await adapter.get_overseas_ticker("AAPL", "NASD")
+    await adapter.place_overseas_order(_market_order("NASD"), "NASD")
+    await adapter.cancel_overseas_order("ORG:1", "AAPL", "NASD", original_quantity=Decimal("1"))
+    await adapter.get_overseas_balance("NASD")
+
+
+@pytest.mark.perf
+async def test_round_trip_under_budget(perf_budget: PerfBudget):
+    """성능 — 모의 왕복 1회(시세→주문→취소→잔고) CPU 시간이 예산 안에 든다."""
+    adapter = _make_paper_adapter([])
+    sample = await perf_budget.best_of_async(lambda: _round_trip_once(adapter), n=3, warmup=1)
+    assert sample.cpu_ms < _ROUND_TRIP_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_ROUND_TRIP_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_round_trip_budget_turns_red_under_10x_virtual_delay(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+):
+    """게이트 적색 재현 — 요청 경로의 동기 함수에 예산 10배 가상 지연을 주입하면
+    같은 CPU 예산 단언이 적색이 된다(실제 sleep 없음)."""
+    reset_virtual_totals()
+    monkeypatch.setattr(
+        overseas_stock_mixin,
+        "_exchange_codes",
+        virtual_delayed_sync(_exchange_codes, _ROUND_TRIP_BUDGET_MS * 10 / 1000),
+    )
+    adapter = _make_paper_adapter([])
+    sample = await perf_budget.best_of_async(lambda: _round_trip_once(adapter), n=2, warmup=0)
+    reset_virtual_totals()
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _ROUND_TRIP_BUDGET_MS
