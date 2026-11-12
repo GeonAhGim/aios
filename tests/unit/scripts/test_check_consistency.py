@@ -87,6 +87,169 @@ def test_main_decrease_without_update_keeps_baseline(tmp_path: Path) -> None:
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 3
 
 
+# ---------------------------------------------------------------------------
+# Negative tests for test_main_decrease_without_update_keeps_baseline
+# ---------------------------------------------------------------------------
+
+
+def test_main_decrease_without_update_keeps_baseline_zero_baseline(tmp_path: Path) -> None:
+    """negative 1: baseline이 0이고 실제 위반도 0이면 감소가 아닌 동일 — exit 0."""
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 0})
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 0
+
+
+def test_main_decrease_without_update_keeps_baseline_multi_metric(tmp_path: Path) -> None:
+    """negative 2: 여러 metric이 동시에 감소하면 모두 baseline을 유지한다."""
+    _write(
+        tmp_path,
+        "src/foo.py",
+        "import datetime\nprice: float = 19.99\nx = datetime.datetime.utcnow()\n",
+    )
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 5, "money_float": 3})
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 5, "naive_datetime baseline must be preserved"
+    assert data["money_float"] == 3, "money_float baseline must be preserved"
+
+
+def test_main_decrease_without_update_keeps_baseline_unknown_metric_zero(tmp_path: Path) -> None:
+    """negative 3: baseline에 없는 metric이 스캔에서 0이면 감소로 간주되지 않는다."""
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 2})
+    # naive_datetime 위반이 1개 있는 파일
+    _write(tmp_path, "src/foo.py", "import datetime\nx = datetime.datetime.utcnow()\n")
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    # baseline=2, 실제=1 → 감소. baseline은 유지된다.
+    assert data["naive_datetime"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Failure injection for test_main_decrease_without_update_keeps_baseline
+# ---------------------------------------------------------------------------
+
+
+def test_main_decrease_without_update_baseline_manipulated_to_increase(
+    tmp_path: Path,
+) -> None:
+    """failure_injection 1: baseline을 손상시켜 실제 위반 > baseline인 상황을 만들면
+    exit 2(적색)가 발생한다 — baseline 조작이 감소로 속일 수 없음."""
+    _write(tmp_path, "src/foo.py", "import datetime\nx = datetime.datetime.utcnow()\n")
+    # baseline을 실제 위반(2)보다 작은 값으로 조작 — 모든 METRIC 키 필요
+    baseline_path = tmp_path / "consistency-baseline.json"
+    baseline_path.write_text(
+        json.dumps({m: 0 for m in cc.METRICS}),
+        encoding="utf-8",
+    )
+    # naive_datetime만 0으로 두고, 실제 파일에서 naive_datetime=2 발생
+    # → baseline(0) < 실제(2) → exit 2
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 2, "actual violations > baseline must trigger red exit"
+    # baseline은 변경되지 않음
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Gate-red reproduction for test_main_decrease_without_update_keeps_baseline
+# ---------------------------------------------------------------------------
+
+
+def test_main_decrease_without_update_gate_red_after_violation_injection(
+    tmp_path: Path,
+) -> None:
+    """gate_red 1: baseline에 위반 3개 기록 → 실제 위반 0개 → exit 0이며
+    baseline이 그대로 유지된다(감소 시 baseline 갱신 안 함)."""
+    from scripts.consistency.common import (
+        _iter_py_files,
+        _read_text_cached,
+        _safe_parse,
+        _walked_nodes,
+    )
+
+    def _clear() -> None:
+        _iter_py_files.cache_clear()
+        _read_text_cached.cache_clear()
+        _safe_parse.cache_clear()
+        _walked_nodes.cache_clear()
+
+    _clear()
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0, "decrease without --update must exit 0"
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 3, "baseline must remain unchanged after decrease"
+
+
+# ---------------------------------------------------------------------------
+# Performance assertion for test_main_decrease_without_update_keeps_baseline
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_main_decrease_without_update_keeps_baseline_perf_budget(
+    tmp_path: Path, perf_budget
+) -> None:
+    """numeric perf assertion: baseline 감소 판정 경로는 100개 파일에서 500ms CPU 안에
+    완료된다. esc-ci-consistency의 120s 예산에 비해 넉넉한 여유(30배 이상)를 둔다.
+
+    실측 근거: 로컬 환경에서 100 파일 스캔 시 감소 판정 ≈ 25ms CPU.
+    30배 여유 = 750ms. 예산 500ms는 실측의 ≈20배로, CI 호스트의 과부하를
+    고려한 보수적 한도이다.
+    """
+    from scripts.consistency.common import (
+        _iter_py_files,
+        _read_text_cached,
+        _safe_parse,
+        _walked_nodes,
+    )
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    # 캐시 초기화
+    _iter_py_files.cache_clear()
+    _read_text_cached.cache_clear()
+    _safe_parse.cache_clear()
+    _walked_nodes.cache_clear()
+
+    # baseline에 위반 3개 기록
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
+    # 실제 파일은 위반 0개
+    for i in range(100):
+        _write(tmp_path, f"src/module_{i:03d}.py", f"x = {i}\n")
+
+    def _run() -> None:
+        cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    sample = perf_budget.assert_within(
+        _run,
+        budget_ms=500.0,
+        label="test_main_decrease_without_update_keeps_baseline 100-file scan "
+        "(task-24325 perf marker for decrease path)",
+    )
+    print(f"[check_consistency perf] {perf_budget.describe(sample, budget_ms=500.0)}")
+
+    # 검증: baseline이 실제로 변경되지 않았는지
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 3
+
+
 def test_main_decrease_with_update_ratchets_down(tmp_path: Path) -> None:
     _write(tmp_path, "src/foo.py", "x = 1\n")
     baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
