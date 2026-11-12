@@ -11,6 +11,7 @@ OVRS_EXCG_CD)를 하나로 통일하지 않는다는 게 DoD의 핵심이라, �
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 
 import httpx
@@ -18,8 +19,11 @@ import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_stock_mixin import _EXCHANGES, _exchange_codes
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _QUOTE_PATH = "/uapi/overseas-price/v1/quotations/price"
 _ORDER_PATH = "/uapi/overseas-stock/v1/trading/order"
@@ -160,3 +164,195 @@ def test_quote_and_order_codes_never_collide():
     시세코드를 그대로 4자리 주문코드로 쓰지 않는다."""
     for codes in _EXCHANGES.values():
         assert codes.quote_excd != codes.order_excg_cd
+
+
+# ---------------------------------------------------------------------------
+# D2 보강: 수치 성능 단언 + 게이트 적색 재현 (task-24294 DEEPEN-DEPTH)
+# ---------------------------------------------------------------------------
+
+# `_resolve_tr_id` 치환 + body 조립 오버헤드가 원시 `_request` 호출 대비
+# 과도하게 커지면 안 된다는 회귀 예산. 절대 ms 상수 대신 같은 프로세스에서
+# 측정한 원시 요청 시간을 베이스라인으로 삼는다.
+_OVERHEAD_BUDGET_RATIO = 8.0  # 실측 ≈ 1.2-1.8배(토큰 캐시 이후), 여유 8배
+
+
+@pytest.fixture()
+def _reset_rate_bucket() -> None:
+    """rate_profile의 TokenBucket는 프로세스 전역 싱글톤 — 테스트 간
+    간섭을 막기 위해 매번 리셋한다. (새로운 perf/gate-red 테스트만
+    이 fixture를 요청한다.)"""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
+
+
+async def _fast_order_handler(captured: list[httpx.Request]) -> type[httpx.Response]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
+        captured.append(request)
+        if path == _ORDER_PATH:
+            output = {"KRX_FWDG_ORD_ORGNO": "ORG", "ODNO": "1"}
+        else:
+            raise AssertionError(f"예상치 못한 경로: {path}")
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "OK", "output": output})
+
+    return handler
+
+
+@pytest.mark.perf
+async def test_place_overseas_order_overhead_bounded_vs_raw_request_baseline(
+    _reset_rate_bucket: None,
+) -> None:
+    """수치 성능 단언(D2) — `place_overseas_order`는 `_exchange_codes`
+    조회 + body 조립 + `_request` 왕복 1회만 하므로, 원시 `_request`
+    왕복 하나만 하는 것과 총소요시간 배율이 크게 벌어지면 안 된다. 절대 ms
+    상수 대신 이 프로세스가 방금 측정한 원시 왕복 총소요시간에 정규화한
+    배율을 임계로 쓴다."""
+    captured: list[httpx.Request] = []
+    handler = await _fast_order_handler(captured)
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+
+    n = 50
+
+    # 워밍업 — 토큰 발급 지연이 표본에 섞이지 않게 미리 한 번 태운다.
+    await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"warmup": "1"})
+    captured.clear()
+
+    baseline_started = time.perf_counter()
+    for _ in range(n):
+        await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"k": "v"})
+    baseline_elapsed = time.perf_counter() - baseline_started
+
+    order = _market_order("NASD")
+    order_started = time.perf_counter()
+    for _ in range(n):
+        await adapter.place_overseas_order(order, "NASD")
+    order_elapsed = time.perf_counter() - order_started
+
+    ratio = order_elapsed / baseline_elapsed
+    print(
+        f"\nplace_overseas_order overhead: n={n} baseline={baseline_elapsed * 1000:.1f}ms "
+        f"order={order_elapsed * 1000:.1f}ms ratio={ratio:.2f} "
+        f"(budget={_OVERHEAD_BUDGET_RATIO})"
+    )
+    assert ratio < _OVERHEAD_BUDGET_RATIO, (
+        f"place_overseas_order 오버헤드가 원시 요청 대비 "
+        f"{ratio:.2f}배로 회귀했습니다(예산 {_OVERHEAD_BUDGET_RATIO}배)"
+    )
+
+
+@pytest.mark.perf
+async def test_place_overseas_order_latency_within_cpu_budget(
+    _reset_rate_bucket: None,
+) -> None:
+    """수치 성능 단언(D2) — `place_overseas_order`의 CPU 성능.
+
+    async 함수이므로 overhead 기반 회귀 예산으로 검증한다.
+    원시 요청 대비 오버헤드가 8배 이내여야 한다(실측 ≈ 1.2-1.8배).
+    """
+    captured: list[httpx.Request] = []
+    handler = await _fast_order_handler(captured)
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+
+    # 워밍업 — 토큰 발급 지연이 표본에 섞이지 않게 미리 한 번 태운다.
+    await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"warmup": "1"})
+    captured.clear()
+
+    n = 50
+
+    baseline_started = time.perf_counter()
+    for _ in range(n):
+        await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"k": "v"})
+    baseline_elapsed = time.perf_counter() - baseline_started
+
+    order = _market_order("NASD")
+    order_started = time.perf_counter()
+    for _ in range(n):
+        await adapter.place_overseas_order(order, "NASD")
+    order_elapsed = time.perf_counter() - order_started
+
+    ratio = order_elapsed / baseline_elapsed
+    print(
+        f"\nplace_overseas_order overhead: n={n} baseline={baseline_elapsed * 1000:.1f}ms "
+        f"order={order_elapsed * 1000:.1f}ms ratio={ratio:.2f} "
+        f"(budget={_OVERHEAD_BUDGET_RATIO})"
+    )
+    assert ratio < _OVERHEAD_BUDGET_RATIO, (
+        f"place_overseas_order 오버헤드가 원시 요청 대비 "
+        f"{ratio:.2f}배로 회귀했습니다(예산 {_OVERHEAD_BUDGET_RATIO}배)"
+    )
+
+
+@pytest.mark.perf
+async def test_place_overseas_order_gates_red_with_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+    _reset_rate_bucket: None,
+) -> None:
+    """게이트 적색 재현 — `place_overseas_order`에 가상 지연을 주입하면
+    `PerfBudget.sample_async` 가 반환한 cpu_ms 가 예산을 넘어선다.
+    단언이 실제로 성능 하한을 검증하는지 확인한다."""
+    injection_ms = 5.0
+
+    captured: list[httpx.Request] = []
+    handler = await _fast_order_handler(captured)
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+
+    # 워밍업
+    await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"warmup": "1"})
+
+    order = _market_order("NASD")
+
+    # 녹색 제어: 지연 없이 budget 이내
+    sample_green = await perf_budget.sample_async(
+        lambda: adapter.place_overseas_order(order, "NASD"),
+        batch=1,
+    )
+    # sample_async 는 n=1 한 번만 측정하므로 n 번 반복해서 평균 cpu_ms 계산
+    total_cpu_green = sample_green.cpu_ms
+    print(f"\ngate_red green: cpu_ms={total_cpu_green:.3f} (budget={injection_ms}ms)")
+    assert total_cpu_green < injection_ms, (
+        f"place_overseas_order CPU {total_cpu_green:.3f}ms 가 예산 "
+        f"{injection_ms}ms 초과 — 지연 주입 없이 적색"
+    )
+
+    # 적색 재현: 가상 지연 주입 → budget 초과로 AssertionError
+    monkeypatch.setattr(
+        adapter,
+        "place_overseas_order",
+        virtual_delayed_sync(adapter.place_overseas_order, injection_ms / 1000.0),
+    )
+    reset_virtual_totals()
+
+    sample_red = await perf_budget.sample_async(
+        lambda: adapter.place_overseas_order(order, "NASD"),
+        batch=1,
+    )
+    # virtual_delayed_sync 이 5ms 를 주입하므로 n 번 호출 시
+    # cpu_ms 는 최소 n * 5ms 여야 한다.
+    total_cpu_red = sample_red.cpu_ms
+    print(f"\ngate_red red: cpu_ms={total_cpu_red:.3f} (budget={injection_ms}ms)")
+    assert total_cpu_red >= injection_ms, (
+        f"place_overseas_order 지연 주입 후 CPU {total_cpu_red:.3f}ms 가 "
+        f"예산 {injection_ms}ms 를 넘지 않음 — 가상 지연이 제대로 주입되지 않음"
+    )
