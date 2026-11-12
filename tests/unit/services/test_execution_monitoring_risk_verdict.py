@@ -224,3 +224,57 @@ def test_verdict_mapping_throughput_for_large_result_set(perf_budget: Any) -> No
     cards = _list()
     assert len(cards) == 500
     perf_budget.assert_within(_list, budget_ms=100.0, label="verdict mapping x500")
+
+
+@pytest.mark.perf
+def test_verdict_mapping_gate_red_with_10x_virtual_delay_injection(
+    perf_budget: Any, monkeypatch: Any
+) -> None:
+    """게이트 적색 재현 — `_FakeConn.fetch`에 예산의 10배 가상 지연을
+    주입하면 같은 단언이 적색이 된다(단언이 실제로 지연을 잡는지 검증).
+
+    `perf_inject.reset_virtual_totals()`로 레더를 초기화하고,
+    `virtual_delayed_async`로 10x(1000ms) 지연을 주입한다. 실제 수면/스핀
+    없이 ledger만 갱신하므로 테스트는 즉시 반환하지만 `wall_ms`는 1초대로
+    읽혀 `budget_ms=100` 단언을 명백히 초과한다."""
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+
+    rows = [
+        _base_row(
+            execution_id=i,
+            risk_outcome="ALLOW" if i % 2 == 0 else None,
+            risk_reason_codes=[] if i % 2 == 0 else None,
+            risk_evaluated_at=_EVALUATED_AT if i % 2 == 0 else None,
+        )
+        for i in range(500)
+    ]
+
+    # Inject 10x virtual delay (1000ms) into the fetch call
+    original_fetch = _FakeConn.fetch
+    monkeypatch.setattr(
+        _FakeConn,
+        "fetch",
+        virtual_delayed_async(original_fetch, seconds=1.0),  # 10x the 100ms budget
+    )
+
+    service = _service(rows)
+
+    def _list() -> list[Any]:
+        return asyncio.run(service.list_for_user(uuid4()))
+
+    cards = _list()
+    assert len(cards) == 500
+
+    # Gate-red reproduction: the same assertion that passes normally MUST go red
+    # when the delay is injected — proving the assertion actually catches regressions.
+    # 100ms budget with 1000ms injected delay -> wall_ms >> 100ms -> assertion fails.
+    sample = perf_budget.best_of(_list, n=1)
+    assert sample.wall_ms >= 100.0, (
+        f"gate_red FAILED: wall_ms={sample.wall_ms:.1f}ms did not exceed budget "
+        f"100.0ms — assertion is not sensitive to injected delay"
+    )
