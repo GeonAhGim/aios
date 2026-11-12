@@ -125,3 +125,35 @@ def test_context_construction_propagates_dependency_failure(
 
     with pytest.raises(RuntimeError, match="universe snapshot source unavailable"):
         _ctx()
+
+
+def _field_names() -> list[str]:
+    return [f.name for f in fields(CheckContext)]
+
+
+# cpu_ms per batch of 200 `fields(CheckContext)` introspections. Local best-of-10 reading is
+# ~0-1 ms (Windows process_time ticks at 15.6 ms); the 50 ms budget leaves >=30x headroom.
+_FIELD_INTROSPECTION_BUDGET_MS = 50.0
+
+
+@pytest.mark.perf
+def test_field_order_introspection_perf_budget(perf_budget) -> None:
+    sample = perf_budget.best_of(_field_names, n=10, warmup=1, batch=200)
+    assert sample.cpu_ms < _FIELD_INTROSPECTION_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_field_order_introspection_goes_red_with_10x_delay(perf_budget) -> None:
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    slow = virtual_delayed_sync(_field_names, _FIELD_INTROSPECTION_BUDGET_MS * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _FIELD_INTROSPECTION_BUDGET_MS
+
+
+def test_field_order_assertion_detects_reordered_fields() -> None:
+    names = _field_names()
+    names[0], names[1] = names[1], names[0]
+    assert names != _field_names()
