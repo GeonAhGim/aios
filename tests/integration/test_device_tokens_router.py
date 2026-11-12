@@ -98,3 +98,69 @@ async def test_device_tokens_require_authentication(client):
     )
 
     assert response.status_code == 401
+
+
+async def test_register_rejects_platform_case_mismatch(client):
+    # 플랫폼 값은 대소문자까지 정확히 일치해야 한다(VALID_PLATFORMS 화이트리스트).
+    headers = await _register(client)
+
+    response = await client.post(
+        "/device-tokens",
+        json={"device_token": "token-abc", "platform": "ios"},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_register_rejects_missing_required_fields(client):
+    headers = await _register(client)
+
+    response = await client.post("/device-tokens", json={"platform": "iOS"}, headers=headers)
+
+    # 요청 검증 실패는 전역 핸들러가 400 봉투로 변환한다(422가 아님).
+    assert response.status_code == 400
+
+
+async def test_deactivate_unknown_device_returns_404(client):
+    headers = await _register(client)
+
+    response = await client.delete("/device-tokens/2147483646", headers=headers)
+
+    assert response.status_code == 404
+
+
+async def test_deactivate_twice_returns_404_on_second_call(client):
+    # 이미 비활성화된 토큰은 다시 비활성화할 수 없다(conditional UPDATE 0행 → NotFound).
+    headers = await _register(client)
+    register_response = await client.post(
+        "/device-tokens",
+        json={"device_token": "token-abc", "platform": "iOS"},
+        headers=headers,
+    )
+    device_id = register_response.json()["device_id"]
+    first = await client.delete(f"/device-tokens/{device_id}", headers=headers)
+    second = await client.delete(f"/device-tokens/{device_id}", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 404
+
+
+async def test_register_service_failure_surfaces_as_server_error(client, monkeypatch):
+    # 실패 주입: 서비스 계층 DB 예외가 응답 본문/상태로 새지 않고 5xx로 귀결되는지 확인.
+    from src.services.device_token_service import DeviceTokenService
+
+    async def _boom(self, user_id, device_token, platform):
+        raise RuntimeError("injected pool failure")
+
+    monkeypatch.setattr(DeviceTokenService, "register", _boom)
+    headers = await _register(client)
+
+    response = await client.post(
+        "/device-tokens",
+        json={"device_token": "token-abc", "platform": "iOS"},
+        headers=headers,
+    )
+
+    assert response.status_code == 500
+    assert "injected pool failure" not in response.text
