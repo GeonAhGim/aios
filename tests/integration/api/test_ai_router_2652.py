@@ -143,6 +143,54 @@ async def test_issue_agent_token_with_empty_scopes_is_400(client, pool):
     assert body["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
+# DEEPEN(task-24367): scopes 변형 입력도 모두 400 + 필드 지목, 토큰 미발급(fail-closed).
+_MISSING = object()
+
+
+@pytest.mark.parametrize(
+    ("scopes", "field"),
+    [
+        (_MISSING, "body.scopes"),
+        ("read", "body.scopes"),
+        (["bogus"], "body.scopes.0"),
+        ([""], "body.scopes.0"),
+        (["read", 1], "body.scopes.1"),
+    ],
+    ids=["missing", "bare-string", "unknown-scope", "empty-string", "non-string-item"],
+)
+async def test_issue_agent_token_with_malformed_scopes_is_400_and_issues_nothing(
+    client, pool, scopes, field
+):
+    headers, _tenant_id = await _register(client)
+    body = _issue_body()
+    if scopes is _MISSING:
+        body.pop("scopes")
+    else:
+        body["scopes"] = scopes
+
+    response = await client.post(f"{BASE}/tokens", headers=headers, json=body)
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error_code"] == "VALIDATION_INVALID_FIELD"
+    assert payload["details"]["fields"] == [field]
+    listed = await client.get(f"{BASE}/tokens", headers=headers)
+    assert listed.json()["data"]["tokens"] == []
+
+
+async def test_empty_scopes_gate_goes_red_when_input_is_repaired(client, pool):
+    """게이트 적색 재현: 입력을 정상(scopes 비어있지 않음)으로 되돌리면 400 단언이 깨진다."""
+    headers, _tenant_id = await _register(client)
+
+    response = await client.post(
+        f"{BASE}/tokens", headers=headers, json=_issue_body(scopes=["read"])
+    )
+
+    with pytest.raises(AssertionError):
+        assert response.status_code == 400
+    assert response.status_code == 201
+
+
 # --- negative 2: 존재하지 않는 토큰 revoke -> 404 ---
 
 
