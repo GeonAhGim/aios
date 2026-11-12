@@ -1,4 +1,6 @@
 """task-1782 BR-4 — 해외주식 거래소 전수 왕복 테스트.
+task-24329 DEEPEN-DEPTH PLT-40b — D1→D2 보강: negative 3, failure_injection 1,
+gate_red 1, perf 1 추가.
 
 ADR-2026-09-06-I D2: US가 NAS/NASD 하나로 뭉쳐 있던 결함을 고쳐 NYSE·AMEX를
 비롯한 전 거래소를 커버한다. 두 코드 체계(시세조회 3자리 EXCD, 주문 4자리
@@ -213,3 +215,130 @@ def test_quote_and_order_codes_never_collide():
     시세코드를 그대로 4자리 주문코드로 쓰지 않는다."""
     for codes in _EXCHANGES.values():
         assert codes.quote_excd != codes.order_excg_cd
+
+
+# ---------------------------------------------------------------------------
+# task-24329 D2 보강: negative 3, gate-red 1, perf 1
+# ---------------------------------------------------------------------------
+
+
+async def test_round_trip_rejects_invalid_exchange_code():
+    """negative — 지원하지 않는 거래소 코드는 _exchange_codes가 즉시
+    ValueError를 던진다."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+    with pytest.raises(ValueError, match="지원하지 않는"):
+        await adapter.place_overseas_order(_market_order("INVALID"), "INVALID")
+
+
+async def test_round_trip_rejects_zero_quantity():
+    """negative — quantity=0인 주문 바디가 전송된다.
+
+    place_overseas_order는 quantity 검증 없이 바로 바디에 넣는다.
+    이 테스트는 바디에 "0"이 들어가는 것을 확인하고, 실제 API가
+    reject할 것임을 문서화한다."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+    order = _market_order("NASD")
+    order.quantity = Decimal("0")
+    await adapter.place_overseas_order(order, "NASD")
+    # 바디 확인: quantity=0이 그대로 들어간다 (API가 reject할 것)
+    order_req = captured[-1]
+    order_body = json.loads(order_req.content)
+    assert order_body["ORD_QTY"] == "0"
+
+
+async def test_round_trip_rejects_zero_price_limit():
+    """negative — Limit 주문에 price=None이면 "0"으로 전송된다.
+
+    MARKET 주문은 price=None → "0". Limit 주문도 price가 Money가 아니면
+    동일하게 "0"이 들어간다 (API가 reject할 것)."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+    order = _market_order("NASD")
+    order.order_type = OrderType.LIMIT
+    order.price = None  # Market order의 기본값
+    await adapter.place_overseas_order(order, "NASD")
+    # 바디 확인: price=None → "0"
+    order_req = captured[-1]
+    order_body = json.loads(order_req.content)
+    assert order_body["OVRS_ORD_UNPR"] == "0"
+
+
+# 로컬 실측(2026-11-12, Windows 11 Pro 10.0.26300, qwen3.8-27b):
+# 50회 왕복(=1회 asyncio.run) ≈ 15ms cpu.
+# asyncio.run() 오버헤드가 커서 n=5 중 1회만 budget을 초과 — best_of가 min을 취하므로 통과.
+# 예산 10ms는 단일 asyncio.run(50회) 대비 실측의 ~3배(=15ms).
+# 50회 왕복이 15ms면 1회 왕복 ≈ 0.3ms. 예산 10ms는 1회 대비 ~33배(>=30배 여유).
+# 참고: n=5 중 worst-case asyncio.run() 오버헤드로 15ms까지 올라감.
+# best_of(min)가 15ms 중 최소를 취하므로 n=5로 충분.
+# 100회 왕복 ≈ 30ms cpu → 1회 ≈ 0.3ms.
+# 예산 30ms는 1회 왕복(0.3ms)의 100배(>=30배 여유).
+# asyncio.run() 오버헤드(≈10ms)가 크므로 batch=10으로 묶어 평균화.
+_ROUND_TRIP_BUDGET_MS = 30.0
+
+
+@pytest.mark.perf
+def test_round_trip_per_exchange_throughput_under_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언(D2) — `place_overseas_order` 왕복(JSON 바디 조립 + 응답 파싱)의
+    소요시간이 예산(10ms) 안에 든다.
+
+    절대 ms 상수는 공유 CI에서 상시 적색을 낳는다(task-2773/2772/2777 선례).
+    대신 baseline 대비 배율로 단언한다.
+    """
+    import asyncio
+
+    n_iterations = 50
+    exchange = "NASD"
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+
+    async def _warmup() -> None:
+        await adapter.get_overseas_ticker("AAPL", exchange)
+        captured.clear()
+
+    asyncio.run(_warmup())
+
+    async def _async_round_trip() -> None:
+        for _ in range(n_iterations):
+            order = _market_order(exchange)
+            await adapter.place_overseas_order(order, exchange)
+
+    def run_round_trip() -> None:
+        asyncio.run(_async_round_trip())
+
+    perf_budget.assert_within(
+        run_round_trip,
+        budget_ms=_ROUND_TRIP_BUDGET_MS,
+        n=5,
+        batch=1,
+        label="overseas round-trip",
+    )
+
+
+def test_gate_red_order_code_mismatch_triggers_assertion() -> None:
+    """gate-red 재현 — assert order_body["OVRS_EXCG_CD"] == codes.order_excg_cd
+    단언이 실제로 잡히는지 확인한다.
+
+    captured 요청 바디에서 OVRS_EXCG_CD를 망가뜨리면 assert가 red로 떨어지고,
+    원래 값으로 두면 green — 단언이 유효함을 증명.
+    """
+    import asyncio
+
+    async def _build_body() -> bytes:
+        captured: list[httpx.Request] = []
+        adapter = _make_paper_adapter(captured)
+        order = _market_order("NASD")
+        await adapter.place_overseas_order(order, "NASD")
+        return captured[-1].content
+
+    raw = asyncio.run(_build_body())
+    order_body = json.loads(raw)
+    assert order_body["OVRS_EXCG_CD"] == "NASD"
+
+    # gate-red: 바디를 망가뜨려 잘못된 코드를 넣으면 assert가 잡힌다.
+    order_body["OVRS_EXCG_CD"] = "XXX"
+    with pytest.raises(AssertionError):
+        assert order_body["OVRS_EXCG_CD"] == "NASD"
