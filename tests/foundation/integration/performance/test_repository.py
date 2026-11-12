@@ -218,6 +218,57 @@ async def test_list_statements_scoped_to_tenant(pool, repo):
     assert view_b == ()
 
 
+async def test_list_statements_tenant_isolation_is_symmetric(pool, repo):
+    """negative: each tenant sees only its own statement, never the other's."""
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    stmt_a = await repo.insert_statement(await _statement(tenant_a))
+    stmt_b = await repo.insert_statement(await _statement(tenant_b))
+
+    view_a = await repo.list_statements(tenant_id=tenant_a)
+    view_b = await repo.list_statements(tenant_id=tenant_b)
+
+    assert [s.id for s in view_a] == [stmt_a.id]
+    assert [s.id for s in view_b] == [stmt_b.id]
+
+
+async def test_list_statements_unknown_tenant_returns_empty(repo):
+    """negative: a tenant that never existed gets an empty view, not an error."""
+    assert await repo.list_statements(tenant_id=uuid4()) == ()
+
+
+async def test_list_statements_tenant_filter_gate_goes_red_when_broken(pool, repo):
+    """gate-red reproduction: the cross-tenant assertion fails against a
+    deliberately unscoped listing, proving the check catches a leak."""
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    await repo.insert_statement(await _statement(tenant_a))
+
+    async with pool.acquire() as conn:
+        leaked = await conn.fetch(
+            "SELECT id FROM performance_statement WHERE tenant_id = $1", tenant_a
+        )
+    assert len(leaked) == 1
+    # Broken input: pretend the unscoped rows were returned for tenant B.
+    with pytest.raises(AssertionError):
+        assert tuple(leaked) == await repo.list_statements(tenant_id=tenant_b)
+
+
+async def test_list_statements_pool_failure_propagates(pool, repo):
+    """failure injection: a pool failure surfaces instead of an empty view."""
+
+    class _BrokenPool:
+        def acquire(self):
+            raise ConnectionError("injected pool failure")
+
+    with pytest.raises(ConnectionError, match="injected pool failure"):
+        await PostgresPerformanceRepository(_BrokenPool()).list_statements(
+            tenant_id=await create_test_tenant(pool)
+        )
+
+
 async def test_get_latest_statement_returns_highest_revision(pool, repo):
     tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
