@@ -339,3 +339,42 @@ def test_baseline_corrupted_returns_1(tmp_path: Path) -> None:
     bad.write_text("{broken json!!!", encoding="utf-8")
     exit_code = cc.main(["--baseline", str(bad)])
     assert exit_code == 1
+
+
+def test_decrease_warn_path_perf_within_budget(perf_budget, tmp_path: Path) -> None:
+    """성능 단언: 감소 경고 경로(main)가 1회 호출당 wall 500ms 이내여야 한다.
+
+    빈 root 에 대한 스캔 + baseline 비교 + WARN 출력만 측정한다. CI 실행 시간에 영향을 주지
+    않도록 ADR-2026-09-09-C Decision 1 수준의 상한을 둔다.
+    """
+    import contextlib
+    import io
+
+    baseline = {
+        "router_unregistered": 0,
+        "port_method_unimplemented": 0,
+        "port_protocol_unimplemented": 0,
+        "env_key_undocumented": 4,
+        "feature_flag_undocumented": 0,
+        "event_type_unconsumed": 4,
+        "migration_hygiene": 0,
+        "openapi_client_mismatch": 34,
+        "spec_leaf_untraced": 32,
+        "naive_datetime": 0,
+        "money_float": 0,
+        "symbol_id_assembly": 1,
+        "spec_template_incomplete": 0,
+        "authority_duplication": 4,
+    }
+    _write_baseline(tmp_path, baseline)
+    (tmp_path / ".env.example").write_text("", encoding="utf-8")
+
+    def _one_call() -> int:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return cc.main(
+                ["--root", str(tmp_path), "--baseline", str(tmp_path / "consistency-baseline.json")]
+            )
+
+    perf_budget.assert_within(
+        _one_call, budget_ms=500.0, n=3, warmup=1, label="consistency_decrease_warn"
+    )
