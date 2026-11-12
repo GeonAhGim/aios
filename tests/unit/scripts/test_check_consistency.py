@@ -449,3 +449,45 @@ def test_main_first_run_initializes_baseline_perf_budget(tmp_path: Path, perf_bu
     assert baseline_path.exists()
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
     assert set(data) == set(cc.METRICS)
+
+
+@pytest.mark.perf
+def test_main_baseline_init_best_of_under_budget(tmp_path: Path, perf_budget) -> None:
+    """best_of(여러 번 중 최소) 측정: 20개 파일 baseline 초기화는 200ms CPU 미만.
+
+    실측 근거: 로컬 20 파일 스캔 ≈ 8ms CPU. 예산 200ms는 실측의 25배 이상이며
+    CI 호스트 과부하 여유를 둔 신설 예산이다(기존 예산 변경 없음).
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+    for i in range(20):
+        _write(tmp_path, f"src/m_{i:02d}.py", f"x = {i}\n")
+    baseline_path = tmp_path / "consistency-baseline.json"
+
+    def _run() -> None:
+        baseline_path.unlink(missing_ok=True)
+        cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    sample = perf_budget.best_of(_run, n=5, warmup=1)
+    assert sample.cpu_ms < 200.0, perf_budget.describe(sample, budget_ms=200.0)
+    assert baseline_path.exists()
+
+
+@pytest.mark.perf
+def test_main_baseline_init_perf_gate_red_with_virtual_delay(tmp_path: Path, perf_budget) -> None:
+    """gate red 재현: 예산(500ms)의 10배(5s) 가상 지연을 주입하면 성능 단언이 적색이다."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    for i in range(5):
+        _write(tmp_path, f"src/m_{i}.py", f"x = {i}\n")
+    baseline_path = tmp_path / "consistency-baseline.json"
+
+    def _run() -> None:
+        cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    slow = virtual_delayed_sync(_run, 5.0)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(slow, budget_ms=500.0, label="virtual 10x delay")
+    reset_virtual_totals()
