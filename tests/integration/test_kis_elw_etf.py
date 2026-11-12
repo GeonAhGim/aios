@@ -9,7 +9,9 @@ import httpx
 import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.kis.rate_profile import KisAccountType
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -246,11 +248,23 @@ async def test_get_etf_price_completes_within_budget(perf_budget):
         lambda request: _route(request, {"/uapi/etfetn/v1/quotations/inquire-price": handler})
     )
 
-    iterations = 5
-    timings_ms = []
-    for _ in range(iterations):
-        measured = await perf_budget.sample_async(lambda: adapter.get_etf_price("069500"), batch=8)
-        timings_ms.append(measured.cpu_ms)
-    elapsed_ms = sum(timings_ms) / len(timings_ms)
+    # 버킷의 실제 asyncio.sleep(호출당 ~500ms)은 cpu_ms 단언과 무관하므로 건너뛴다.
+    # 레지스트리는 프로세스 싱글턴이라 전후로 비워 다른 테스트에 새지 않게 한다.
+    async def _no_sleep(_seconds: float) -> None:
+        return None
+
+    rate_profile.reset_token_bucket_registry_for_test()
+    rate_profile.build_token_bucket(KisAccountType.PAPER, "FHPST02400000", sleep=_no_sleep)
+    try:
+        iterations = 5
+        timings_ms = []
+        for _ in range(iterations):
+            measured = await perf_budget.sample_async(
+                lambda: adapter.get_etf_price("069500"), batch=8
+            )
+            timings_ms.append(measured.cpu_ms)
+        elapsed_ms = sum(timings_ms) / len(timings_ms)
+    finally:
+        rate_profile.reset_token_bucket_registry_for_test()
 
     assert elapsed_ms < 1500, f"avg {elapsed_ms:.1f}ms exceeds 1500ms budget"
