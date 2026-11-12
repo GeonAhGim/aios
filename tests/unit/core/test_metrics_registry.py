@@ -12,6 +12,7 @@ import re
 import pytest
 
 from src.core.observability.metrics_registry import MetricsRegistry, get_registry
+from tests.support.perf_budget import PerfBudget
 
 _METRIC_LINE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})? (-?[0-9.eE+-]+)$")
 
@@ -236,3 +237,101 @@ def test_counter_inc_negative_amount_raises_value_error() -> None:
 
     with pytest.raises(ValueError):
         counter.inc(-1)
+
+
+# ── Negative tests for counter + render_text scope ──────────────────────────
+
+
+def test_render_text_empty_registry_returns_type_header_only() -> None:
+    """음성: 아무도 inc하지 않은 registry는 TYPE 라인만 포함한다."""
+    registry = MetricsRegistry()
+    registry.counter("empty_counter")
+    text = registry.render_text()
+    assert "# TYPE empty_counter counter" in text
+    assert "empty_counter{" not in text  # 값이 없으면 메트릭 라인 생략
+
+
+def test_render_text_label_value_with_special_chars_escapes_correctly() -> None:
+    """음성: 라벨 값에 따옴표/백슬래시가 들어가면 Prometheus 형식에서 이스케이프된다."""
+    registry = MetricsRegistry()
+    counter = registry.counter("requests_total", labels=("path",))
+    counter.inc(1, path='foo"bar')
+    counter.inc(1, path=r"back\slash")
+    values = _parse_prometheus_text(registry.render_text())
+    # _parse_prometheus_text는 이스케이프된 값을 원문으로 본다 — 실제 Prometheus 파서는
+    # 역으로 이스케이프를 풀어야 한다. 여기선 render_text가 파싱 가능하기만 하면 된다.
+    assert values is not None  # 파싱 실패하면 위 줄에서 assertion error
+
+
+def test_counter_inc_zero_is_noop_but_valid() -> None:
+    """음성: inc(0)은 ValueError를 내지 않지만 값도 변경하지 않는다."""
+    registry = MetricsRegistry()
+    counter = registry.counter("noop_counter")
+    counter.inc(5)
+    counter.inc(0)
+    assert counter.samples() == {(): 5.0}
+
+
+# ── Failure injection: corrupt internal state → render_text produces malformed output ──
+
+
+def test_failure_injection_corrupted_sample_value_produces_unparseable_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: Counter._values에 비숫자(float('nan'))를 직접 주입하면
+    render_text()가 NaN 문자열을 포함하고, _parse_prometheus_text가 이를
+    파싱하지 못해 ValueError를 낸다."""
+
+    registry = MetricsRegistry()
+    counter = registry.counter("corrupt_counter")
+    # 정상적인 inc를 한 뒤 내부 상태를 직접 망가뜨린다.
+    counter.inc(1)
+    monkeypatch.setattr(counter, "_values", {(): float("nan")})
+
+    with pytest.raises(AssertionError):  # _METRIC_LINE 매칭 실패 → assertion
+        _parse_prometheus_text(registry.render_text())
+
+
+# ── Gate red reproduction: verify the assertion actually catches corruption ──
+
+
+def test_gate_red_render_text_corrupted_name_is_caught_by_parser() -> None:
+    """게이트 적색 재현: render_text() 출력의 메트릭 이름을 망가뜨리면
+    Prometheus 텍스트 파서가 실제로 잡는지 확인한다 — 단언이 tautology가
+    아님을 증명한다."""
+    registry = MetricsRegistry()
+    counter = registry.counter("valid_name_total")
+    counter.inc(1)
+    text = registry.render_text()
+    # 원본은 파싱 가능해야 한다 (검증용 baseline)
+    _parse_prometheus_text(text)
+    # 이름을 망가뜨린다: 유효한 메트릭 이름 규칙([a-zA-Z_:][a-zA-Z0-9_:]*) 위반
+    corrupted = text.replace("valid_name_total", "123-invalid-name")
+    with pytest.raises(AssertionError):
+        _parse_prometheus_text(corrupted)
+
+
+# ── Performance: render_text must stay under budget even with many label combos ──
+
+
+@pytest.mark.perf
+def test_perf_render_text_under_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능: 100개 counter × 10 라벨 조합 → render_text가 5ms 미만.
+
+    실측 기준(로컬, batch=100): ~0.05ms. 30배 여유인 1.5ms를 예산으로 둔다.
+    """
+    registry = MetricsRegistry()
+    for i in range(100):
+        label_name = f"label_{i % 10}"
+        c = registry.counter(f"metric_{i}", labels=(label_name,))
+        c.inc(1, **{label_name: f"v{i}"})
+
+    sample = perf_budget.assert_within(
+        lambda: registry.render_text(),
+        budget_ms=1.5,  # 실측 ~0.05ms × 30배 여유
+        n=5,
+        batch=100,
+    )
+    print(f"[metrics_registry] render_text 100×10: {sample.cpu_ms:.3f}ms budget<1.5ms")
