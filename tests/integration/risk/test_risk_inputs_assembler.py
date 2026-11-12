@@ -184,6 +184,135 @@ async def test_missing_distrust_level_denies_via_safety_state_rule(pool):
     assert result.reason_code == "RISK_INPUT_MISSING:safety.data_distrust_level"
 
 
+async def test_active_control_scopes_denies_via_safety_state_rule(pool):
+    """negative — 활성 kill-switch control_scopes가 있으면 safety_state가
+    실제로 DENY한다(조용히 통과 금지, I2)."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    riskcaches = caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        riskcaches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-killswitch"),
+        balances=balances,
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+    # active_control_scopes는 조립기 예산 밖이라 None — 비워두고 직접 주입
+    assert inputs.safety.active_control_scopes is None
+
+    killed = inputs.model_copy(
+        update={
+            "safety": inputs.safety.model_copy(
+                update={
+                    "active_control_scopes": ("order_validation",),
+                    "data_distrust_level": None,
+                }
+            ),
+        }
+    )
+
+    result = safety_state.safety_state(killed, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_KILL_SWITCH_ACTIVE_order_validation"
+
+
+async def test_execution_paused_by_safety_denies_via_safety_state_rule(pool):
+    """negative — execution_paused_by_safety=True면 safety_state가
+    실제로 DENY한다(조용히 통과 금지, I2)."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    riskcaches = caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        riskcaches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-paused"),
+        balances=balances,
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+    paused = inputs.model_copy(
+        update={
+            "safety": inputs.safety.model_copy(
+                update={
+                    "active_control_scopes": (),
+                    "data_distrust_level": "NORMAL",
+                    "execution_paused_by_safety": True,
+                }
+            ),
+        }
+    )
+
+    result = safety_state.safety_state(paused, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_EXECUTION_PAUSED_BY_SAFETY"
+
+
+async def test_connection_fresh_false_triggers_pause(pool):
+    """negative — connection_fresh=False면 safety_state가 PAUSE를 반환한다
+    (조용히 ALLOW로 새는 금지, I2)."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    riskcaches = caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        riskcaches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-stale"),
+        balances=balances,
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+    stale = inputs.model_copy(
+        update={
+            "safety": inputs.safety.model_copy(
+                update={
+                    "active_control_scopes": (),
+                    "data_distrust_level": "NORMAL",
+                    "execution_paused_by_safety": False,
+                    "connection_fresh": False,
+                }
+            ),
+        }
+    )
+
+    result = safety_state.safety_state(stale, POLICY)
+    assert result.outcome == RiskOutcome.PAUSE
+    assert result.reason_code == "RISK_INPUT_STALE"
+
+
 async def test_other_tenants_positions_excluded(pool):
     """DoD (6) — 교차 테넌트: user_b의 포지션이 user_a의 조립 결과로 새지
     않는다."""
