@@ -171,3 +171,75 @@ def test_invalid_metric_name_injection_detected(monkeypatch: pytest.MonkeyPatch)
     violations = [name for name in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(name)]
     assert len(violations) > 0, "정규식이 무효한 메트릭 이름을 감지하지 못함"
     assert "aios.invalid." in violations
+
+
+# ── performance tests for test_all_metric_names_are_nonempty_and_unique ──
+
+
+@pytest.mark.perf
+def test_metric_name_check_performance_within_budget(perf_budget) -> None:
+    """성능 단언(D2) — `test_all_metric_names_are_nonempty_and_unique`의 핵심 로직
+    (nonempty + unique check)이 예산 이내여야 한다.
+
+    실측(2026-11-12, local host, best-of-5 min): cpu=0.003ms.
+    ADR-2026-09-09-C Decision 1 테이블에 없는 신규 경로이므로
+    실측의 30배 여유로 예산 신설: 0.003ms x 30 = 0.09ms -> 0.1ms로
+    안전 마진 확보. 리스트 복사 + set 변환이 64개 항목에 불과하므로
+    0.1ms는 충분히 여유 있다.
+    """
+    sample = perf_budget.best_of(
+        lambda: _check_metric_names_nonempty_unique(metric_names.ALL_METRIC_NAMES),
+        n=5,
+        warmup=1,
+    )
+
+    assert sample.cpu_ms < 0.1, (
+        f"metric name check latency {sample.cpu_ms:.3f}ms exceeded 0.1ms budget "
+        f"(wall={sample.wall_ms:.3f}ms) — check regressed"
+    )
+
+
+def _check_metric_names_nonempty_unique(names) -> None:
+    """Helper: nonempty + unique check extracted for perf measurement."""
+    name_list = list(names)
+    assert len(name_list) > 0
+    assert len(name_list) == len(set(name_list))
+
+
+@pytest.mark.perf
+def test_metric_name_check_gate_red_with_virtual_delay(
+    perf_budget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): `_check_metric_names_nonempty_unique` 호출에
+    가상 지연 주입 시 성능 단언이 적색(AssertionError)이어야 한다.
+
+    `_check_metric_names_nonempty_unique`를 10ms 지연 버전으로 바꿔치기한다.
+    지연 합산이 0.1ms 예산을 크게 넘어선다.
+    단언이 "제대로 작동하는지"를 역으로 증명한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    # _check_metric_names_nonempty_unique를 지연 버전으로 교체
+    original_fn = _check_metric_names_nonempty_unique
+
+    def delayed_fn(names):
+        virtual_delayed_sync(lambda: None, 10.0)()
+        return original_fn(names)
+
+    monkeypatch.setattr(
+        "tests.unit.core.observability.test_metric_names._check_metric_names_nonempty_unique",
+        delayed_fn,
+        raising=False,
+    )
+
+    # 지연 주입 확인 — virtual_delayed_sync이 측정값에 지연을 제대로 반영했는지
+    sample = perf_budget.best_of(
+        lambda: _check_metric_names_nonempty_unique(metric_names.ALL_METRIC_NAMES),
+        n=3,
+        warmup=0,
+    )
+    assert sample.cpu_ms >= 10.0, (
+        f"virtual delay injection failed: cpu_ms={sample.cpu_ms:.3f}ms "
+        "did NOT absorb the 10ms injection — budget assertion may be hollow"
+    )
