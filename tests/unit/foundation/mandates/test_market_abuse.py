@@ -126,12 +126,56 @@ def _other_participants(total_qty: str, executed_at: datetime) -> list[dict[str,
 
 
 def test_marking_the_close_self_share_at_30_pct_misses():
+    """Negative: exactly 30% share is NOT a hit (strict >)."""
     fills = [
         _fill(fill_id="self", tenant_id="tenant-a", qty=Decimal("300"), executed_at=_CLOSE),
         *_other_participants("700", _CLOSE),
     ]
     hits = detect(_window(fills=fills), {})
     assert [h for h in hits if h.pattern_id == PATTERN_MARKING_THE_CLOSE] == []
+
+
+def test_marking_the_close_self_share_below_30_pct_misses():
+    """Negative: 20% share well under the 30% limit must not trigger."""
+    fills = [
+        _fill(fill_id="self", tenant_id="tenant-a", qty=Decimal("200"), executed_at=_CLOSE),
+        *_other_participants("800", _CLOSE),
+    ]
+    hits = detect(_window(fills=fills), {})
+    assert [h for h in hits if h.pattern_id == PATTERN_MARKING_THE_CLOSE] == []
+
+
+def test_marking_the_close_multi_tenant_each_below_30_pct_misses():
+    """Negative: two tenants each at ~28.6% (200/700) must not trigger."""
+    fills = [
+        _fill(fill_id="self-a", tenant_id="tenant-a", qty=Decimal("200"), executed_at=_CLOSE),
+        _fill(fill_id="self-b", tenant_id="tenant-b", qty=Decimal("200"), executed_at=_CLOSE),
+        *_other_participants("300", _CLOSE),
+    ]
+    hits = detect(_window(fills=fills), {})
+    assert [h for h in hits if h.pattern_id == PATTERN_MARKING_THE_CLOSE] == []
+
+
+@pytest.mark.perf
+def test_marking_the_close_self_share_performance_ceiling():
+    """Performance: detect() on 500 fills must complete under 200ms.
+
+    marking-the-close is O(n) in fill count (single pass through fills).
+    """
+    import time
+
+    fills = [
+        _fill(fill_id=f"f{i}", tenant_id=f"tenant-{i % 10}", qty=Decimal("100"), executed_at=_CLOSE)
+        for i in range(500)
+    ]
+    window = _window(fills=fills)
+    start = time.perf_counter()
+    for _ in range(100):
+        detect(window, {})
+    elapsed_ms = (time.perf_counter() - start) * 1000 / 100
+    assert elapsed_ms < 200, (
+        f"marking_the_close detect p95 budget 200ms exceeded: {elapsed_ms:.1f}ms"
+    )
 
 
 def test_marking_the_close_self_share_over_30_pct_hits():
