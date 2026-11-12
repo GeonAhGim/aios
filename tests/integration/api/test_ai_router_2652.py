@@ -192,6 +192,20 @@ async def test_get_other_tenants_proposal_is_404(client, pool):
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
 
 
+# --- negative 5: 존재하지 않는 토큰 회전 -> 404 ---
+
+
+async def test_rotate_nonexistent_agent_token_is_404(client, pool):
+    headers, _tenant_id = await _register(client)
+
+    response = await client.post(
+        f"{BASE}/tokens/{uuid.uuid4()}:rotate", headers=headers, json={"ttl_seconds": 7200}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
 # --- 실패 주입: EXCEPTION_MAP에 없는 예외가 원본 메시지를 누출하지 않음 ---
 
 
