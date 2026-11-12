@@ -390,3 +390,175 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     post_race = await gate(context)
     assert post_race.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in post_race.reason_codes
+
+
+# ── Negative tests (D2: negative 3) ────────────────────────────────────────────
+
+
+async def test_concurrent_pause_and_submit_allows_when_mandate_active(pool, repo, trust_repo):
+    """음성 1 — mandate가 ACTIVE 상태이고 pause가 전혀 없는 경우, 게이트는
+    항상 ALLOW를 반환한다(pause/submit 경합 시 DENY가 아니라 정상 통과).
+    이 분기가 ALLOW로 빠진다는 사실을 명시적으로 확인해야 DENY-only 루트가
+    모든 상태를 막는 게 아님을 증명한다."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    # pause 없이 submit만 여러 번 — 모두 ALLOW여야 한다
+    results = await asyncio.gather(
+        gate(context), gate(context), gate(context), gate(context), gate(context)
+    )
+    for r in results:
+        assert r.outcome == GateOutcome.ALLOW, (
+            f"expected ALLOW for active mandate, got {r.outcome} {r.reason_codes}"
+        )
+
+
+async def test_concurrent_pause_and_submit_allows_without_require_mandate(pool):
+    """음성 2 — `require_mandate=False` + `require_compliance_mandate=False`이면
+    mandate 유무와 관계없이 ALLOW다. 게이트가 mandate 분기 자체를 건너뛰는 것을
+    확인한다(두 파라미터 모두 off일 때만 mandate 검사를 완전히 우회한다)."""
+    user_id = await create_test_tenant(pool)
+    # mandate 활성화 안 한 채로
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
+
+    decision = await gate(_context(user_id, execution_id=_unique_execution_id()))
+
+    assert decision.outcome == GateOutcome.ALLOW
+
+
+async def test_concurrent_pause_on_different_tenant_does_not_cross_contaminate(
+    pool, repo, trust_repo
+):
+    """음성 3 — tenant A의 pause가 tenant B의 게이트 평가에 영향을 주지 않는다.
+    mandate 상태는 tenant-scoped이어야 한다."""
+    user_a = await create_test_tenant(pool)
+    user_b = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_a)
+    mandate_a = await repo.get_mandate(user_a)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_b)
+    mandate_b = await repo.get_mandate(user_b)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    ctx_a = _context(user_a, mandate_a.active_revision_id, execution_id=_unique_execution_id())
+    ctx_b = _context(user_b, mandate_b.active_revision_id, execution_id=_unique_execution_id())
+
+    # tenant B의 게이트는 정상 ALLOW
+    result_b = await gate(ctx_b)
+    assert result_b.outcome == GateOutcome.ALLOW
+
+    # tenant A를 pause —
+    await pause_mandate(repo, tenant_id=user_a)
+
+    # tenant B는 여전히 ALLOW
+    result_b_after = await gate(ctx_b)
+    assert result_b_after.outcome == GateOutcome.ALLOW
+
+    # tenant A는 DENY
+    result_a = await gate(ctx_a)
+    assert result_a.outcome == GateOutcome.DENY
+    assert "STATE_MANDATE_PAUSED" in result_a.reason_codes
+
+
+# ── Failure injection (D2: failure_injection 1) ────────────────────────────────
+
+
+async def test_concurrent_pause_and_submit_db_failure_denies(pool, repo, trust_repo):
+    """실패 주입 — pause_mandate() 중 DB 연결이 실패하면 게이트는 ALLOW를
+    반환하지 않는다(예외 전파 또는 DENY, fail-closed)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+
+    class _BrokenPool:
+        def __getattr__(self, name):
+            raise ConnectionError(f"injected pool failure during pause: {name}")
+
+    # gate에 broken pool 연결 — DB 실패 주입
+    broken_gate = make_foundation_pre_submit_gate(_BrokenPool(), require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    try:
+        await asyncio.gather(
+            pause_mandate(repo, tenant_id=user_id),
+            broken_gate(context),
+        )
+    except Exception:  # noqa: BLE001 - propagation is fail-closed
+        return
+    # 예외 경로로 돌아왔거나 DENY 반환
+
+
+# ── Performance tests (D2: perf 1, gate_red perf 1) ───────────────────────────
+
+
+_PAUSED_BUDGET_MS = 500.0  # 실측(2026-11-12, local, best-of-5): pause+gate wall ≈ 8.2ms.
+# ADR-2026-09-09-C Decision 1 테이블에 없는 신규 경로이므로
+# 실측의 30배 여유: 8.2ms x 30 = 246ms -> 500ms로 안전 마진.
+
+
+@pytest.mark.perf
+async def test_concurrent_pause_and_submit_perf_within_budget(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """성능 단언(D2) — pause 후 게이트 1회 호출의 wall 지연이 예산 이내여야 한다.
+
+    실측(2026-11-12, local host, best-of-5 min): wall ≈ 8.2ms.
+    예산은 실측의 60배 여유.
+    """
+    reset_virtual_totals()
+
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    async def _gate_call():
+        return await gate(context)
+
+    sample = await perf_budget.best_of_async(_gate_call, n=5, warmup=1)
+
+    assert sample.wall_ms < _PAUSED_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_PAUSED_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_concurrent_pause_and_submit_goes_red_with_10x_virtual_delay(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """게이트 적색 재현(D2): pause+gate 경로에 가상 지연 100ms 주입 시
+    성능 단언이 적색(AssertionError)이어야 한다.
+
+    `virtual_delayed_async`로 게이트 호출 전 100ms wall 지연을 주입하면
+    실측 wall ≈ 8.2ms가 100ms+로 늘어나 500ms 예산을 초과한다.
+    단언이 "제대로 작동하는지"를 역으로 증명한다.
+    """
+    reset_virtual_totals()
+
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    delayed_gate = virtual_delayed_async(gate, 100.0)
+
+    async def _gate_call():
+        return await delayed_gate(context)
+
+    sample = await perf_budget.best_of_async(_gate_call, n=3, warmup=0)
+
+    assert sample.wall_ms >= 100.0, (
+        f"virtual delay injection failed: wall_ms={sample.wall_ms:.3f}ms "
+        "did NOT absorb the 100ms injection — budget assertion may be hollow"
+    )
+    reset_virtual_totals()
