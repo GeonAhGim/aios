@@ -46,6 +46,49 @@ def test_local_adapter_satisfies_kms_port_protocol_statically() -> None:
     assert isinstance(adapter, KmsPort)
 
 
+@pytest.mark.parametrize("missing", ["get_key", "encrypt", "decrypt", "rotate"])
+def test_static_conformance_breaks_when_any_single_member_is_not_callable(
+    missing: str,
+) -> None:
+    """Negative: nulling any one KmsPort member on a subclass fails isinstance."""
+    broken_cls = type("_Broken", (LocalKeyRingKmsAdapter,), {missing: None})
+    assert isinstance(broken_cls(_ring()), KmsPort) is False
+
+
+# Measured 2026-11-12 (wt/backend-1, Windows 11): construct adapter + isinstance
+# ≈ 0.0002 ms/call (20_000 iterations, perf_counter). Budget 0.05 ms (>200× measured).
+_STATIC_CONFORMANCE_BUDGET_MS: float = 0.05
+
+
+def _construct_and_check() -> bool:
+    return isinstance(LocalKeyRingKmsAdapter(_ring()), KmsPort)
+
+
+@pytest.mark.perf
+def test_static_conformance_construct_and_check_within_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Perf: adapter construction plus the protocol check stays under budget."""
+    sample = perf_budget.best_of(_construct_and_check, n=10, batch=500)
+    assert sample.cpu_ms < _STATIC_CONFORMANCE_BUDGET_MS, (
+        f"cpu={sample.cpu_ms:.4f}ms budget={_STATIC_CONFORMANCE_BUDGET_MS}ms"
+    )
+
+
+@pytest.mark.perf
+def test_static_conformance_gate_fails_on_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red: a 10× virtual delay must trip the static-conformance budget."""
+    reset_virtual_totals()
+    delayed = virtual_delayed_sync(
+        _construct_and_check, 10 * _STATIC_CONFORMANCE_BUDGET_MS / 1000.0
+    )
+    sample = perf_budget.best_of(delayed, n=5, batch=1)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _STATIC_CONFORMANCE_BUDGET_MS
+
+
 def test_object_missing_kms_port_member_is_not_kms_port() -> None:
     """Negative: an object missing any KmsPort member must not pass
     ``isinstance(..., KmsPort)``."""
