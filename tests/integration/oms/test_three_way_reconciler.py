@@ -164,6 +164,25 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(
         )
     assert order_count == 0
 
+    # negative 4 — kill switch ACTIVE 동안 동일 명령 재시도(멱등키 포함)도 DENY:
+    # 멱등성이 safety control을 우회하지 않는지 검증한다.
+    with pytest.raises(OrderSubmitDeniedError) as retry_exc:
+        await submit_order(
+            cmd,
+            pool=pool,
+            profile=profile(),
+            registry=registry(),
+            pre_submit_gate=gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
+        )
+    assert any(code.startswith("RISK_KILL_SWITCH_ACTIVE_") for code in retry_exc.value.reason_codes)
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == 0
+
     resolved_adapter = ScriptedAdapter(
         open_orders=[provider_order(client_id, Decimal("10"), Decimal("3"))]
     )
