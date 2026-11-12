@@ -324,10 +324,12 @@ async def test_perf_gate_red_reproduction_injected_cpu_load(
     reset_virtual_totals()
     _original_entries = cache._entries
 
+    _inject = virtual_delayed_sync(lambda: None, 0.003)
+
     class _VirtualHeavyDict(dict):
         def get(self, key, default=None):
             # 3ms 가상 CPU 지연 — 500회 × 3ms = 1500ms > 800ms 예산
-            virtual_delayed_sync(lambda: None, 0.003)()
+            _inject()
             return super().get(key, default)
 
     cache._entries = _VirtualHeavyDict(_original_entries)
