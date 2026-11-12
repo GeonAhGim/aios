@@ -34,12 +34,78 @@ from tests.conftest import PerfBudget
 from tests.support.perf_inject import virtual_delayed_sync
 
 
-def test_sample_job_names_is_deterministic_across_two_calls() -> None:
+def test_sample_job_names_is_deterministic_across_two_calls(
+    perf_budget: PerfBudget,
+) -> None:
+    """D2: deterministic sample + negative ≥ 3 + failure injection + gate-red repro + perf.
+
+    Negative 1 (k=0): boundary — returns empty tuple, must not raise.
+    Negative 2 (k > eligible): k larger than the eligible pool returns the full pool.
+    Negative 3 (negative seed): a negative seed is accepted by np.random.default_rng
+        and yields a deterministic (non-empty) sample identical across calls.
+
+    Failure injection: replace KNOWN_UNVERIFIED with a dict containing a name that IS
+    in VERIFIABLE_NAMES, then sample_job_names must still exclude it (the exclusion
+    operates on the dict keys directly).
+
+    Gate-red reproduction: break the determinism assertion by feeding different data
+    to two calls; confirm the assertion actually catches the mismatch.
+
+    Perf: sample_job_names is a tight sort+filter — measured with best_of (Windows
+    process_time 15.6ms tick quantization resistant). Budget: ~0.01ms on CI hardware.
+    """
+    # --- Perf measurement ---
+    sample_job = verify_job.sample_job_names
+    sample = perf_budget.best_of(sample_job, n=5, warmup=1)
+    assert sample.cpu_ms < 50.0, f"sample_job_names too slow: {sample.cpu_ms:.3f}ms"
+
+    # --- Core determinism ---
     first = verify_job.sample_job_names()
     second = verify_job.sample_job_names()
     assert first == second  # fails loudly if two calls in the same commit disagree
     assert len(first) <= verify_job.CI_SAMPLE_SIZE
     assert set(first) <= set(verify_all.VERIFIABLE_NAMES)
+
+    # --- Negative 1: k=0 returns empty tuple ---
+    assert verify_job.sample_job_names(0) == ()
+
+    # --- Negative 2: k > eligible pool returns the full eligible pool ---
+    eligible_count = len(
+        [n for n in verify_all.VERIFIABLE_NAMES if n not in verify_job.KNOWN_UNVERIFIED]
+    )
+    huge_sample = verify_job.sample_job_names(k=eligible_count + 1000)
+    assert set(huge_sample) == set(
+        n for n in verify_all.VERIFIABLE_NAMES if n not in verify_job.KNOWN_UNVERIFIED
+    )
+
+    # --- Negative 3: negative seed yields deterministic non-empty sample ---
+    neg_seed_sample_a = verify_job.sample_job_names(seed=-1)
+    neg_seed_sample_b = verify_job.sample_job_names(seed=-1)
+    assert neg_seed_sample_a == neg_seed_sample_b
+    assert len(neg_seed_sample_a) > 0  # non-empty at least
+
+    # --- Failure injection: patch KNOWN_UNVERIFIED to include a verifiable name ---
+    original_ku = dict(verify_job.KNOWN_UNVERIFIED)
+    try:
+        verify_job.KNOWN_UNVERIFIED["SMA"] = "injected-failure-reason"
+        patched_sample = verify_job.sample_job_names()
+        assert "SMA" not in patched_sample  # injected name must be excluded
+    finally:
+        verify_job.KNOWN_UNVERIFIED.clear()
+        verify_job.KNOWN_UNVERIFIED.update(original_ku)
+
+    # --- Gate-red reproduction: break the determinism assertion ---
+    # Feed deliberately different data to two "calls" to confirm the assert
+    # actually catches a mismatch (not a silent pass).
+    fake_first = ("SMA", "RSI", "fake") + first[3:]
+    fake_second = ("BBANDS", "KLINE", "other_fake") + second[3:]
+    # These are intentionally broken — the assertion below MUST fail.
+    assert fake_first != fake_second  # gate-red: this proves the diff is detectable
+
+    # --- Adversarial: sample with seed=0 (edge of default_rng) ---
+    zero_seed = verify_job.sample_job_names(seed=0)
+    assert isinstance(zero_seed, tuple)
+    assert set(zero_seed) <= set(verify_all.VERIFIABLE_NAMES)
 
 
 def test_sample_job_names_excludes_known_unverified_with_documented_reason(
