@@ -3,6 +3,9 @@
 DoD(docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-04, §6):
 `metric_names.py`의 상수 전부가 §6 단위테스트 표의 정규식을 만족해야 하고,
 위반 상수가 1개라도 있으면 실패한다.
+
+D3 evidence (task-24295): negative 6→9, failure_injection 1→2, perf 0→1,
+gate_red 1→2, adversarial 0→1.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ import re
 import pytest
 
 from src.core.observability import metric_names
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _METRIC_NAME_RE = re.compile(r"^aios\.[a-z_]+\.[a-z_]+\.[a-z_]+(_total|_seconds|_bytes|\.gauge)?$")
 
@@ -171,3 +176,145 @@ def test_invalid_metric_name_injection_detected(monkeypatch: pytest.MonkeyPatch)
     violations = [name for name in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(name)]
     assert len(violations) > 0, "정규식이 무효한 메트릭 이름을 감지하지 못함"
     assert "aios.invalid." in violations
+
+
+# ── additional negative tests (D3: negative 6→9) ──────────────────────────
+
+
+def test_negative_five_segment_name_rejected() -> None:
+    """음성 테스트: 세그먼트가 5개이면 정규식을 만족하지 않는다.
+    `aios.api.v1.orders.submit.total`는 5세그먼트로 `[a-z_]+` 패턴 3회 이상을 초과한다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.api.v1.orders.submit.total")
+    assert not _METRIC_NAME_RE.match("aios.one.two.three.four.five_total")
+
+
+def test_negative_special_char_segment_rejected() -> None:
+    """음성 테스트: 세그먼트에 하이픈(-)이나 슬래시(/)가 포함되면 `[a-z_]+`를 위반한다.
+    `aios.api-v2.request.count_total`은 하이픈 세그먼트를 포함하므로 거부된다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.api-v2.request.count_total")
+    assert not _METRIC_NAME_RE.match("aios.api/request/count_total")
+
+
+def test_negative_metric_with_leading_dot_suffix_rejected() -> None:
+    """음성 테스트: `.gauge` 접미사 없이 점만으로 끝나는 이름은 정규식을 만족하지 않는다.
+    `aios.something.status.`은 빈 세그먼트를 만들어 거부된다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.something.status.")
+    assert not _METRIC_NAME_RE.match("aios.api.request.")
+
+
+# ── additional gate_red tests (D3: gate_red 1→2) ──────────────────────────
+
+
+def test_gate_catches_malformed_metric_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """게이트 적색 재현: `ALL_METRIC_NAMES`에 잘못된 형식의 이름이混入되면
+    `test_all_metric_names_match_naming_regex`가 실제로 적색이 되는지 증명한다.
+    """
+    malformed = "aios.MALFORMED.name"
+    original = metric_names.ALL_METRIC_NAMES
+    malformed_set = set(original) | {malformed}
+    monkeypatch.setattr(metric_names, "ALL_METRIC_NAMES", malformed_set)
+
+    violations = [name for name in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(name)]
+    assert len(violations) > 0
+    assert malformed in violations
+
+
+# ── failure_injection: to_prom with corrupted input (D3: 1→2) ─────────────
+
+
+def test_to_prom_handles_names_with_multiple_dots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입: 점 여러 개가连着된 이름이 ALL_METRIC_NAMES에 있으면 to_prom이
+    모든 점을 언더스코어로 변환해야 한다(부분 변환 방지).
+    """
+    # Original test already exists; this is a deeper injection:
+    # Inject a name with consecutive dots and verify to_prom handles it.
+    injected = "aios.multi..dots.name_total"
+    monkeypatch.setattr(
+        metric_names, "ALL_METRIC_NAMES", set(metric_names.ALL_METRIC_NAMES) | {injected}
+    )
+
+    for name in metric_names.ALL_METRIC_NAMES:
+        result = metric_names.to_prom(name)
+        assert isinstance(result, str)
+        assert result == name.replace(".", "_")
+
+
+# ── perf test (D3: 0→1) ───────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+def test_to_prom_performance_within_budget() -> None:
+    """성능 단언: `to_prom()`은 `ALL_METRIC_NAMES`의 각 이름을 변환하는 데
+    0.01ms 미만이어야 한다(ADR-2026-09-09-C Decision 1: 계측 배선 오버헤드 p95 < 1ms).
+
+    Virtual delay 10x injection으로 게이트 적색 재현: 실제 지연이 주입되면
+    예산을 초과하여 적색이 된다.
+    """
+    reset_virtual_totals()
+
+    budget_ms = 0.01  # 0.01ms per name — generous for a str.replace() call
+    perf_budget = PerfBudget()
+
+    def fn() -> None:
+        for name in metric_names.ALL_METRIC_NAMES:
+            metric_names.to_prom(name)
+
+    sample = perf_budget.best_of(fn, n=5, warmup=0, batch=1)
+    assert sample.cpu_ms < budget_ms, (
+        f"to_prom() performance exceeded budget: {sample.cpu_ms:.4f}ms > {budget_ms}ms "
+        f"wall={sample.wall_ms:.4f}ms — see ADR-2026-09-09-C Decision 1"
+    )
+
+
+def test_to_prom_performance_gate_red_with_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: `to_prom()`에 가상 지연을 주입하면 성능 단언이
+    실제로 적색이 되는지 확인한다. 지연 주입 없이 항상 녹색이 아님을 증명.
+    """
+    reset_virtual_totals()
+
+    budget_ms = 0.01
+    perf_budget = PerfBudget()
+
+    # Inject 0.001ms virtual delay per call — with ~100 metric names,
+    # cumulative ~0.1ms exceeds the 0.01ms budget.
+    original_to_prom = metric_names.to_prom
+    monkeypatch.setattr(metric_names, "to_prom", virtual_delayed_sync(original_to_prom, 0.001))
+
+    def fn() -> None:
+        for name in metric_names.ALL_METRIC_NAMES:
+            metric_names.to_prom(name)
+
+    sample = perf_budget.best_of(fn, n=3, warmup=0, batch=1)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < budget_ms, (
+            f"Expected gate-red: {sample.cpu_ms:.4f}ms should exceed {budget_ms}ms budget"
+        )
+
+
+# ── adversarial test (D3: 0→1) ────────────────────────────────────────────
+
+
+def test_adversarial_metric_name_fuzz_boundary() -> None:
+    """Adversarial: 메트릭 이름 경계값 공격 — 세그먼트가 공백, Null 바이트,
+    Unicode 등 이상 입력일 때 정규식이 안전하게 거부되어야 한다.
+    """
+    adversarial_names = [
+        "aios. api.request.count_total",  # 공백
+        "aios\x00.request.count_total",  # Null 바이트
+        "aios.🔥.request.count_total",  # Emoji
+        ".aios.api.request.count_total",  # 선행 점
+        "aios.api.request.count_total.",  # 후행 점
+        "AIOS.API.REQUEST.COUNT_TOTAL",  # 전체 대문자
+        "aios.api.request.COUNT_total",  # 혼합 케이스
+        "aios.api_request_count_total",  # 점이 하나도 없음
+        "aios.api.request.count._total",  # 빈 세그먼트(연속 점 아님, 언더스코어 세그먼트)
+        "aios.api.request.5count_total",  # 세그먼트 시작 숫자
+        "aios.api.request.5count",  # 5세그먼트 + 숫자 세그먼트
+    ]
+    for name in adversarial_names:
+        assert not _METRIC_NAME_RE.match(name), f"경계값이 허용됨: {name!r}"

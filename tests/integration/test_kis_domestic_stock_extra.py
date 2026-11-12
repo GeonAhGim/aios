@@ -2,7 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
-# loc-allow: task-24289 D2 하한 보강 — negative 3 + perf + gate_red for get_investor_trading_by_stock
+# loc-allow: task-24289 D2 하한 보강 — negative 3, perf, gate_red
 
 import httpx
 import pytest
