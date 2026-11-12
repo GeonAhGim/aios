@@ -219,8 +219,8 @@ async def test_conditional_update_latency_within_relative_budget(
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT status FROM users WHERE user_id = $1", user_id)
 
-    write = await perf_budget.best_of_async(flip, n=3, warmup=1, batch=200)
-    read = await perf_budget.best_of_async(baseline, n=3, warmup=1, batch=200)
+    write = await perf_budget.best_of_async(flip, n=3, warmup=1, batch=1000)
+    read = await perf_budget.best_of_async(baseline, n=3, warmup=1, batch=1000)
     # CPU 기준 상대 예산 — 쓰기 경로가 단순 SELECT의 20배를 넘으면 회귀로 본다.
     assert write.cpu_ms < 20.0 * read.cpu_ms, (
         f"write={write.cpu_ms:.3f}ms read={read.cpu_ms:.3f}ms ratio>{20.0}x"
