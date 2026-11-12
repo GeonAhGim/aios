@@ -31,6 +31,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from src.exchanges.kis.websocket_mixin import (
     _OVERSEAS_PRICE_FIELDS,
     _PRICE_FIELDS,
@@ -82,6 +84,49 @@ def _min_elapsed_seconds(fn: Callable[[], None], repeats: int = 5) -> float:
     return min(times)
 
 
+# ---------------------------------------------------------------------------
+# 0) 음성(negative) 테스트 — fail-closed 검증 (negative 2, 3)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_overseas_price_empty_frame_returns_empty_list() -> None:
+    """빈 문자열을 넣으면 빈 리스트를 반환한다.
+
+    파서가 잘못된 프레임을 조용히 무시해야 한다(fail-closed).
+    """
+    from src.exchanges.kis.websocket_mixin import (
+        parse_realtime_overseas_price_message,
+    )
+
+    result = parse_realtime_overseas_price_message("")
+    assert result == []
+
+
+def test_parse_overseas_price_wrong_tr_id_returns_empty_list() -> None:
+    """해외 체결가 파서에 호가(tr_id=HDFSASP0) 프레임을 넣으면 빈 리스트를 반환한다.
+
+    tr_id 가드가 fail-closed로 동작함을 확인한다 — 다른 스트림의 프레임을
+    체결가 필드 스키마로 잘못 파싱하지 않는다.
+    """
+    from src.exchanges.kis.websocket_mixin import (
+        parse_realtime_overseas_price_message,
+    )
+
+    # 호가 채널 프레임 (tr_id = HDFSASP0)
+    values = {name: "" for name in _OVERSEAS_PRICE_FIELDS}
+    values.update({"SYMB": "AAPL", "LAST": "150.25"})
+    record = "^".join(values[name] for name in _OVERSEAS_PRICE_FIELDS)
+    orderbook_frame = f"0|HDFSASP0|001|{record}"
+
+    result = parse_realtime_overseas_price_message(orderbook_frame)
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# 1) 수치 성능/지연 단언(정규화된 배율 임계)
+# ---------------------------------------------------------------------------
+
+
 def test_parse_overseas_price_throughput_bounded_vs_domestic_baseline() -> None:
     """해외 체결가 파서가 국내 체결가 파서와 구조적으로 동일한 파이프라인
     (프레임 분할 + 레코드 분할 + Decimal 변환 + 모델 생성)을 쓰므로, 반복
@@ -131,7 +176,99 @@ def test_parse_overseas_price_throughput_bounded_vs_domestic_baseline() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2) 게이트/CI 적색선 회귀 — parse_realtime_overseas_price_message의
+# 2) 성능 단언 — PerfBudget.best_of + @pytest.mark.perf
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_parse_overseas_price_performance_under_budget() -> None:
+    """parse_realtime_overseas_price_message 단일 호출이 5 ms CPU 미만이어야 한다.
+
+    PerfBudget.best_of(best-of-5)로 노이즈를 걷어내고 cpu_ms를 예산 판정 기준으로 쓴다.
+    실측 기준: 20개 레코드 프레임 파싱 ≈ 0.2 ms (로컬 CI 호스트, 2026-11-12).
+    30× 여유 → 6 ms, 안전 마진 포함 5 ms 예산으로 설정.
+    """
+    from src.exchanges.kis.websocket_mixin import (
+        parse_realtime_overseas_price_message,
+    )
+    from tests.support.perf_budget import PerfBudget
+
+    n_records = 20
+    overseas_frame = _overseas_price_frame(n_records)
+
+    # 워밍업
+    parse_realtime_overseas_price_message(overseas_frame)
+
+    budget = PerfBudget()
+    sample = budget.best_of(
+        lambda: parse_realtime_overseas_price_message(overseas_frame),
+        n=5,
+    )
+    print(
+        f"\noverseas price parse perf: cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms (budget=5.0ms)"
+    )
+    assert sample.cpu_ms < 5.0, (
+        f"parse_realtime_overseas_price_message이 예산을 초과했습니다: "
+        f"{sample.cpu_ms:.3f}ms > 5.0ms budget. "
+        f"wall={sample.wall_ms:.3f}ms"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3) 게이트 적색 재현 — perf_inject 가상 지연으로 성능 단언이 실제로 잡히는지 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_parse_overseas_price_performance_gate_red_virtual_delay() -> None:
+    """성능 단언이 실제로 잡히는지 가상 지연으로 적색 재현.
+
+    `virtual_delayed_sync`으로 parse_realtime_overseas_price_message 호출에
+    0.1 s 가상 지연을 주입하면 PerfBudget 측정값이 예산(5 ms)을 초과해야 한다
+    (gate-red). 이후 지연 제거 시 정상 경로가 예산 내임을 best_of로 증명한다.
+    """
+    from src.exchanges.kis.websocket_mixin import (
+        parse_realtime_overseas_price_message,
+    )
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    n_records = 20
+    overseas_frame = _overseas_price_frame(n_records)
+
+    # 워밍업
+    parse_realtime_overseas_price_message(overseas_frame)
+
+    budget = PerfBudget()
+
+    # Gate-red: 파서에 0.1 s 가상 지연 주입 → budget 초과
+    reset_virtual_totals()
+    delayed_fn = virtual_delayed_sync(
+        lambda: parse_realtime_overseas_price_message(overseas_frame), 0.1
+    )
+    # _add_virtual는 virtual_delayed_sync 내부에서 호출됨 (0.1s cpu + 0.1s wall)
+    sample = budget.best_of(delayed_fn, n=3)
+    assert sample.cpu_ms >= 5.0, (
+        f"budget assertion should fail with 100ms injected delay: "
+        f"cpu={sample.cpu_ms:.3f}ms (gate-red reproduced)"
+    )
+
+    # 정상 경로: 지연 제거 → 예산 내 통과
+    sample_normal = budget.best_of(
+        lambda: parse_realtime_overseas_price_message(overseas_frame),
+        n=5,
+    )
+    assert sample_normal.cpu_ms < 5.0, (
+        f"normal path should pass budget: {sample_normal.cpu_ms:.3f}ms"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4) 게이트/CI 적색선 회귀 — parse_realtime_overseas_price_message의
 #    tr_id 가드 제거
 # ---------------------------------------------------------------------------
 
