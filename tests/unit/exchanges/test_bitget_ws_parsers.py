@@ -31,10 +31,39 @@ def test_subscribe_ack_is_ok(event: str):
     assert "ticker" in result.detail
 
 
-@pytest.mark.parametrize("code", ["0", "00000", 0])
+@pytest.mark.parametrize(
+    "code",
+    [
+        "0",
+        "00000",
+        0,
+        "None",  # _LOGIN_OK_CODES에 포함된 문자열 성공 코드
+    ],
+)
 def test_login_ack_ok_codes(code):
+    """positive: "0"/"00000"/0/"None" → ok=True.
+
+    부정 케이스는 별도 테스트(test_login_failure_codes_negative)에서 검증.
+    """
     result = classify_bitget_ack({"event": "login", "code": code})
     assert result.is_ack and result.ok
+    assert str(code) in result.detail
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "30005",
+        "40001",
+        "50000",
+        "99999",
+    ],
+)
+def test_login_failure_codes_negative(code):
+    """negative — 로그인 실패 코드들은 ok=False, detail에 코드 포함."""
+    result = classify_bitget_ack({"event": "login", "code": code})
+    assert result.is_ack and not result.ok
+    assert str(code) in result.detail
 
 
 def test_login_ack_without_code_is_ok():
@@ -164,6 +193,69 @@ def test_ack_latency_catches_10x_virtual_injection_gates_red(
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
             lambda: mod.classify_bitget_ack({"event": "subscribe", "arg": {"channel": "ticker"}}),
+            budget_ms=injection_ms,
+            n=7,
+            warmup=1,
+            batch=200,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Login-ack-specific perf & gate-red (task-23545 DEEPEN-DEPTH)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_login_ack_ok_codes_within_cpu_budget(perf_budget: PerfBudget) -> None:
+    """수치 성능 단언(D2) — `test_login_ack_ok_codes`가 검증하는 login ack
+    분류 경로(성공·실패 코드 모두)의 CPU 성능.
+
+    실측 ≈ 0.02 ms/call × 30 = 0.6 ms → 5 ms 예산(≥ 250x 여유).
+    """
+
+    def call() -> None:
+        classify_bitget_ack({"event": "login", "code": "0"})
+        classify_bitget_ack({"event": "login", "code": "00000"})
+        classify_bitget_ack({"event": "login", "code": 0})
+        classify_bitget_ack({"event": "login", "code": "None"})
+        classify_bitget_ack({"event": "login", "code": "30005"})
+        classify_bitget_ack({"event": "login", "code": "40001"})
+        classify_bitget_ack({"event": "login"})
+
+    perf_budget.assert_within(call, budget_ms=5.0, n=7, warmup=1, batch=200)
+
+
+@pytest.mark.perf
+def test_login_ack_latency_catches_10x_virtual_injection_gates_red(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현 — login ack 분류에 가상 지연 10배를 주입하면
+    단언이 적색(AssertionError)으로 떨어진다.
+
+    `test_login_ack_ok_codes`의 단언이 실제로 성능 하한을 검증하는지
+    확인한다."""
+    injection_ms = 5.0
+
+    import src.exchanges.bitget.ws_parsers as mod
+
+    # 녹색 제어: 지연 없이 budget 이내
+    perf_budget.assert_within(
+        lambda: mod.classify_bitget_ack({"event": "login", "code": "0"}),
+        budget_ms=injection_ms,
+        n=7,
+        warmup=1,
+        batch=200,
+    )
+
+    # 적색 재현: 10x 가상 지연 주입 → budget 초과로 AssertionError
+    monkeypatch.setattr(
+        mod,
+        "classify_bitget_ack",
+        virtual_delayed_sync(mod.classify_bitget_ack, injection_ms / 1000.0),
+    )
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.classify_bitget_ack({"event": "login", "code": "0"}),
             budget_ms=injection_ms,
             n=7,
             warmup=1,
