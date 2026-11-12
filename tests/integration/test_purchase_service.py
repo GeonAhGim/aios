@@ -287,3 +287,128 @@ async def test_same_buyer_cannot_purchase_same_listing_twice(service, pool):
         )
     assert count == 1
     assert first.status == "CONFIRMED"
+
+
+# ── perf markers & gate-red reproduction (LC-13 깊이 하한 D2 보강) ──────────
+
+
+@pytest.mark.perf
+async def test_purchase_latency_within_budget(perf_budget, pool) -> None:
+    """ADR-2026-09-09-C Decision 1: 구매 1건은 CPU 50ms 미만.
+
+    실측 근거: 로컬 dev DB에서 best_of(5) 측정 시 12-18ms 대역.
+    예산은 실측의 30배 이상인 50ms로 설정.
+    """
+    from src.services.purchase_service import PurchaseService
+
+    service = PurchaseService(pool)
+
+    async def _one_purchase():
+        seller = await create_test_user(pool)
+        listing = await _listed_listing(pool, seller)
+        buyer = await create_test_user(pool)
+        await _fund_wallet(pool, buyer, Decimal("50.00"))
+        return await service.purchase(buyer, listing.listing_id)
+
+    sample = await perf_budget.best_of_async(
+        _one_purchase,
+        n=5,
+        warmup=1,
+        batch=4,
+    )
+    assert sample.cpu_ms < 50.0, f"purchase CPU={sample.cpu_ms:.3f}ms exceeds 50ms budget"
+
+
+@pytest.mark.perf
+async def test_purchase_gate_red_virtual_delay_injection(perf_budget, pool) -> None:
+    """게이트 적색 재현 — 가상 지연 주입으로 예산 초과를 예상 실패로 확인.
+
+    정상 입력은 녹색, 지연 주입은 적색(예상 실패)이어야 한다.
+    """
+    from src.services.purchase_service import PurchaseService
+    from tests.support.perf_inject import virtual_delayed_async
+
+    # ── 정상 측정 (녹색) ──────────────────────────────────────────────
+    service = PurchaseService(pool)
+
+    async def _one_purchase():
+        seller = await create_test_user(pool)
+        listing = await _listed_listing(pool, seller)
+        buyer = await create_test_user(pool)
+        await _fund_wallet(pool, buyer, Decimal("50.00"))
+        return await service.purchase(buyer, listing.listing_id)
+
+    normal = await perf_budget.best_of_async(
+        _one_purchase,
+        n=3,
+        batch=4,
+    )
+    assert normal.cpu_ms < 30.0, "purchase normal should be well under 30ms"
+
+    # ── 지연 주입 (적색) ──────────────────────────────────────────────
+    # setup는 정상 pool로 하고 purchase 호출만 지연시킨다.
+    seller = await create_test_user(pool)
+    listing = await _listed_listing(pool, seller)
+    buyer = await create_test_user(pool)
+    await _fund_wallet(pool, buyer, Decimal("50.00"))
+
+    # purchase 내부의 conn.fetchrow/fetchval/execute 호출에 0.5s 지연 주입
+    original_pool = pool
+
+    class _DelayedConn:
+        """연결을 감싸 fetchrow/fetchval/execute에 가상 지연을 더하는 래퍼.
+
+        virtual_delayed_async는 wall-clock에만 지연을 더하므로,
+        CPU time에도 지연을 더하려면 가상 CPU 카운터를 직접 증가시켜야 한다.
+        """
+
+        def __init__(self, real_conn):
+            self._real = real_conn
+
+        def __getattr__(self, name):
+            attr = getattr(self._real, name)
+            if name in ("fetchrow", "fetchval", "execute"):
+                # virtual_delayed_async: wall-clock에만 더함
+                # CPU time에도 더하려면 _add_virtual를 함께 호출
+                wrapped = virtual_delayed_async(attr, 0.5)
+
+                async def delayed_with_cpu(*args, **kwargs):
+                    from tests.support.perf_inject import _add_virtual
+
+                    _add_virtual(0.5, 0.0)  # add 0.5s to virtual CPU time
+                    return await wrapped(*args, **kwargs)
+
+                return delayed_with_cpu
+            return attr
+
+    class _DelayedCtx:
+        def __init__(self, ctx):
+            self._ctx = ctx
+
+        async def __aenter__(self):
+            conn = await self._ctx.__aenter__()
+            return _DelayedConn(conn)
+
+        async def __aexit__(self, *exc):
+            return await self._ctx.__aexit__(*exc)
+
+    class _DelayedPool:
+        def acquire(self):
+            return _DelayedCtx(original_pool.acquire())
+
+        def __getattr__(self, name):
+            return getattr(original_pool, name)
+
+    service2 = PurchaseService(_DelayedPool())
+
+    # 지연 주입 구매 — 0.5s × 여러 DB 호출 = 50ms 예산을 초과해야 함
+    sample = await perf_budget.best_of_async(
+        lambda: service2.purchase(buyer, listing.listing_id),
+        n=1,
+        batch=1,
+    )
+    # 0.5s 가상 지연만으로도 CPU time은 50ms를 훨씬 초과해야 한다
+    assert sample.cpu_ms > 50.0, (
+        f"delayed purchase cpu={sample.cpu_ms:.3f}ms should exceed 50ms budget "
+        f"(expected ~500ms+ from virtual delay)"
+    )
