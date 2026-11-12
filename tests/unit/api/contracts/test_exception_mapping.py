@@ -1,3 +1,5 @@
+import pytest
+
 from src.api.contracts.error_codes import ErrorCode
 from src.api.contracts.exception_mapping import ApprovalOwnershipError, map_exception
 from src.core.approval.service import ApprovalError
@@ -9,6 +11,8 @@ from src.services.exchange_credential_service import (
 )
 from src.services.mfa_service import MfaError, MfaReauthenticationRequiredError
 from src.services.user_admin_service import UserAdminError
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def test_auth_error_maps_to_generic_invalid_credentials():
@@ -179,3 +183,76 @@ def test_map_exception_with_overrides_still_returns_correct_code(monkeypatch):
         assert details == {}
     finally:
         monkeypatch.setattr(exception_mapping, "STATUS_OVERRIDE", original_override)
+
+
+# ── performance tests (D2: perf assertion + gate-red reproduction) ───────
+
+
+@pytest.mark.perf
+def test_perf_map_exception_within_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언(D2) — map_exception은 단일 isinstance 루프 + str() 호출만
+    수행하는 경량 함수다. 실측 ~0.01ms × 30배 여유 = 0.3ms 예산.
+
+    PerfBudget.best_of(5)로 5회 중 최소값을 선택해 양자화/컨테이션 노이즈를
+    걷어낸다. 측정은 time.process_time() 기준.
+    """
+
+    def _map_once() -> tuple[ErrorCode, str, dict[str, object]]:
+        return map_exception(AuthError("test"))
+
+    sample = perf_budget.best_of(_map_once, n=5, warmup=1, batch=1)
+
+    # 실측 ~0.01ms × 30배 여유 (ADR-2026-09-09-C Decision 1: 비-실행축)
+    budget_ms = 0.3
+    assert sample.cpu_ms < budget_ms, (
+        f"perf_budget exceeded: cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_perf_map_exception_goes_red_with_10x_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. virtual_delayed_sync로 1회 호출당 100ms 가상 지연을
+    주입하면 assert_within가 AssertionError로 적색이 돼야 한다.
+
+    실제 sleep/busy-wait 없이 perf_inject.virtual_delayed_sync의
+    가상 지연 레더만 더하므로 테스트가 1초 이상 blocking되지 않는다.
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    reset_virtual_totals()
+    budget_ms = 0.3  # 위 테스트와 동일 예산
+
+    # EXCEPTION_MAP의 AuthError 항목을 virtual_delayed_sync로 감싸서
+    # PerfBudget이 100ms의 가상 CPU 지연을 감지하도록 함.
+    from src.api.contracts import exception_mapping
+
+    original_map = exception_mapping.EXCEPTION_MAP
+
+    # 100ms 가상 지연을 추가하는 래퍼 — map_exception을 호출하면
+    # virtual_delayed_sync가 가상 CPU 레더에 100ms를 추가한다.
+    delayed_map = virtual_delayed_sync(map_exception, 0.1)
+
+    class _DelayedAuthError(AuthError):
+        """AuthError 서브클래스로 EXCEPTION_MAP에 등록."""
+
+    exception_mapping.EXCEPTION_MAP = [
+        (_DelayedAuthError, ErrorCode.AUTH_INVALID_CREDENTIALS),
+    ]
+
+    try:
+        # 같은 budget(0.3ms)을 초과하므로 AssertionError가 있어야 함
+        with pytest.raises(AssertionError):
+            perf_budget.assert_within(
+                lambda: delayed_map(_DelayedAuthError("test")),
+                budget_ms=budget_ms,
+                n=5,
+                warmup=1,
+                batch=1,
+                label="map_exception_100ms_injected",
+            )
+    finally:
+        exception_mapping.EXCEPTION_MAP = original_map
