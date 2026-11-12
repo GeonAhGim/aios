@@ -56,6 +56,7 @@ import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.kis import trading_mixin
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_futureoption_mixin import (
     KISOverseasFutureoptionMixin as _OverseasFutureoptionMixin,
@@ -355,5 +356,139 @@ async def test_overseas_roundtrip_perf_budget_and_gate_red(
     slow = virtual_delayed_async(_StubKIS().request, budget_ms * 10 / 1000)
     monkeypatch.setattr(adapter, "_request", slow)
     red = await perf_budget.best_of_async(lambda: _overseas_roundtrip(adapter), n=3, warmup=0)
+    assert red.wall_ms >= budget_ms
+    await adapter.aclose()
+
+
+# --- D2 depth evidence for the domestic_stock roundtrip (task-24206) --------------------------
+# Offline: `_request` is stubbed, so these run in default CI without credentials (no live_demo).
+# Perf budget (new): place+get+cancel against an instant stub is pure adapter CPU; the budget is
+# 50 ms for the 3-call sequence (same shape as the overseas one, ~1 ms measured, >30x headroom).
+
+
+class _DomesticStub(_StubKIS):
+    """Answers the three domestic_stock TRs with canned KIS payloads."""
+
+    def __init__(self, *, rt_cd: str = "0", fail_on: str | None = None, rows: bool = True) -> None:
+        super().__init__(rt_cd=rt_cd, fail_on=fail_on)
+        self._rows = rows
+
+    async def request(self, method: str, path: str, tr_id: str, **_: object) -> dict[str, object]:
+        self.calls.append((method, tr_id))
+        if tr_id == self._fail_on:
+            raise ConnectionError("injected transport failure")
+        if tr_id == "TTTC0012U":
+            return {"rt_cd": "0", "output": {"KRX_FWDG_ORD_ORGNO": "91252", "ODNO": "0000002"}}
+        if tr_id == "TTTC0081R":
+            row = {"pdno": "005930", "ord_qty": "1", "tot_ccld_qty": "0", "sll_buy_dvsn_cd": "02"}
+            return {"output1": [row] if self._rows else []}
+        return {"rt_cd": self._rt_cd}
+
+
+def _domestic_adapter(monkeypatch: pytest.MonkeyPatch, stub: _DomesticStub) -> KISAdapter:
+    # The registry snapshot for 005930 is verified=False, so the app's tick/lot precheck rejects
+    # the order fail-closed (pinned by the negative test below); the TR roundtrip itself is
+    # exercised with that precheck neutralised.
+    monkeypatch.setattr(trading_mixin, "_precheck_order", lambda order, registry: None)
+    return _stub_adapter(monkeypatch, stub)
+
+
+async def _domestic_roundtrip(adapter: KISAdapter) -> bool:
+    order = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity",
+    )
+    placed = await adapter.place_order(order)
+    assert placed.exchange_order_id == "91252:0000002"
+    fetched = await adapter.get_order(placed.exchange_order_id)
+    assert fetched.exchange_order_id == placed.exchange_order_id
+    return await adapter.cancel_order(placed.exchange_order_id)
+
+
+async def test_domestic_roundtrip_offline_uses_expected_tr_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _DomesticStub()
+    adapter = _domestic_adapter(monkeypatch, stub)
+    assert await _domestic_roundtrip(adapter) is True
+    assert [tr for _, tr in stub.calls] == ["TTTC0012U", "TTTC0081R", "TTTC0013U"]
+    await adapter.aclose()
+
+
+async def test_domestic_cancel_rejected_returns_false_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _domestic_adapter(monkeypatch, _DomesticStub(rt_cd="1"))
+    assert await _domestic_roundtrip(adapter) is False
+    await adapter.aclose()
+
+
+async def test_domestic_place_unverified_spec_rejected_fail_closed_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _DomesticStub()
+    adapter = _stub_adapter(monkeypatch, stub)
+    order = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity",
+    )
+    with pytest.raises(Exception, match="UNVERIFIED_SPEC|verified=False"):  # noqa: B017
+        await adapter.place_order(order)
+    assert stub.calls == []  # never reached the exchange
+    await adapter.aclose()
+
+
+async def test_domestic_cancel_malformed_order_id_raises_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _DomesticStub()
+    adapter = _domestic_adapter(monkeypatch, stub)
+    with pytest.raises(Exception, match="orgno:odno"):  # noqa: B017 - FatalExchangeError
+        await adapter.cancel_order("no-colon-id")
+    assert stub.calls == []  # rejected before any request
+    await adapter.aclose()
+
+
+async def test_domestic_get_order_unknown_id_raises_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _domestic_adapter(monkeypatch, _DomesticStub(rows=False))
+    with pytest.raises(Exception, match="찾을 수 없음"):  # noqa: B017 - FatalExchangeError
+        await adapter.get_order("91252:9999999")
+    await adapter.aclose()
+
+
+async def test_domestic_roundtrip_failure_injection_stops_before_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _DomesticStub(fail_on="TTTC0081R")
+    adapter = _domestic_adapter(monkeypatch, stub)
+    with pytest.raises(ConnectionError):
+        await _domestic_roundtrip(adapter)
+    assert "TTTC0013U" not in [tr for _, tr in stub.calls]  # cancel never reached
+    await adapter.aclose()
+
+
+@pytest.mark.perf
+async def test_domestic_roundtrip_perf_budget_and_gate_red(
+    monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+) -> None:
+    from tests.support.perf_inject import virtual_delayed_async
+
+    budget_ms = 50.0
+    adapter = _domestic_adapter(monkeypatch, _DomesticStub())
+    sample = await perf_budget.best_of_async(lambda: _domestic_roundtrip(adapter), n=3, warmup=1)
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+    # gate-red: a virtual 10x-budget delay on `_request` must trip the same assertion.
+    slow = virtual_delayed_async(_DomesticStub().request, budget_ms * 10 / 1000)
+    monkeypatch.setattr(adapter, "_request", slow)
+    red = await perf_budget.best_of_async(lambda: _domestic_roundtrip(adapter), n=3, warmup=0)
     assert red.wall_ms >= budget_ms
     await adapter.aclose()
