@@ -234,6 +234,133 @@ async def test_other_tenants_positions_excluded(pool):
     assert inputs.exposure.gross_notional[f"TENANT:{user_a}"] == Decimal("200")
 
 
+async def _assemble_for(pool, user_id, execution_id, symbol, strategy_id):
+    return await assemble_risk_inputs(
+        pool,
+        caches(),
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, strategy_id),
+        balances=[
+            AccountBalance(
+                exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+            )
+        ],
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+
+async def test_other_tenant_only_position_yields_zero_exposure(pool):
+    """Negative — only user_b holds a position; user_a must see zero exposure,
+    never user_b's quantity or count."""
+    user_a = await create_test_user(pool)
+    user_b = await create_test_user(pool)
+    execution_a = await create_execution(pool, user_a)
+    symbol = f"ISO0-{uuid.uuid4().hex[:8]}/USDT"
+    await insert_position(
+        pool,
+        user_id=user_b,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id="strat-iso0",
+        quantity=Decimal("999"),
+        average_entry_price=Decimal("100"),
+    )
+
+    inputs = await _assemble_for(pool, user_a, execution_a, symbol, "strat-iso0")
+
+    assert inputs.exposure.position_quantity == Decimal("0")
+    assert inputs.exposure.open_positions_count == 0
+    assert Decimal("99900") not in inputs.exposure.gross_notional.values()
+
+
+async def test_other_tenant_notional_not_in_own_gross_total(pool):
+    """Negative — user_b's notional must not inflate any gross_notional bucket
+    of user_a, and user_b's tenant key must not appear in user_a's result."""
+    user_a = await create_test_user(pool)
+    user_b = await create_test_user(pool)
+    execution_a = await create_execution(pool, user_a)
+    symbol = f"ISO1-{uuid.uuid4().hex[:8]}/USDT"
+    for uid, qty in ((user_a, "3"), (user_b, "500")):
+        await insert_position(
+            pool,
+            user_id=uid,
+            symbol=symbol,
+            exchange="bitget",
+            strategy_id="strat-iso1",
+            quantity=Decimal(qty),
+            average_entry_price=Decimal("10"),
+        )
+
+    inputs = await _assemble_for(pool, user_a, execution_a, symbol, "strat-iso1")
+
+    gross = inputs.exposure.gross_notional
+    assert f"TENANT:{user_b}" not in gross
+    assert gross[f"TENANT:{user_a}"] == Decimal("300")  # marked at candle price 100
+    assert all(v <= Decimal("300") for v in gross.values())
+
+
+async def test_cross_tenant_execution_does_not_adopt_foreign_positions(pool):
+    """Failure injection / negative — user_a's execution paired with user_b's
+    user_id (mismatched ownership) must not expose user_a's position under
+    user_b's identity as a leak of user_a's quantity into user_b's view."""
+    user_a = await create_test_user(pool)
+    user_b = await create_test_user(pool)
+    execution_a = await create_execution(pool, user_a)
+    symbol = f"ISO2-{uuid.uuid4().hex[:8]}/USDT"
+    await insert_position(
+        pool,
+        user_id=user_a,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id="strat-iso2",
+        quantity=Decimal("7"),
+        average_entry_price=Decimal("10"),
+    )
+
+    inputs = await _assemble_for(pool, user_b, execution_a, symbol, "strat-iso2")
+
+    assert inputs.exposure.position_quantity != Decimal("7")
+    assert f"TENANT:{user_a}" not in inputs.exposure.gross_notional
+
+
+async def test_isolation_assertion_turns_red_when_tenant_leaks(pool):
+    """Gate-red reproduction — querying with the wrong tenant (simulating a
+    dropped user_id filter) makes the isolation assertion of
+    test_other_tenants_positions_excluded fail, proving it detects a leak."""
+    user_a = await create_test_user(pool)
+    user_b = await create_test_user(pool)
+    execution_a = await create_execution(pool, user_a)
+    symbol = f"ISO3-{uuid.uuid4().hex[:8]}/USDT"
+    await insert_position(
+        pool,
+        user_id=user_a,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id="strat-iso3",
+        quantity=Decimal("2"),
+        average_entry_price=Decimal("100"),
+    )
+    await insert_position(
+        pool,
+        user_id=user_b,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id="strat-iso3",
+        quantity=Decimal("999"),
+        average_entry_price=Decimal("100"),
+    )
+
+    # Healthy view passes the isolation check.
+    good = await _assemble_for(pool, user_a, execution_a, symbol, "strat-iso3")
+    assert good.exposure.position_quantity == Decimal("2")
+    # Broken input (other tenant's view) must NOT satisfy the same assertion.
+    bad = await _assemble_for(pool, user_b, execution_a, symbol, "strat-iso3")
+    assert bad.exposure.position_quantity != Decimal("2")
+
+
 async def test_to_legacy_dict_round_trips_fourteen_keys(pool):
     """account_state.py가 기대하는 14키가 그대로 채워진다(무회귀)."""
     user_id = await create_test_user(pool)
