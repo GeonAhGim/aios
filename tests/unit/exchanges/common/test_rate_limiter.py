@@ -56,6 +56,186 @@ async def test_acquire_waits_for_refill_when_bucket_empty() -> None:
     assert clock.now == pytest.approx(0.5)
 
 
+# --- negative tests for refill behavior (DEPTH_L4_BR D2 보강) ----------------
+
+
+async def test_acquire_partial_refill_waits_exact_wait_time() -> None:
+    """음성: 버킷이 완전히 비어있지 않아도 부족한 분량만큼만 대기해야 한다.
+    rate=10/s에서 토큰 3개 남고 4개 필요 → 0.1초 대기(1개 분량 리필)."""
+    bucket, clock, sleep_calls = _make_bucket(rate=10, burst=10)
+    await bucket.acquire(7, timeout=5.0)  # 3개 남음
+    await bucket.acquire(4, timeout=5.0)  # 1개 필요 → 0.1초 대기
+    assert sleep_calls == [pytest.approx(0.1)]
+    assert clock.now == pytest.approx(0.1)
+
+
+async def test_acquire_zero_tokens_succeeds_immediately() -> None:
+    """음성: 0개 토큰 요청은 대기 없이 즉시 성공해야 한다."""
+    bucket, clock, sleep_calls = _make_bucket(rate=10, burst=5)
+    await bucket.acquire(5, timeout=5.0)  # 소진
+    await bucket.acquire(0, timeout=5.0)  # 0개 → 즉시 성공
+    assert sleep_calls == []
+
+
+async def test_acquire_after_refill_exceeds_burst_capped_at_burst() -> None:
+    """음성: 리필량이 버스트 한도를 넘으면 버스트로 컷된다 — 초과 리필로
+    토큰이 burst를 초과해 쌓이지 않는다."""
+    bucket, clock, sleep_calls = _make_bucket(rate=100, burst=5)
+    await bucket.acquire(5, timeout=5.0)  # 소진
+    clock.now = 10.0  # 10초 경과 → 이론상 1000개 리필 but burst=5로 컷
+    await bucket.acquire(5, timeout=5.0)  # 버스트 가득 채워졌으므로 대기 불필요
+    assert sleep_calls == []  # 리필이 burst를 넘어섰으므로 대기 없음
+
+
+# --- gate-red reproduction: timeout check removal causes red ----------------
+
+
+def test_acquire_waits_for_refill_gate_turns_red_when_timeout_check_removed(
+    tmp_path: Path,
+) -> None:
+    """timeout 초과 즉시 거부 코드를 무력화하면 pytest가 exit 1로 적색이 되는
+    것까지 증명(gate/CI red-line regression proof, DEPTH_L4_BR task-456 D2).
+
+    `test_acquire_waits_for_refill_when_bucket_empty`가 먼저 통과하는 것을
+    확인하고, 동일 테스트에서 timeout 체크를 `if False:`로 뒤편조하면
+    실제 timeout 초과 시에도 기다리다가 pytest 타임아웃으로 실패한다."""
+    test_copy = tmp_path / "test_rate_limiter_refill_copy.py"
+    test_copy.write_text(Path(__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    config = tmp_path / "pytest.ini"
+    config.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
+        "--timeout",
+        "10",
+        f"{test_copy}::test_acquire_raises_rate_limited_when_wait_exceeds_timeout",
+    ]
+
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    baseline = subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=30,
+        check=False,
+    )
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+
+    # timeout 체크를 무력화 — conftest.py에서 모듈을 동적 변조
+    (tmp_path / "conftest.py").write_text(
+        "import importlib\nfrom pathlib import Path\n"
+        "name = 'src.exchanges.common.rate_limiter'\n"
+        "module = importlib.import_module(name)\n"
+        "source = Path(module.__file__).read_text(encoding='utf-8')\n"
+        "guard = '            if wait_needed > timeout:'\n"
+        "assert source.count(guard) == 1\n"
+        "mutated_src = source.replace(guard, '            if False:')\n"
+        "mutant = compile(mutated_src, module.__file__, 'exec')\n"
+        "exec(mutant, module.__dict__)\n",
+        encoding="utf-8",
+    )
+    mutated = subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=30,
+        check=False,
+    )
+    assert mutated.returncode == 1, mutated.stdout + mutated.stderr
+
+
+# --- failure injection + perf assertion (D2 보강) ----------------------------
+
+
+@pytest.mark.perf
+async def test_acquire_waits_for_refill_fires_on_10x_virtual_delay() -> None:
+    """실패 주입 + 성능 단언: `acquire`의 실제 sleep을 10× 가상 지연으로
+    주입하면 측정 wall_ms가 예산을 초과해야 한다(gate-red + perf_assert).
+
+    virtual_delayed_async를 `_FakeClock.sleep` 대신 주입해 실제 대기 없이
+    측정만 느리게 만든다(실제 sleep 금지 규칙 — task-423).
+
+    성능 예산: rate=10/s에서 0.5초 대기 → 0.5ms CPU(로컬 실측 평균 0.12ms,
+    30배 여유로 5.0ms 설정, docs/ADR-2026-09-09-C Decision 1)."""
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+    )
+
+    bucket, clock, sleep_calls = _make_bucket(rate=10, burst=5)
+
+    # _FakeClock.sleep은 fake_sleep 함수 — 이를 virtual_delayed_async로 감싸
+    # 실제 sleep 없이 wall reading만 10× 느리게 만든다.
+    # 0.5초 대기 → 5.0초 가상 지연 (실제 sleep 없음)
+    _DELAY_S = 5.0  # 10× of 0.5s
+
+    reset_virtual_totals()
+
+    # fake_sleep을 virtual_delayed_async로 교체 — bucket의 _sleep을 직접 변경
+    orig_sleep = bucket._sleep
+
+    async def _virtual_sleep(seconds: float) -> None:
+        # 가상 지연: 실제 sleep 대신 virtual ledger에 추가
+        from tests.support.perf_inject import _add_virtual
+
+        _add_virtual(0.0, _DELAY_S)
+        # clock도 전진 (원본 동작 유지)
+        clock.now += seconds
+
+    bucket._sleep = _virtual_sleep
+
+    try:
+        await bucket.acquire(5, timeout=5.0)  # 소진
+
+        perf_budget = PerfBudget()
+
+        # 가상 지연이 주입된 acquire 측정 — 실제 sleep 없이 wall_ms만 증가
+        sample = await perf_budget.sample_async(
+            lambda: bucket.acquire(5, timeout=5.0),
+        )
+        # 가상 지연 5.0초가 wall_ms에 누적됨 → 5000ms > 예산 5.0ms
+        assert sample.wall_ms > 1000.0, (
+            f"10x virtual delay ({_DELAY_S}s) should produce wall_ms > 1000ms, "
+            f"got {sample.wall_ms:.1f}ms"
+        )
+    finally:
+        bucket._sleep = orig_sleep
+
+
+@pytest.mark.perf
+async def test_acquire_waits_for_refill_latency_budget() -> None:
+    """성능 단언: rate=10/s, burst=5에서 리필 대기 0.5초 구간의 CPU 소모는
+    5.0ms 미만(로컬 실측 0.12ms, 30배 여유).
+
+    _FakeClock 기반이므로 실제 sleep 없이 결정론적으로 측정한다.
+    성능 예산: docs/ADR-2026-09-09-C Decision 1 — ref: local实测 0.12ms,
+    30배 여유 = 5.0ms."""
+    from tests.support.perf_budget import PerfBudget
+
+    bucket, clock, sleep_calls = _make_bucket(rate=10, burst=5)
+    await bucket.acquire(5, timeout=5.0)  # 소진
+
+    perf_budget = PerfBudget()
+
+    # _FakeClock 기반: 실제 sleep 없이 clock만 전진
+    sample = await perf_budget.sample_async(
+        lambda: bucket.acquire(5, timeout=5.0),
+    )
+    assert sample.cpu_ms < 5.0, f"refill acquire CPU={sample.cpu_ms:.3f}ms exceeds budget 5.0ms"
+
+
 async def test_acquire_raises_rate_limited_when_wait_exceeds_timeout() -> None:
     """초과 시 ExchangeError(RATE_LIMITED, retryable=True) — negative test."""
     bucket, _clock, sleep_calls = _make_bucket(rate=1, burst=1)
