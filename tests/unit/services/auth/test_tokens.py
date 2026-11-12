@@ -7,6 +7,7 @@ DoD("단위: kid 회전·alg 고정").
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -24,6 +25,8 @@ from src.services.auth.tokens import (
     TokenVerifier,
     hash_refresh_token,
 )
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 KEY_V1 = "11" * 32
 KEY_V2 = "22" * 32
@@ -59,6 +62,47 @@ def test_issue_access_roundtrip_returns_matching_claims() -> None:
     assert claims.auth_level == "PASSWORD"
     assert claims.schema_version == "v1"
     assert claims.exp - claims.iat == 15 * 60
+
+
+# cpu_ms per batch of 100 issue+verify roundtrips. Local best-of-10 reading is ~0-20 ms
+# (HS256 sign+verify, ~0.2 ms/call; Windows process_time ticks at 15.6 ms);
+# budget has >=30x headroom (ADR-2026-09-09-C Decision 1).
+_ROUNDTRIP_BUDGET_MS = 1000.0
+
+
+def _roundtrip_fn() -> Callable[[], object]:
+    issuer, verifier = _issuer("v1"), _verifier()
+    uid, tid, sid = uuid4(), uuid4(), uuid4()
+
+    def _run() -> object:
+        token = issuer.issue_access(
+            user_id=uid, tenant_id=tid, session_id=sid, auth_level="PASSWORD"
+        )
+        return verifier.verify(token)
+
+    return _run
+
+
+def _roundtrip_cpu_ms(perf_budget: PerfBudget, fn: Callable[[], object]) -> float:
+    # best_of (min of n) + batch=100 so one quantized Windows tick cannot flip the gate.
+    return perf_budget.best_of(fn, n=10, warmup=1, batch=100).cpu_ms
+
+
+@pytest.mark.perf
+def test_issue_access_roundtrip_perf_budget(perf_budget: PerfBudget) -> None:
+    cpu_ms = _roundtrip_cpu_ms(perf_budget, _roundtrip_fn())
+    assert cpu_ms < _ROUNDTRIP_BUDGET_MS, f"budget exceeded: {cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_issue_access_roundtrip_goes_red_with_10x_delay_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red repro: a virtual 10x-budget delay makes the same assertion fail."""
+    slowed = virtual_delayed_sync(_roundtrip_fn(), _ROUNDTRIP_BUDGET_MS * 10 / 1000.0)
+    cpu_ms = _roundtrip_cpu_ms(perf_budget, slowed)
+    with pytest.raises(AssertionError):
+        assert cpu_ms < _ROUNDTRIP_BUDGET_MS, f"budget exceeded: {cpu_ms} ms"
 
 
 def test_verify_uses_kid_from_header_after_active_kid_rotates() -> None:
