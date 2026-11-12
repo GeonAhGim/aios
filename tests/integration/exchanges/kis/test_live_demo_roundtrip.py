@@ -153,6 +153,171 @@ async def test_domestic_stock_place_get_cancel_roundtrip(demo_adapter: KISAdapte
     assert cancelled is True
 
 
+# ── D2 보강: negative 3, failure_injection 1, gate_red 1, perf 1 ──────────────
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_negative_invalid_get_order_id(
+    demo_adapter: KISAdapter,
+) -> None:
+    """negative — 유효하지 않은 exchange_order_id로 get_order()를 호출하면
+    KIS 서버가 에러를 반환한다(EmptyData 또는 RT_CD != 0)."""
+    with pytest.raises((ValueError, KeyError, AssertionError)):
+        await demo_adapter.get_order("INVALID-NONEXISTENT-ID")
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_negative_invalid_cancel_order_id(
+    demo_adapter: KISAdapter,
+) -> None:
+    """negative — 유효하지 않은 exchange_order_id로 cancel_order()를 호출하면
+    KIS 서버가 에러를 반환한다."""
+    result = await demo_adapter.cancel_order("INVALID-NONEXISTENT-ID")
+    # KIS는 존재하지 않는 주문 취소에 대해 False 또는 에러를 반환한다.
+    # False 반환도 "fail-closed"이므로 성공 단언이 아님.
+    assert result is not True
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_negative_zero_quantity_place(
+    demo_adapter: KISAdapter,
+) -> None:
+    """negative — 수량 0으로 주문하면 KIS 서버가 거부해야 한다."""
+    order = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity-zero-qty",
+    )
+    # 수량을 0으로 수정 — KIS는 최소 1주 요구
+    order.quantity = Decimal("0")
+    with pytest.raises((ValueError, KeyError, AssertionError)):
+        await demo_adapter.place_order(order)
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_failure_injection_place_returns_error(
+    demo_adapter: KISAdapter,
+) -> None:
+    """실패 주입 — `_request`를 모의 응답(서버 에러 코드)으로 덮어쓰면
+    place_order()가 예외를 던지거나 실패해야 한다."""
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    async def fake_request(*args, **kwargs):
+        # KIS 서버 에러 응답 시뮬레이션 — RT_CD != 0
+        return {"rt_cd": "1", "err_msg": "INJECTED_ERROR_FOR_TEST"}
+
+    orig_request = demo_adapter._request
+    demo_adapter._request = fake_request
+    try:
+        order = _order(
+            symbol=_KR_EQUITY_SYMBOL,
+            price=_KR_EQUITY_SAFE_PRICE,
+            currency=Currency.KRW,
+            asset_class=AssetClass.KR_EQUITY,
+            tag="kr-equity-failure-inject",
+        )
+        with pytest.raises((ValueError, KeyError, AssertionError)):
+            await demo_adapter.place_order(order)
+    finally:
+        demo_adapter._request = orig_request
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_perf_within_budget(
+    demo_adapter: KISAdapter,
+    perf_budget,
+) -> None:
+    """성능 단언(D2) — domestic_stock place/get/cancel 왕복 3TR의 CPU 지연이
+    예산 이내여야 한다.
+
+    실측(2026-11-12, local host, best-of-5 min): cpu≈0.350s (network-bound).
+    ADR-2026-09-09-C Decision 1 테이블에 없는 신규 경로이므로
+    실측의 30배 여유로 예산 신설: 0.350s x 30 = 10.5s -> 10.0s로
+    안전 마진 확보. 네트워크 왕복이므로 CPU보다 wall이 더 크지만
+    perf_budget은 CPU 기준 측정.
+    """
+
+    sample = await perf_budget.best_of_async(
+        lambda: _domestic_roundtrip(demo_adapter),
+        n=5,
+        warmup=1,
+    )
+
+    assert sample.cpu_s < 10.0, (
+        f"roundtrip CPU {sample.cpu_s:.3f}s exceeded 10.0s budget "
+        f"(measured best-of-5 min: ~0.350s, budget=30x)"
+    )
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_gate_red_catches_10x_delay(
+    demo_adapter: KISAdapter,
+    monkeypatch,
+    perf_budget,
+) -> None:
+    """gate-red 재현(D2) — `_request`에 가상 지연 10x(10s) 주입하면
+    성능 단언이 실제로 적색으로 떨어진다.
+
+    virtual_delayed_async를 사용해 실제 sleep 없이 ledger만 늦추므로
+    테스트는 즉시 종료된다(task-21952)."""
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+
+    _BUDGET_S = 10.0
+    _DELAY_S = _BUDGET_S * 10  # 100s — 예산의 10배
+
+    orig_request = demo_adapter._request
+    demo_adapter._request = virtual_delayed_async(orig_request, _DELAY_S)
+
+    try:
+
+        async def _roundtrip():
+            order = _order(
+                symbol=_KR_EQUITY_SYMBOL,
+                price=_KR_EQUITY_SAFE_PRICE,
+                currency=Currency.KRW,
+                asset_class=AssetClass.KR_EQUITY,
+                tag="kr-equity-gate-red",
+            )
+            placed = await demo_adapter.place_order(order)
+            assert placed.exchange_order_id
+            await demo_adapter.get_order(placed.exchange_order_id)
+            return await demo_adapter.cancel_order(placed.exchange_order_id)
+
+        sample = await perf_budget.best_of_async(_roundtrip, n=3, warmup=0)
+
+        # 이 단언은 적색이어야 한다 — 지연이 예산을 초과하므로
+        assert sample.cpu_s < _BUDGET_S, (
+            f"gate-red 실패: 지연 주입에도 {sample.cpu_s:.3f}s로预算 이내 — "
+            "virtual_delayed_async가 작동하지 않음"
+        )
+    finally:
+        demo_adapter._request = orig_request
+
+
+async def _domestic_roundtrip(adapter: KISAdapter) -> bool:
+    """place/get/cancel 왕복 3TR — perf_budget.best_of_async에 넘길 콜백."""
+    order = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity-perf",
+    )
+    placed = await adapter.place_order(order)
+    assert placed.exchange_order_id
+    await adapter.get_order(placed.exchange_order_id)
+    return await adapter.cancel_order(placed.exchange_order_id)
+
+
 @pytest.mark.live_demo
 async def test_overseas_stock_place_cancel_balance_roundtrip(demo_adapter: KISAdapter) -> None:
     """overseas_stock 대표 3TR: place(TTTT1002U) / cancel(TTTT1004U) /
