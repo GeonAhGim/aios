@@ -31,10 +31,15 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from src.exchanges.kis.websocket_mixin import (
     _OVERSEAS_PRICE_FIELDS,
     _PRICE_FIELDS,
+    parse_realtime_overseas_price_message,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # ---------------------------------------------------------------------------
 # 1) 수치 성능/지연 단언(정규화된 배율 임계)
@@ -128,6 +133,74 @@ def test_parse_overseas_price_throughput_bounded_vs_domestic_baseline() -> None:
         f"국내 파서 대비 {ratio:.2f}배로 회귀했습니다(예산 {budget_ratio}배) — 레코드 분할/"
         "Decimal 변환 경로에 의도치 않은 무거운 연산이 섞였을 가능성."
     )
+
+
+# ---------------------------------------------------------------------------
+# 1b) 추가 음성(negative) 테스트
+# ---------------------------------------------------------------------------
+
+
+def test_parse_overseas_price_empty_frame_returns_empty() -> None:
+    """음성: 빈 문자열 프레임은 fail-closed로 빈 리스트."""
+    assert parse_realtime_overseas_price_message("") == []
+
+
+def test_parse_overseas_price_malformed_frame_returns_empty() -> None:
+    """음성: 파이프 분할이 안 되는 깨진 프레임은 빈 리스트."""
+    assert parse_realtime_overseas_price_message("0|HDFSCNT0") == []
+    assert parse_realtime_overseas_price_message("not-a-frame-at-all") == []
+
+
+def test_parse_overseas_price_other_stream_tr_id_returns_empty() -> None:
+    """음성: 호가(HDFSASP0)·국내(H0STCNT0) tr_id 프레임은 해외 체결가로 파싱되지 않는다."""
+    ask = _overseas_price_frame(1).replace("HDFSCNT0", "HDFSASP0", 1)
+    domestic = _domestic_price_frame(1)
+    assert parse_realtime_overseas_price_message(ask) == []
+    assert parse_realtime_overseas_price_message(domestic) == []
+
+
+# ---------------------------------------------------------------------------
+# 1c) 성능 단언(perf_budget.best_of) + 가상 지연 10배 주입 적색 재현
+# ---------------------------------------------------------------------------
+
+# 로컬 실측(2026-11-12, Windows, 단일 레코드 호출 best-of): ~0.0036ms/호출.
+# 예산 1.0ms는 실측의 ~280배(>=30배 여유 요건 충족) — 공유 CI 편차 흡수용.
+_SINGLE_RECORD_BUDGET_MS = 1.0
+_PERF_BATCH = 200
+
+
+@pytest.mark.perf
+def test_parse_overseas_price_single_record_under_budget(perf_budget: PerfBudget) -> None:
+    """단일 레코드 해외 체결가 파싱 호출당 CPU 시간이 예산(1.0ms) 안에 든다."""
+    frame = _overseas_price_frame(1)
+    perf_budget.assert_within(
+        lambda: parse_realtime_overseas_price_message(frame),
+        budget_ms=_SINGLE_RECORD_BUDGET_MS,
+        n=5,
+        batch=_PERF_BATCH,
+        label="overseas single-record parse",
+    )
+
+
+@pytest.mark.perf
+def test_single_record_budget_turns_red_under_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현: 예산의 10배(10ms) 가상 지연을 주입하면 같은 예산 단언이
+    AssertionError로 적색이 된다(실제 sleep 없음)."""
+    reset_virtual_totals()
+    frame = _overseas_price_frame(1)
+    delayed = virtual_delayed_sync(
+        parse_realtime_overseas_price_message, _SINGLE_RECORD_BUDGET_MS * 10 / 1000
+    )
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed(frame),
+            budget_ms=_SINGLE_RECORD_BUDGET_MS,
+            n=5,
+            batch=_PERF_BATCH,
+        )
+    reset_virtual_totals()
 
 
 # ---------------------------------------------------------------------------
