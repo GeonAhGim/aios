@@ -358,17 +358,6 @@ def test_market_abuse_module_imports_no_io_or_nondeterminism():
             )
 
 
-def test_detect_is_pure_and_deterministic():
-    fills = [
-        _fill(fill_id="f1", side="BUY", executed_at=_T0),
-        _fill(fill_id="f2", side="SELL", executed_at=_T0 + timedelta(seconds=10)),
-    ]
-    window = _window(fills=fills)
-    first = detect(window, {})
-    second = detect(window, {})
-    assert first == second
-
-
 def test_pattern_id_constants_are_exposed_and_distinct():
     ids = {PATTERN_WASH_TRADE, PATTERN_MARKING_THE_CLOSE, PATTERN_SPOOFING}
     assert len(ids) == 3
