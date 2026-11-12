@@ -1,5 +1,7 @@
 """Unit tests for `backtest/domain/param_stability.py` -- task-2386 L33 DoD (e)."""
 
+from __future__ import annotations
+
 import time
 from decimal import Decimal
 from itertools import product
@@ -12,6 +14,8 @@ from src.foundation.backtest.domain.param_stability import (
     ParamStabilityError,
     stability_score,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 AXES = {"p": [5, 10, 15, 20, 25]}
 
@@ -112,6 +116,7 @@ def _p95(samples: list[float]) -> float:
 _STABILITY_SCORE_BUDGET_MS = 25.0
 
 
+@pytest.mark.perf
 def test_stability_score_p95_latency_within_self_declared_budget() -> None:
     """수치 성능 단언: `stability_score`는 그리드 서치 후 최적점 하나를 고를 때
     호출되는 경로다(ADR-2026-09-09-C 예산표에 전용 항목은 없다 -- 512점 그리드
@@ -126,22 +131,50 @@ def test_stability_score_p95_latency_within_self_declared_budget() -> None:
     assert p95_ms < _STABILITY_SCORE_BUDGET_MS
 
 
+@pytest.mark.perf
+def test_stability_score_best_of_latency_within_budget() -> None:
+    """성능 단언 (D2 보강): `PerfBudget.best_of`로 `stability_score`의 CPU 시간을
+    측정한다. best_of는 여러 번 중 최소를 선택해 노이즈를 걷어낸다.
+    8x8x8=512점 그리드 기준 로컬 실측 best_of(5) cpu_ms 대비 25ms 예산."""
+    axes = {"a": list(range(8)), "b": list(range(8)), "c": list(range(8))}
+    grid = ParamGrid(axes=axes)
+    points = list(product(*axes.values()))
+    metric_by_point = {point: Decimal(str(1.0 - 0.01 * sum(point))) for point in points}
+
+    def _call() -> object:
+        return stability_score(grid, metric_by_point)
+
+    pb = PerfBudget()
+    sample = pb.best_of(_call, n=5, warmup=1)
+    budget_ms = 25.0
+    print(
+        f"[L33 param_stability] stability_score best_of(5) cpu={sample.cpu_ms:.3f}ms "
+        f"budget<{budget_ms:.0f}ms"
+    )
+    assert sample.cpu_ms < budget_ms
+
+
+@pytest.mark.perf
 def test_stability_score_budget_gate_actually_fails_past_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현: 위 단언식이, `ParamGrid.neighbors` 경로 한 곳이 예산을
-    실제로 넘기도록 지연을 주입했을 때 진짜로 `AssertionError`를 내는지(= CI가
-    실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
-    통과하는 tautology인지 아무도 검증하지 못한다."""
+    """게이트 적색 재현: `virtual_delayed_sync`로 `ParamGrid.neighbors`에
+    가상 지연(예산 10배)을 주입하면 `PerfBudget` 측정치가 예산을 넘어
+    `AssertionError`를 낸다. 실제 sleep/busy-wait 없이 virtual ledger만
+    누수하므로 테스트 실행 시간은 증가하지 않는다."""
+    reset_virtual_totals()
+    injected_delay_s = _STABILITY_SCORE_BUDGET_MS * 10 / 1000.0  # 10x 가상 지연
+
     original_neighbors = ParamGrid.neighbors
+    delayed_neighbors = virtual_delayed_sync(original_neighbors, injected_delay_s)
+    monkeypatch.setattr(ParamGrid, "neighbors", delayed_neighbors)
 
-    def _stalled_neighbors(self: ParamGrid, point: tuple[int, ...]) -> list[tuple[int, ...]]:
-        time.sleep(_STABILITY_SCORE_BUDGET_MS / 1000.0)
-        return original_neighbors(self, point)
+    axes = {"a": list(range(8)), "b": list(range(8)), "c": list(range(8))}
+    grid = ParamGrid(axes=axes)
+    points = list(product(*axes.values()))
+    metric_by_point = {point: Decimal(str(1.0 - 0.01 * sum(point))) for point in points}
 
-    monkeypatch.setattr(ParamGrid, "neighbors", _stalled_neighbors)
-
-    samples = _stability_score_latencies_ms(iterations=3)
-    p95_ms = _p95(samples)
+    pb = PerfBudget()
+    sample = pb.best_of(lambda: stability_score(grid, metric_by_point), n=3, warmup=1)
     with pytest.raises(AssertionError):
-        assert p95_ms < _STABILITY_SCORE_BUDGET_MS
+        assert sample.cpu_ms < _STABILITY_SCORE_BUDGET_MS
