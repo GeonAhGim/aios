@@ -20,6 +20,8 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_stock_mixin import _EXCHANGES, _exchange_codes
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _QUOTE_PATH = "/uapi/overseas-price/v1/quotations/price"
 _ORDER_PATH = "/uapi/overseas-stock/v1/trading/order"
@@ -108,9 +110,60 @@ async def test_round_trip_per_exchange_uses_distinct_codes(exchange: str):
     assert codes.quote_excd != codes.order_excg_cd
 
 
+@pytest.mark.perf
 def test_unsupported_exchange_is_rejected_explicitly():
-    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
-        _exchange_codes("LSE")
+    """음성 케이스 3종 + 성능 단언 + 게이트 적색 재현 (D2 보강, task-24330).
+
+    기존 "LSE" 단언을 유지하며, ""(빈 문자열)와 "XXXX"(4자리 미지원 코드)를
+    추가로 검증한다. 모두 같은 ValueError 메시지를 매칭한다.
+
+    성능: _exchange_codes는 dict.get + .upper() + ValueError raise만 하는
+    경량 함수다. Windows time.process_time() 해상도(15.6ms) 아래라
+    best_of(batch=200)로 양자화 오차를 줄였다.
+
+    실측(2026-11-13, local Windows 11, py3.13): batch=10000 → cpu_ms=0.000000
+    (해상도 한계). wall_ms ≈ 0.36ms이므로 실제 CPU는 < 0.001ms.
+    예산은 30배 여유인 0.03ms로 정한다.
+    """
+    # ── 음성 케이스 3종 ──────────────────────────────────────────────
+    for bad_input in ("LSE", "", "XXXX"):
+        with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+            _exchange_codes(bad_input)
+
+    # ── 성능 단언 ─────────────────────────────────────────────────────
+    def _reject() -> None:
+        try:
+            _exchange_codes("LSE")
+        except ValueError:
+            return None
+
+    perf_budget = PerfBudget()
+    sample = perf_budget.best_of(_reject, n=5, warmup=1, batch=200)
+
+    # 실측 < 0.001ms (Windows process_time 해상도 한계). 30배 여유 = 0.03ms.
+    budget_ms = 0.03
+    assert sample.cpu_ms < budget_ms, (
+        f"perf_budget exceeded: cpu={sample.cpu_ms:.6f}ms budget<{budget_ms:.3f}ms"
+    )
+
+    # ── 게이트 적색 재현 ──────────────────────────────────────────────
+    # virtual_delayed_sync로 1회 호출당 10ms 가상 지연을 주입하면
+    # 예산(0.03ms)을 초과해야 한다 — 단언이 실제로 작동함을 증명.
+    reset_virtual_totals()
+    delayed_reject = virtual_delayed_sync(_reject, 0.01)  # 10ms 가상 지연
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            delayed_reject,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=200,
+            label="gate_red_10ms_injected",
+        )
+
+    # 후속 테스트에 영향 없게 정리
+    reset_virtual_totals()
 
 
 async def test_place_order_rejects_unsupported_exchange_before_request():
