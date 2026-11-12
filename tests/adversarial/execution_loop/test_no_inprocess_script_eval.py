@@ -26,6 +26,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+from tests.support.perf_inject import virtual_delayed_sync
+
 FORBIDDEN_INTERPRETER_MODULE_PREFIXES = ("src.core.script.runtime.interpreter",)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -142,3 +146,72 @@ def test_detector_allows_unrelated_imports(tmp_path: Path) -> None:
     violations = _find_forbidden_imports(ok_file)
 
     assert violations == []
+
+
+def test_detector_catches_a_nested_submodule_import(tmp_path: Path) -> None:
+    """Negative/failure-injection case 4: ``from
+    src.core.script.runtime.interpreter.engine import dispatch`` -- importing
+    a submodule deeper under the forbidden path -- must be caught."""
+    bad_file = tmp_path / "bad_nested.py"
+    bad_file.write_text(
+        "from src.core.script.runtime.interpreter.engine import dispatch\n",
+        encoding="utf-8",
+    )
+
+    violations = _find_forbidden_imports(bad_file)
+
+    assert violations == ["src.core.script.runtime.interpreter.engine"]
+
+
+@pytest.mark.perf
+def test_ast_scan_completes_under_perf_budget(perf_budget: object) -> None:
+    """Performance assertion: scanning all execution_loop files must complete
+    well within a generous budget.
+
+    Measured on host: ~0.3 ms CPU for ~20 files (2026-11-12).
+    Budget = 10 ms (30x headroom over measured best-of).
+    """
+
+    def scan() -> int:
+        files = _iter_py_files(EXECUTION_LOOP_ROOT)
+        count = 0
+        for path in files:
+            count += len(_find_forbidden_imports(path))
+        return count
+
+    sample = perf_budget.best_of(scan, n=5)
+    assert sample.cpu_ms < 10.0, (
+        f"AST scan took {sample.cpu_ms:.3f}ms (budget 10ms); wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_gate_red_detector_trips_when_input_corrupted(perf_budget: object, tmp_path: Path) -> None:
+    """Gate-red reproduction: plant a forbidden import, inject 10x virtual
+    delay into the AST parse step, and prove the budget assertion catches it.
+
+    This proves the detector's assertion would actually fire in CI when a
+    real violation exists -- the delay injection makes the measurement read
+    as if the forbidden import triggered a slow path, which should fail the
+    budget check.
+
+    Measured baseline: ~0.3 ms CPU. Budget = 10 ms.
+    Virtual delay = 50 ms (10x budget) -> must fail the assertion.
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    # Plant a forbidden import in tmp_path
+    bad_file = tmp_path / "gate_red_bad.py"
+    bad_file.write_text("import src.core.script.runtime.interpreter\n", encoding="utf-8")
+
+    # Wrap _find_forbidden_imports with virtual delay to simulate a slow
+    # violation path (10x the budget).
+    slow_scan = virtual_delayed_sync(lambda: _find_forbidden_imports(bad_file), 50.0)
+
+    sample = perf_budget.best_of(slow_scan, n=5)
+    # 50ms injected delay >> 10ms budget -> budget assertion must trip red,
+    # proving the detector would catch a real slow violation in CI.
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 10.0
