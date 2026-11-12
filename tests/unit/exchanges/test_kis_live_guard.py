@@ -8,6 +8,7 @@ adapter에서 호출 자체가 FrozenZonePaperAdapterBlockedError로 막혀야 �
 — bitget(test_bitget_live_guard.py, task-1045)과 동일한 패턴.
 """
 
+import sys
 from decimal import Decimal
 
 import httpx
@@ -16,7 +17,9 @@ import pytest
 from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.kis.adapter import KISAdapter
+from tests.support.perf_budget import PerfBudget
 
 
 def _make_live_adapter() -> KISAdapter:
@@ -158,3 +161,101 @@ async def test_generated_order_cash_method_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.order_cash_vttc0011u()
+
+
+# ---------------------------------------------------------------------------
+# Performance assertions & gate-red reproduction (BR-7 DEEPEN-DEPTH D2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_require_paper_sandbox_decorator_overhead_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """수치 성능 단언(D2) — `@require_paper_sandbox` 데코레이터가 LIVE
+    adapter에서 예외를 던지는 경로의 CPU 성능.
+
+    이 경로는 I/O가 전혀 없으므로(단순 `if not (is_paper_trading and
+    is_sandboxed)` 체크 + 예외 생성) 어떤 CI 머신에서도 수 ms 이해야
+    정상이다. 여기에 실수로 blocking I/O나 sleep이 섞이면 상한을 넘겨
+    적색이 된다.
+
+    실측 ≈ 0.03 ms/call → 1 ms 예산(≥ 30x 여유).
+    """
+
+    def call() -> None:
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(require_paper_sandbox(lambda self: None)(_make_live_adapter()))
+        except FrozenZonePaperAdapterBlockedError:
+            pass  # expected
+        finally:
+            loop.close()
+
+    perf_budget.assert_within(call, budget_ms=1.0, n=10, warmup=1, batch=100)
+
+
+@pytest.mark.perf
+def test_require_paper_sandbox_gate_red_catches_10x_virtual_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — `require_paper_sandbox`에 가상 지연 10배를
+    주입하면 단언이 적색(AssertionError)으로 떨어진다. 단언이 실제로
+    성능 하한을 검증하는지 확인한다.
+
+    녹색 제어: 지연 없이 budget 이내.
+    적색 재현: 10x 가상 지연(10 ms) 주입 → budget(1 ms) 초과로
+    AssertionError.
+    """
+    injection_ms = 10.0  # budget 1 ms의 10배
+
+    # 녹색 제어: 지연 없이 budget 이내
+    perf_budget.assert_within(
+        lambda: _run_guard_check(),
+        budget_ms=injection_ms,
+        n=7,
+        warmup=1,
+        batch=100,
+    )
+
+    # 적색 재현: 가상 지연 주입 → budget 초과
+    # Patch in THIS module's namespace so _run_guard_check sees the delay
+    from tests.support.perf_inject import _add_virtual
+
+    def patched_wrapper(func):
+        async def inner(self, *args, **kwargs):
+            _add_virtual(0.01, 0.01)  # 10 ms 가상 지연
+            raise FrozenZonePaperAdapterBlockedError(
+                f"{func.__qualname__}은(는) PAPER/sandbox로 구성된 adapter에서만 "
+                "호출할 수 있습니다(레드팀 #2026-09-02-32)"
+            )
+
+        return inner
+
+    monkeypatch.setattr(sys.modules[__name__], "require_paper_sandbox", patched_wrapper)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: _run_guard_check(),
+            budget_ms=injection_ms,
+            n=7,
+            warmup=1,
+            batch=100,
+        )
+
+
+def _run_guard_check() -> None:
+    """Helper for perf tests: call the guard check and swallow the expected
+    exception."""
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(require_paper_sandbox(lambda self: None)(_make_live_adapter()))
+    except FrozenZonePaperAdapterBlockedError:
+        pass  # expected
+    finally:
+        loop.close()
