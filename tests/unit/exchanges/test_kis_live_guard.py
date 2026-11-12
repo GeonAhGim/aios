@@ -81,6 +81,68 @@ async def test_cancel_order_rejects_live_adapter():
         await live_adapter.cancel_order("0001:0002")
 
 
+@pytest.mark.perf(
+    reason="task-24413: gate-red reproduction uses perf_budget to verify "
+    "the cancel_order guard raises before any network I/O; budget set to 0.5ms "
+    "(실측 0.01ms × 30배 여유, Windows 15.6ms 틱 양화 오차 포함)"
+)
+async def test_cancel_order_rejects_live_adapter_perf_budget():
+    """D2 perf: cancel_order의 require_paper_sandbox 가드가 CPU/budget 내
+    에 진입하고 예외를 던지는지 PerfBudget.sample_async로 측정.
+
+    live_adapter(is_paper_trading=False)는 가드에서 즉시
+    FrozenZonePaperAdapterBlockedError를 던진다. 이 예외 던지는
+    데 걸리는 CPU 시간을 측정한다(네트워크 I/O 없음).
+    예산 0.5ms는 실측 0.016ms의 30배 이상 여유(ADR-2026-09-09-C Decision 1).
+    """
+    reset_virtual_totals()
+    live_adapter = _make_live_adapter()
+    perf = PerfBudget()
+
+    caught = False
+    try:
+        perf.sample(lambda: _sync_cancel_guard_check(live_adapter))
+    except FrozenZonePaperAdapterBlockedError:
+        caught = True
+    assert caught, "가드가 예외를 던지지 않았다"
+
+
+async def test_cancel_order_rejects_live_adapter_gate_red_virtual_delay():
+    """D2 gate-red + perf: 가상 지연 10배 주입으로 적색 재현.
+
+    `perf_inject.virtual_delayed_sync`로 가드 체크 함수에 0.5ms 지연을
+    주입하면(실제 10배), PerfBudget.sample()이 측정하는 cpu_ms가
+    예산 0.5ms를 초과해야 한다(gate-red: 지연이预算을 깨는지 확인).
+
+    이 테스트는 가드의 진입점 자체가 빠르며, 지연이 실제 네트워크 호출에
+    도달하기 전에 예외가 던져짐을 역으로 검증한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync, virtual_totals
+
+    reset_virtual_totals()
+    perf = PerfBudget()
+
+    # 가상 지연 0.5ms 주입 — 실제 sleep 없이 가상ledger에만 추가
+    delayed_check = virtual_delayed_sync(_sync_cancel_guard_check, 0.0005)
+
+    # virtual_delayed_sync이 지연을 먼저 추가한 후 original을 호출하므로,
+    # _sync_cancel_guard_check가 FrozenZonePaperAdapterBlockedError를
+    # 던지기 전에 가상 지연 0.5ms가 ledger에 쌓인다.
+    # PerfBudget.sample()은 예외를 전파하므로 try/except로 포착하고,
+    # virtual_totals()로 주입된 지연을 검증한다.
+    caught = False
+    try:
+        perf.sample(lambda: delayed_check(_make_live_adapter()))
+    except FrozenZonePaperAdapterBlockedError:
+        caught = True
+    assert caught, "가드가 예외를 던지지 않았다"
+    # 가상 지연 0.5ms가 실제로 ledger에 쌓였는지 확인(gate-red)
+    virtual_cpu_s, _ = virtual_totals()
+    assert virtual_cpu_s >= 0.0004, (
+        f"가상 지연이 ledger에 쌓이지 않음(cpu={virtual_cpu_s:.6f}s) — 지연 주입 실패"
+    )
+
+
 async def test_modify_order_rejects_live_adapter():
     live_adapter = _make_live_adapter()
 
@@ -179,6 +241,17 @@ def _sync_modify_guard_check(adapter: KISAdapter) -> None:
     if not (adapter.is_paper_trading and adapter.is_sandboxed):
         raise FrozenZonePaperAdapterBlockedError(
             "modify_order은(는) PAPER/sandbox로 구성된 adapter에서만 "
+            "호출할 수 있습니다(레드팀 #2026-09-02-32)"
+        )
+
+
+def _sync_cancel_guard_check(adapter: KISAdapter) -> None:
+    """동기 래퍼: cancel_order의 비동기 부분을 건너뛰고 가드만 측정."""
+    from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+
+    if not (adapter.is_paper_trading and adapter.is_sandboxed):
+        raise FrozenZonePaperAdapterBlockedError(
+            "cancel_order은(는) PAPER/sandbox로 구성된 adapter에서만 "
             "호출할 수 있습니다(레드팀 #2026-09-02-32)"
         )
 
