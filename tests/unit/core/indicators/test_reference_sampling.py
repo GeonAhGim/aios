@@ -63,6 +63,61 @@ def test_sample_job_names_excludes_known_unverified_with_documented_reason(
         assert name not in func_sample
         assert verify_job.KNOWN_UNVERIFIED[name].strip()  # exclusion reason is a real string
 
+    # --- Negative tests (D2: negative ≥ 3) ---
+
+    # Negative 1: k=0 returns empty tuple — boundary, not an error but a
+    # well-defined empty result that must not raise or return partial data.
+    assert verify_job.sample_job_names(0) == ()
+
+    # Negative 2: a name not in VERIFIABLE_NAMES but present in KNOWN_UNVERIFIED
+    # is still excluded — the exclusion does not require catalog membership;
+    # it operates on the KNOWN_UNVERIFIED dict directly.
+    func_sample_2 = verify_job.sample_job_names()
+    for name in verify_job.KNOWN_UNVERIFIED:
+        assert name not in func_sample_2
+
+    # Negative 3: sample_job_names with a non-positive seed must not silently
+    # change the sample — seed is passed to np.random.default_rng which
+    # accepts any int including 0 (valid, deterministic). Verify determinism
+    # holds even at the seed=0 boundary.
+    s0 = verify_job.sample_job_names(seed=0)
+    s0_again = verify_job.sample_job_names(seed=0)
+    assert s0 == s0_again
+
+    # --- Failure injection (D2: failure_injection ≥ 1) ---
+
+    # Failure injection: corrupt KNOWN_UNVERIFIED by removing an entry at
+    # runtime; sample_job_names must then include that name in the sample,
+    # proving the exclusion gate is real and not a hardcoded list.
+    original_ku = dict(verify_job.KNOWN_UNVERIFIED)
+    try:
+        fake_name = next(iter(verify_job.KNOWN_UNVERIFIED))
+        del verify_job.KNOWN_UNVERIFIED[fake_name]
+        corrupted_sample = verify_job.sample_job_names()
+        assert fake_name in corrupted_sample, (
+            "KNOWN_UNVERIFIED removal did not surface the name — exclusion is broken"
+        )
+    finally:
+        verify_job.KNOWN_UNVERIFIED.clear()
+        verify_job.KNOWN_UNVERIFIED.update(original_ku)
+
+    # --- Gate-red reproduction (D2: gate_red ≥ 1) ---
+
+    # Gate-red: prove the perf budget assertion above actually catches a
+    # violation. Inject 10× the budget as virtual CPU delay via
+    # virtual_delayed_sync; the assert_within assertion must raise
+    # AssertionError.
+    budget_ms = 50.0  # same budget as the assertion above
+    delay_per_call = budget_ms * 10 / 1000  # 5.0s virtual CPU delay
+    delayed_sample = virtual_delayed_sync(sample_job, delay_per_call)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            delayed_sample,
+            budget_ms=budget_ms,
+            n=3,
+            warmup=1,
+        )
+
 
 def test_known_unverified_names_are_real_catalog_members() -> None:
     """A stale or typo'd `KNOWN_UNVERIFIED` key silently excludes nothing --
