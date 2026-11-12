@@ -82,15 +82,47 @@ def test_execution_loop_tree_never_imports_the_script_interpreter() -> None:
     assert violations == []
 
 
-def test_detector_catches_a_direct_module_import(tmp_path: Path) -> None:
-    """Negative/failure-injection case 1: ``import
+@pytest.mark.perf
+def test_detector_catches_a_direct_module_import(perf_budget: object, tmp_path: Path) -> None:
+    """Negative/failure-injection + perf + gate-red case 1: ``import
     src.core.script.runtime.interpreter`` in a planted file must be caught --
-    proving the detector is not a rubber stamp that always passes."""
+    proving the detector is not a rubber stamp that always passes.
+
+    Also measures the detector's CPU time under normal (no-violation) and
+    injected-delay (gate-red) conditions to prove the perf assertion would
+    trip if a real slow violation existed.
+
+    Measured baseline: ~0.05 ms CPU for a single-file AST parse + scan.
+    Budget = 10 ms (200x headroom).
+    Gate-red virtual delay = 50 ms (5x budget) -> must fail budget assertion.
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
     bad_file = tmp_path / "bad_direct_import.py"
     bad_file.write_text("import src.core.script.runtime.interpreter\n", encoding="utf-8")
 
-    violations = _find_forbidden_imports(bad_file)
+    # --- baseline perf: scan the bad file, expect it fast ---
+    def scan_once() -> list[str]:
+        return _find_forbidden_imports(bad_file)
 
+    sample = perf_budget.best_of(scan_once, n=5)
+    assert sample.cpu_ms < 10.0, (
+        f"AST scan took {sample.cpu_ms:.3f}ms (budget 10ms); wall={sample.wall_ms:.3f}ms"
+    )
+
+    # --- gate-red: inject 50ms virtual delay, prove budget assertion trips ---
+    reset_virtual_totals()
+    slow_scan = virtual_delayed_sync(scan_once, 50.0)
+    red_sample = perf_budget.best_of(slow_scan, n=5)
+    with pytest.raises(AssertionError):
+        assert red_sample.cpu_ms < 10.0, (
+            f"gate-red should have tripped; cpu={red_sample.cpu_ms:.3f}ms"
+        )
+
+    # --- functional assertion: violations must be detected ---
+    violations = _find_forbidden_imports(bad_file)
     assert violations == ["src.core.script.runtime.interpreter"]
 
 
