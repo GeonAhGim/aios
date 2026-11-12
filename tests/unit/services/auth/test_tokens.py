@@ -24,6 +24,7 @@ from src.services.auth.tokens import (
     TokenVerifier,
     hash_refresh_token,
 )
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 KEY_V1 = "11" * 32
 KEY_V2 = "22" * 32
@@ -220,3 +221,45 @@ def test_issue_and_verify_budget_gate_fails_on_injected_regression(
 
     with pytest.raises(AssertionError):
         assert p95_ms < 5.0
+
+
+@pytest.mark.perf
+def test_issue_access_perf_budget_with_virtual_delay_gate_red(
+    perf_budget: pytest.fixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 단언 + 게이트 적색 재현 (perf_budget.best_of + virtual_delay).
+
+    실측 기준: issue_access+verify 1회 p95 ≈ 0.38ms (로컬 실측, 20회 반복).
+    예산 = 10ms (실측의 ≈26배, ADR-2026-09-09-C Decision 1 차용 근거 동일).
+    Gate-red 가상 지연 = 50ms (예산의 5배) -> perf_budget.best_of가
+    virtual_delayed_sync의 지연을 cpu_ms로 인식해 예산 단언을 잡아야 한다.
+
+    This proves: (1) the perf assertion actually constrains runtime,
+    (2) virtual_delay injection reproduces a red gate without real sleep,
+    (3) best_of correctly picks the minimum across multiple runs.
+    """
+    issuer = _issuer("v1")
+
+    # --- baseline: best_of measurement, expect under budget ---
+    reset_virtual_totals()
+
+    def issue_once() -> None:
+        issuer.issue_access(
+            user_id=uuid4(), tenant_id=uuid4(), session_id=uuid4(), auth_level="PASSWORD"
+        )
+
+    sample = perf_budget.best_of(issue_once, n=5)
+    assert sample.cpu_ms < 10.0, (
+        f"token issue took {sample.cpu_ms:.3f}ms (budget 10ms); wall={sample.wall_ms:.3f}ms"
+    )
+
+    # --- gate-red: inject 50ms virtual delay, prove budget assertion trips ---
+    reset_virtual_totals()
+
+    slow_issue = virtual_delayed_sync(issue_once, 50.0)
+    red_sample = perf_budget.best_of(slow_issue, n=5)
+    with pytest.raises(AssertionError):
+        assert red_sample.cpu_ms < 10.0, (
+            f"gate-red should have tripped; cpu={red_sample.cpu_ms:.3f}ms"
+        )
