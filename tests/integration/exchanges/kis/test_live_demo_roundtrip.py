@@ -60,6 +60,7 @@ from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_futureoption_mixin import (
     KISOverseasFutureoptionMixin as _OverseasFutureoptionMixin,
 )
+from tests.conftest import PerfBudget
 
 # 모듈 전체가 아니라 왕복을 "시도"하는 세 테스트에만 개별 부여한다(아래
 # `@pytest.mark.live_demo`) — `test_overseas_futureoption_trs_...`는 자격증명
@@ -237,3 +238,122 @@ def test_overseas_futureoption_trs_have_no_paper_trading_equivalent() -> None:
     assert hasattr(_OverseasFutureoptionMixin, "place_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "cancel_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "get_overseas_futureoption_balance")
+
+
+# --- D2 depth evidence for the overseas_stock roundtrip (task-24193) --------------------------
+# Offline: `_request` is stubbed, so these run in default CI without credentials (no live_demo).
+# Perf budget (new): place+balance+cancel against an instant stub is pure adapter CPU; local
+# best-of-3 measured ~1 ms for the 3-call sequence, budget 50 ms (>30x headroom).
+
+
+class _StubKIS:
+    """Records `_request` calls and answers with canned KIS payloads."""
+
+    def __init__(self, *, rt_cd: str = "0", fail_on: str | None = None) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self._rt_cd = rt_cd
+        self._fail_on = fail_on
+
+    async def request(self, method: str, path: str, tr_id: str, **_: object) -> dict[str, object]:
+        self.calls.append((method, tr_id))
+        if tr_id == self._fail_on:
+            raise ConnectionError("injected transport failure")
+        if tr_id == "TTTT1002U":
+            return {"rt_cd": "0", "output": {"KRX_FWDG_ORD_ORGNO": "91252", "ODNO": "0000001"}}
+        if tr_id == "TTTS3012R":
+            return {"output1": [{"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "2"}]}
+        return {"rt_cd": self._rt_cd}
+
+
+def _stub_adapter(monkeypatch: pytest.MonkeyPatch, stub: _StubKIS) -> KISAdapter:
+    adapter = KISAdapter("k", "s", "12345678", "01", is_paper_trading=True)
+    monkeypatch.setattr(adapter, "_request", stub.request)
+    return adapter
+
+
+async def _overseas_roundtrip(adapter: KISAdapter) -> bool:
+    order = _order(
+        symbol=_US_EQUITY_SYMBOL,
+        price=_US_EQUITY_SAFE_PRICE,
+        currency=_US_EQUITY_CURRENCY_PLACEHOLDER,
+        asset_class=AssetClass.US_EQUITY,
+        tag="us-equity",
+    )
+    placed = await adapter.place_overseas_order(order, _US_EQUITY_EXCHANGE)
+    assert placed.exchange_order_id == "91252:0000001"
+    balances = await adapter.get_overseas_balance(_US_EQUITY_EXCHANGE)
+    assert [b.asset for b in balances] == ["AAPL"]
+    return await adapter.cancel_overseas_order(
+        placed.exchange_order_id,
+        _US_EQUITY_SYMBOL,
+        _US_EQUITY_EXCHANGE,
+        original_quantity=Decimal("1"),
+    )
+
+
+async def test_overseas_roundtrip_offline_uses_expected_tr_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _StubKIS()
+    adapter = _stub_adapter(monkeypatch, stub)
+    assert await _overseas_roundtrip(adapter) is True
+    assert [tr for _, tr in stub.calls] == ["TTTT1002U", "TTTS3012R", "TTTT1004U"]
+    await adapter.aclose()
+
+
+async def test_overseas_cancel_rejected_returns_false_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _stub_adapter(monkeypatch, _StubKIS(rt_cd="1"))
+    assert await _overseas_roundtrip(adapter) is False
+    await adapter.aclose()
+
+
+async def test_overseas_cancel_malformed_order_id_raises_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _stub_adapter(monkeypatch, _StubKIS())
+    with pytest.raises(ValueError):
+        await adapter.cancel_overseas_order(
+            "no-colon-id", _US_EQUITY_SYMBOL, _US_EQUITY_EXCHANGE, original_quantity=Decimal("1")
+        )
+    await adapter.aclose()
+
+
+async def test_overseas_unknown_exchange_rejected_negative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _stub_adapter(monkeypatch, _StubKIS())
+    with pytest.raises(Exception):  # noqa: B017 - exact type owned by the app code
+        await adapter.get_overseas_balance("ZZZZ")
+    await adapter.aclose()
+
+
+async def test_overseas_roundtrip_failure_injection_stops_before_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _StubKIS(fail_on="TTTS3012R")
+    adapter = _stub_adapter(monkeypatch, stub)
+    with pytest.raises(ConnectionError):
+        await _overseas_roundtrip(adapter)
+    assert "TTTT1004U" not in [tr for _, tr in stub.calls]  # cancel never reached
+    await adapter.aclose()
+
+
+@pytest.mark.perf
+async def test_overseas_roundtrip_perf_budget_and_gate_red(
+    monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+) -> None:
+    from tests.support.perf_inject import virtual_delayed_async
+
+    budget_ms = 50.0
+    adapter = _stub_adapter(monkeypatch, _StubKIS())
+    sample = await perf_budget.best_of_async(lambda: _overseas_roundtrip(adapter), n=3, warmup=1)
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+    # gate-red: a virtual 10x-budget delay on `_request` must trip the same assertion.
+    slow = virtual_delayed_async(_StubKIS().request, budget_ms * 10 / 1000)
+    monkeypatch.setattr(adapter, "_request", slow)
+    red = await perf_budget.best_of_async(lambda: _overseas_roundtrip(adapter), n=3, warmup=0)
+    assert red.wall_ms >= budget_ms
+    await adapter.aclose()
