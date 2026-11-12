@@ -170,3 +170,46 @@ async def test_get_p2p_merchant_info_propagates_transport_failure():
     adapter = _make_adapter(handler, sleep_fn=_no_sleep)
     with pytest.raises(RetryableExchangeError):
         await adapter.get_p2p_merchant_info()
+
+
+# --- 성능 단언 (D2, perf_budget 경유) ---------------------------------------------
+
+
+async def test_get_p2p_ads_p95_within_budget(perf_budget):
+    """mock transport 왕복 기준 P2P 광고 조회 p95가 예산(50ms) 안에 있어야 한다.
+    adapter 쪽 파싱/직렬화 회귀(예: 불필요한 전수 순회)를 잡기 위한 회귀 감지 예산이다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": []})
+
+    adapter = _make_adapter(handler)
+
+    async def _call() -> None:
+        await adapter.get_p2p_ads(coin="usdt")
+
+    samples = sorted(
+        [await perf_budget.sample_async(_call) for _ in range(5)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms
+    assert p95 < 50.0, f"p2p ads p95 latency {p95:.3f}ms exceeded 50ms budget"
+
+
+async def test_get_p2p_ads_budget_goes_red_with_delay_injection(perf_budget, monkeypatch):
+    """게이트 적색 재현 — 응답 경로에 인위적 지연(200ms)을 주입하면 같은 예산 단언이
+    실패해야 한다. 예산이 실제 회귀를 잡는지 증명한다."""
+    import time
+
+    def slow_handler(request: httpx.Request) -> httpx.Response:
+        time.sleep(0.2)
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": []})
+
+    adapter = _make_adapter(slow_handler)
+
+    async def _call() -> None:
+        await adapter.get_p2p_ads(coin="usdt")
+
+    sample = await perf_budget.sample_async(_call)
+    assert sample.wall_ms >= 200.0
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < 50.0, "injected delay must exceed the budget"
