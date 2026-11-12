@@ -390,3 +390,111 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     post_race = await gate(context)
     assert post_race.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in post_race.reason_codes
+
+
+async def _setup_expired_revision(pool, repo, trust_repo):
+    """Return (user_id, superseded revision id, current revision id)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    expired_id = (await repo.get_mandate(user_id)).active_revision_id
+    proposed = await propose_amendment(repo, tenant_id=user_id, rules=default_rules())
+    await activate_revision_command(
+        repo,
+        trust_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        revision_id=proposed.id,
+        reauthenticated=False,
+    )
+    return user_id, expired_id, (await repo.get_mandate(user_id)).active_revision_id
+
+
+async def test_expired_revision_current_revision_not_stale(pool, repo, trust_repo):
+    """음성 1 — 현재 active revision(B) 제출은 STALE을 받지 않는다."""
+    user_id, expired_id, current_id = await _setup_expired_revision(pool, repo, trust_repo)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    current = await gate(_context(user_id, current_id, execution_id=_unique_execution_id()))
+    expired = await gate(_context(user_id, expired_id, execution_id=_unique_execution_id()))
+
+    assert "RISK_MANDATE_REVISION_STALE" not in current.reason_codes
+    assert expired.outcome == GateOutcome.DENY
+    assert expired.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
+
+
+async def test_expired_revision_other_tenant_never_allows(pool, repo, trust_repo):
+    """음성 2 — 다른 tenant의 만료 revision id 제출은 ALLOW되지 않는다."""
+    _, expired_id, _ = await _setup_expired_revision(pool, repo, trust_repo)
+    other = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=other)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    try:
+        decision = await gate(_context(other, expired_id, execution_id=_unique_execution_id()))
+    except Exception:  # noqa: BLE001 - raising is also fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+async def test_expired_revision_repeat_submit_stays_denied(pool, repo, trust_repo):
+    """음성 3 — 같은 만료 revision 반복 제출도 매번 STALE DENY."""
+    user_id, expired_id, _ = await _setup_expired_revision(pool, repo, trust_repo)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    for _ in range(3):
+        decision = await gate(_context(user_id, expired_id, execution_id=_unique_execution_id()))
+        assert decision.outcome == GateOutcome.DENY
+        assert decision.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
+
+
+async def test_expired_revision_db_failure_never_allows(pool, repo, trust_repo):
+    """실패 주입 — 만료 revision 경로에서 DB 실패 시 ALLOW 없음."""
+    user_id, expired_id, _ = await _setup_expired_revision(pool, repo, trust_repo)
+
+    class _BrokenPool:
+        def __getattr__(self, name):
+            raise ConnectionError(f"injected pool failure: {name}")
+
+    gate = make_foundation_pre_submit_gate(_BrokenPool(), require_mandate=True)
+    try:
+        decision = await gate(_context(user_id, expired_id, execution_id=_unique_execution_id()))
+    except Exception:  # noqa: BLE001 - propagation is fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+# 성능 예산: 만료 revision 게이트 wall 실측 약 6.0ms(로컬, best-of-5), 예산은 30배 이상 여유.
+_EXPIRED_REVISION_BUDGET_MS = 200.0  # 실측 6.0ms의 ~33배
+
+
+async def _measure_expired_gate(perf_budget, pool, repo, trust_repo, *, delay_s=0.0):
+    user_id, expired_id, _ = await _setup_expired_revision(pool, repo, trust_repo)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    call = virtual_delayed_async(gate, delay_s) if delay_s else gate
+
+    async def _run():
+        return await call(_context(user_id, expired_id, execution_id=_unique_execution_id()))
+
+    return await perf_budget.best_of_async(_run, n=5, warmup=1)
+
+
+@pytest.mark.perf
+async def test_expired_revision_gate_perf_budget(perf_budget: PerfBudget, pool, repo, trust_repo):
+    """성능 단언 — 만료 revision 게이트 wall 지연이 예산 미만."""
+    reset_virtual_totals()
+    sample = await _measure_expired_gate(perf_budget, pool, repo, trust_repo)
+    assert sample.wall_ms < _EXPIRED_REVISION_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_EXPIRED_REVISION_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_expired_revision_gate_perf_gate_red_with_10x_injection(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """게이트 적색 재현 — 예산 10배 가상 지연 주입 시 같은 단언이 적색."""
+    reset_virtual_totals()
+    sample = await _measure_expired_gate(
+        perf_budget, pool, repo, trust_repo, delay_s=_EXPIRED_REVISION_BUDGET_MS * 10 / 1000
+    )
+    assert not (sample.wall_ms < _EXPIRED_REVISION_BUDGET_MS)
+    reset_virtual_totals()
