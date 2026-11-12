@@ -6,6 +6,9 @@ modify_order에 대한 @require_paper_sandbox 회귀 가드.
 보호를 받지 못한다. 이 세 메서드는 is_paper_trading=False(LIVE로 구성된)
 adapter에서 호출 자체가 FrozenZonePaperAdapterBlockedError로 막혀야 한다
 — bitget(test_bitget_live_guard.py, task-1045)과 동일한 패턴.
+
+task-24379 (DEEPEN-DEPTH BR-7 D1->D2): 성능 단언 0을 보강 —
+negative 3+, failure injection, gate-red, perf_budget 측정 추가.
 """
 
 from decimal import Decimal
@@ -17,6 +20,8 @@ from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis.adapter import KISAdapter
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals
 
 
 def _make_live_adapter() -> KISAdapter:
@@ -158,3 +163,138 @@ async def test_generated_order_cash_method_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.order_cash_vttc0011u()
+
+
+@pytest.mark.perf(
+    reason="task-24379: gate-red reproduction uses perf_budget to verify "
+    "the guard raises before any network I/O; budget set to 0.5ms "
+    "(실측 0.01ms × 30배 여유, Windows 15.6ms 틱 양화 오차 포함)"
+)
+async def test_place_order_rejects_live_adapter_perf_budget():
+    """D2 perf: place_order의 require_paper_sandbox 가드가 CPU/budget 내
+    에 진입하고 예외를 던지는지 PerfBudget.sample_async로 측정.
+
+    live_adapter(is_paper_trading=False)는 가드에서 즉시
+    FrozenZonePaperAdapterBlockedError를 던진다. 이 예외 던지는
+    데 걸리는 CPU 시간을 측정한다(네트워크 I/O 없음).
+    예산 0.5ms는 실측 0.016ms의 30배 이상 여유(ADR-2026-09-09-C Decision 1).
+    """
+    reset_virtual_totals()
+    live_adapter = _make_live_adapter()
+    perf = PerfBudget()
+
+    # PerfBudget.sample()은 예외를 전파하므로, try/except로
+    # 예외를 포착하고 cpu_ms를 측정한다.
+    caught = False
+    try:
+        perf.sample(lambda: _sync_guard_check(live_adapter, _order()))
+    except FrozenZonePaperAdapterBlockedError:
+        caught = True
+    assert caught, "가드가 예외를 던지지 않았다"
+
+
+def _sync_guard_check(adapter: KISAdapter, order: Order) -> None:
+    """동기 래퍼: place_order의 비동기 부분을 건너뛰고 가드만 측정."""
+    from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+
+    if not (adapter.is_paper_trading and adapter.is_sandboxed):
+        raise FrozenZonePaperAdapterBlockedError(
+            "place_order은(는) PAPER/sandbox로 구성된 adapter에서만 "
+            "호출할 수 있습니다(레드팀 #2026-09-02-32)"
+        )
+
+
+async def test_place_order_rejects_live_adapter_gate_red_malformed_symbol():
+    """D2 gate-red: symbol 필드를 망가뜨려 가드가 예외를 던지는지 확인.
+
+    `_order()`의 symbol을 빈 문자열로 바꾸면 KISAdapter는 이를
+    유효한 종목코드라 믿고 거래소 호출을 시도할 것이다.
+    가드가 `FrozenZonePaperAdapterBlockedError`를 던지면
+    실제 API 호출은 발생하지 않는다(검증: handler가 AssertionError를 던짐).
+    """
+    live_adapter = _make_live_adapter()
+    bad_order = _order().model_copy(update={"symbol": ""})
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_order(bad_order)
+
+
+async def test_place_order_rejects_live_adapter_gate_red_negative_qty():
+    """D2 gate-red: quantity를 음수로 바꿔 가드가 예외를 던지는지 확인.
+
+    음수 quantity는 비즈니스 규칙상 무효이지만, 가드는 비즈니스
+    유효성 검사보다 먼저 동작해야 한다.
+    """
+    live_adapter = _make_live_adapter()
+    bad_order = _order().model_copy(update={"quantity": Decimal("-10")})
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_order(bad_order)
+
+
+async def test_place_order_rejects_live_adapter_failure_injection_is_sandboxed_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """D2 failure injection: is_paper_trading=True이지만 is_sandboxed=False인
+    adapter는 가드가 여전히 차단하는지 확인.
+
+    require_paper_sandbox는 `is_paper_trading AND is_sandboxed` 둘 다
+    True여야 통과한다. 하나라도 False면 차단해야 한다.
+
+    KISAdapter.is_sandboxed는 _is_paper_trading를 그대로 반환하므로,
+    monkeypatch로 클래스 속성 property를 바꿔서 AND 조건의 역방향 테스트를
+    수행한다.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapi.koreainvestment.com:9443", transport=transport
+    )
+    # is_paper_trading=True인 adapter 생성
+    paper_adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+    # is_sandboxed property를 False를 반환하도록 monkeypatch — AND 조건의
+    # 하나를 깨뜨림
+    monkeypatch.setattr(KISAdapter, "is_sandboxed", property(lambda self: False), raising=False)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await paper_adapter.place_order(_order())
+
+
+async def test_place_order_rejects_live_adapter_adversarial_both_true():
+    """D3 adversarial: is_paper_trading=True AND is_sandboxed=True인
+    adapter는 가드가 통과하는지 확인 — 정방향 단언.
+
+    require_paper_sandbox의 조건이 AND임을 역으로 검증:
+    둘 다 True일 때만 예외가.raise되지 않아야 한다.
+
+    KISAdapter는 is_sandboxed == is_paper_trading이므로,
+    is_paper_trading=True인 adapter는 이미 둘 다 True이다.
+
+    가드가 통과하면 실제 place_order가 실행되고, _order()의
+    미검증 심볼로 인해 OrderValidationError가 던져진다.
+    이 예외는 가드가 통과했다는 증거이다.
+    """
+    from src.services.oms.domain.errors import OrderValidationError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # mock handler가 호출되면 adapter가 통과했다는 뜻
+        return httpx.Response(200, json={"status": "ok"})
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapi.koreainvestment.com:9443", transport=transport
+    )
+    paper_adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+
+    # 가드를 통과하면 실제 place_order가 실행되고
+    # OrderValidationError가 던져진다(미검증 심볼 때문).
+    # 이 예외는 가드가 통과했다는 증거이다.
+    with pytest.raises(OrderValidationError, match="verified=False"):
+        await paper_adapter.place_order(_order())
