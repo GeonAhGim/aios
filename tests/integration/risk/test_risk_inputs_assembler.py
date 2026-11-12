@@ -277,3 +277,121 @@ async def test_to_legacy_dict_round_trips_fourteen_keys(pool):
     }
     assert legacy["leverage"] == Decimal("1")  # 열린 포지션 없음 — 무레버리지 기본값
     assert legacy["total_equity"] == Decimal("1000")
+
+
+def _count_selects(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch asyncpg fetch/fetchrow to record every issued query text."""
+    queries: list[str] = []
+    original_fetchrow = asyncpg.Connection.fetchrow
+    original_fetch = asyncpg.Connection.fetch
+
+    async def counting_fetchrow(self, query, *args, **kwargs):
+        queries.append(query)
+        return await original_fetchrow(self, query, *args, **kwargs)
+
+    async def counting_fetch(self, query, *args, **kwargs):
+        queries.append(query)
+        return await original_fetch(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", counting_fetchrow)
+    monkeypatch.setattr(asyncpg.Connection, "fetch", counting_fetch)
+    return queries
+
+
+def _select_count(queries: list[str]) -> int:
+    return sum(1 for q in queries if q.strip().upper().startswith(("SELECT", "WITH")))
+
+
+async def test_two_select_budget_holds_with_empty_balances_and_candles(pool, monkeypatch):
+    """negative: degenerate inputs (no balances, no candles) must not add a
+    fallback query — the budget stays at 2 SELECTs."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = f"EMPTY-{uuid.uuid4().hex[:8]}/USDT"
+    queries = _count_selects(monkeypatch)
+
+    await assemble_risk_inputs(
+        pool,
+        caches(),
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-empty"),
+        balances=[],
+        candles=[],
+        policy=POLICY,
+        now=NOW,
+    )
+
+    assert _select_count(queries) == 2, queries
+
+
+async def test_two_select_budget_holds_with_open_position(pool, monkeypatch):
+    """negative: an existing position must be read inside the CTE snapshot,
+    not via a per-position follow-up SELECT (N+1)."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = f"NPLUS1-{uuid.uuid4().hex[:8]}/USDT"
+    await insert_position(
+        pool,
+        user_id=user_id,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id="strat-nplus1",
+        quantity=Decimal("3"),
+        average_entry_price=Decimal("10"),
+    )
+    riskcaches = caches()
+    # Pre-seed the equity baseline so R-30's first-call SELECT is not counted.
+    riskcaches.equity_tracker.seed(
+        execution_id,
+        day_start_date=date(2026, 1, 1),
+        day_start_equity=Decimal("1000"),
+        peak_equity=Decimal("1000"),
+    )
+    queries = _count_selects(monkeypatch)
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        riskcaches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-nplus1"),
+        balances=[
+            AccountBalance(
+                exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+            )
+        ],
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+    assert inputs.exposure.position_quantity == Decimal("3")
+    assert _select_count(queries) == 2, queries
+
+
+async def test_two_select_counter_catches_an_injected_third_select(pool, monkeypatch):
+    """gate-red/negative: the counter used by the two-SELECT assertion really
+    goes red when a third SELECT is issued, so the DoD check is not vacuous."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = f"THIRD-{uuid.uuid4().hex[:8]}/USDT"
+    queries = _count_selects(monkeypatch)
+
+    await assemble_risk_inputs(
+        pool,
+        caches(),
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, "strat-third"),
+        balances=[],
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+    async with pool.acquire() as conn:
+        await conn.fetchrow("SELECT 1")  # injected extra round trip
+
+    assert _select_count(queries) == 3
+    with pytest.raises(AssertionError):
+        assert _select_count(queries) == 2, queries
