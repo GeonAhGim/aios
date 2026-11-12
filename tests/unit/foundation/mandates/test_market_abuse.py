@@ -39,6 +39,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain import market_abuse
 from src.foundation.mandates.domain.market_abuse import (
@@ -160,10 +162,53 @@ def test_marking_the_close_fill_outside_window_excluded_from_both_sides():
 
 
 def test_spoofing_three_orders_exactly_10x_ratio_misses():
+    """Negative: cancel_qty == ratio * fill_qty is NOT a hit (strict >)."""
     orders = [_order(order_id=f"o{i}", qty=Decimal("100")) for i in range(3)]
     fills = [_fill(qty=Decimal("30"))]  # 300 == 10 * 30
     hits = detect(_window(orders=orders, fills=fills), {})
     assert [h for h in hits if h.pattern_id == PATTERN_SPOOFING] == []
+
+
+def test_spoofing_cancel_qty_below_ratio_misses():
+    """Negative: cancel_qty < ratio * fill_qty is not a hit."""
+    orders = [_order(order_id=f"o{i}", qty=Decimal("50")) for i in range(3)]
+    fills = [_fill(qty=Decimal("100"))]  # 150 < 10 * 100
+    hits = detect(_window(orders=orders, fills=fills), {})
+    assert [h for h in hits if h.pattern_id == PATTERN_SPOOFING] == []
+
+
+def test_spoofing_single_order_never_hits():
+    """Negative: fewer than min_orders (3) never triggers spoofing."""
+    orders = [_order(order_id="o1", qty=Decimal("10000"))]
+    fills = [_fill(qty=Decimal("1"))]
+    hits = detect(_window(orders=orders, fills=fills), {})
+    assert [h for h in hits if h.pattern_id == PATTERN_SPOOFING] == []
+
+
+def test_spoofing_no_cancel_time_misses():
+    """Negative: orders without canceled_at are skipped, never crash."""
+    orders = [_order(order_id=f"o{i}", qty=Decimal("1000"), canceled_at=None) for i in range(3)]
+    fills = [_fill(qty=Decimal("1"))]
+    hits = detect(_window(orders=orders, fills=fills), {})
+    assert [h for h in hits if h.pattern_id == PATTERN_SPOOFING] == []
+
+
+@pytest.mark.perf
+def test_spoofing_performance_ceiling():
+    """Performance: detect() on 500 orders + 200 fills must complete under 200ms."""
+    import time
+
+    orders = [
+        _order(order_id=f"o{i}", qty=Decimal("1000"), canceled_at=_T0 + timedelta(seconds=1))
+        for i in range(500)
+    ]
+    fills = [_fill(fill_id=f"f{i}", qty=Decimal("10")) for i in range(200)]
+    window = _window(orders=orders, fills=fills)
+    start = time.perf_counter()
+    for _ in range(100):
+        detect(window, {})
+    elapsed_ms = (time.perf_counter() - start) * 1000 / 100
+    assert elapsed_ms < 200, f"spoofing detect p95 budget 200ms exceeded: {elapsed_ms:.1f}ms"
 
 
 def test_spoofing_three_orders_above_10x_ratio_hits():
