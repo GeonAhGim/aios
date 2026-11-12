@@ -34,6 +34,7 @@ from tests.support.perf_inject import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.negative
 async def test_lifespan_rejects_corrupted_event_bus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -60,6 +61,7 @@ async def test_lifespan_rejects_corrupted_event_bus(
             pass
 
 
+@pytest.mark.negative
 async def test_lifespan_rejects_credential_resolver_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -84,6 +86,7 @@ async def test_lifespan_rejects_credential_resolver_failure(
             pass
 
 
+@pytest.mark.negative
 async def test_lifespan_rejects_notification_gateway_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,6 +117,7 @@ async def test_lifespan_rejects_notification_gateway_failure(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.failure_injection
 async def test_lifespan_shutdown_cleans_up_on_pool_query_failure() -> None:
     """실패주입: lifespan 진입 후 pool.fetchval이 raise하면(예: DB 일시
     불용), finally 블록이 정상 작동해 루프 태스크가 취소되고 pool이
@@ -143,6 +147,7 @@ async def test_lifespan_shutdown_cleans_up_on_pool_query_failure() -> None:
 
 
 @pytest.mark.perf
+@pytest.mark.gate_red
 async def test_lifespan_perf_assertion_fails_with_virtual_io_delay(
     perf_budget: PerfBudget,
 ) -> None:
