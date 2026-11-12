@@ -16,6 +16,8 @@ from src.api.contracts import exception_mapping as exception_mapping_module
 from src.api.contracts.error_codes import ErrorCode
 from src.api.contracts.exception_mapping import map_exception
 from src.api.contracts.exception_registry import EXCEPTION_MAP_SERVICES
+from src.services.alert_service import AlertError
+from src.services.device_token_service import DeviceTokenError
 from src.services.user_admin_service import UserAdminError, UserAdminNotFoundError
 from src.services.verification_service import (
     VerificationError,
@@ -222,6 +224,20 @@ def test_wallet_topup_invalid_transition_maps_to_state_invalid_transition_before
 def test_wallet_topup_base_error_still_maps_to_validation_invalid_field():
     code, _, _ = map_exception(WalletTopupError("충전 금액은 0보다 커야 합니다."))
     assert code == ErrorCode.VALIDATION_INVALID_FIELD
+
+
+def test_alert_base_error_is_not_resource_not_found():
+    """negative — AlertError(부모)가 AlertNotFoundError(자식)의 404 코드로
+    오매핑되면 안 된다."""
+    code, _, _ = map_exception(AlertError("알 수 없는 알림 상태입니다."))
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
+
+
+def test_device_token_base_error_is_not_resource_not_found():
+    """negative — DeviceTokenError(부모)가 DeviceTokenNotFoundError(자식)의
+    404 코드로 오매핑되면 안 된다."""
+    code, _, _ = map_exception(DeviceTokenError("알 수 없는 디바이스 오류입니다."))
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
 
 
 def _index_of(exc_type: type[Exception]) -> int:
