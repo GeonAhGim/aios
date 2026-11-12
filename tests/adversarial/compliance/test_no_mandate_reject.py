@@ -256,3 +256,141 @@ async def test_paused_gate_budget_turns_red_under_10x_virtual_delay(
     reset_virtual_totals()
 
     assert not sample.wall_ms < _PAUSED_GATE_BUDGET_MS
+
+
+async def _amended_tenant(pool, repo, trust_repo):
+    """Tenant whose original revision (A) was superseded by an amendment (B)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    expired_revision_id = (await repo.get_mandate(user_id)).active_revision_id
+    proposed = await propose_amendment(repo, tenant_id=user_id, rules=default_rules())
+    await activate_revision_command(
+        repo,
+        trust_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        revision_id=proposed.id,
+        reauthenticated=False,
+    )
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    return user_id, gate, expired_revision_id, proposed.id
+
+
+async def test_expired_revision_burst_all_denied_stale(pool, repo, trust_repo):
+    """음성 1: 만료 revision으로 동시 다발 제출(8건) 전부 STALE DENY — 하나라도 ALLOW면 적색."""
+    user_id, gate, expired_id, _ = await _amended_tenant(pool, repo, trust_repo)
+
+    decisions = await asyncio.gather(
+        *(
+            gate(_context(user_id, expired_id, execution_id=_unique_execution_id()))
+            for _ in range(8)
+        )
+    )
+
+    assert [d.outcome for d in decisions] == [GateOutcome.DENY] * 8
+    assert all(d.reason_codes == ("RISK_MANDATE_REVISION_STALE",) for d in decisions)
+
+
+async def test_expired_revision_does_not_reuse_cached_allow(pool, repo, trust_repo):
+    """음성 2: 만료 전에 ALLOW가 캐시됐어도, 개정 후 같은 (A) 바인딩 제출은 DENY."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    expired_id = (await repo.get_mandate(user_id)).active_revision_id
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    ctx = _context(user_id, expired_id, execution_id=_unique_execution_id())
+    assert (await gate(ctx)).outcome == GateOutcome.ALLOW  # warm the cache
+
+    proposed = await propose_amendment(repo, tenant_id=user_id, rules=default_rules())
+    await activate_revision_command(
+        repo,
+        trust_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        revision_id=proposed.id,
+        reauthenticated=False,
+    )
+
+    decision = await gate(ctx)
+    assert decision.outcome == GateOutcome.DENY
+    assert decision.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
+
+
+async def test_expired_revision_other_tenant_unaffected(pool, repo, trust_repo):
+    """음성 3: A 테넌트의 개정이 B 테넌트의 현재 revision 제출을 STALE로 오염시키지 않는다."""
+    user_a, gate, expired_a, _ = await _amended_tenant(pool, repo, trust_repo)
+    user_b = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_b)
+    rev_b = (await repo.get_mandate(user_b)).active_revision_id
+
+    stale = await gate(_context(user_a, expired_a, execution_id=_unique_execution_id()))
+    fresh = await gate(_context(user_b, rev_b, execution_id=_unique_execution_id()))
+
+    assert stale.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
+    assert fresh.outcome == GateOutcome.ALLOW
+
+
+async def test_expired_revision_assertion_turns_red_for_current_revision(pool, repo, trust_repo):
+    """게이트 적색 재현: 만료가 아닌 현재 revision(B)을 넘기면 STALE 단언이 깨진다 —
+    test_expired_revision_rejects의 단언이 입력 구분을 실제로 잡는다는 증거."""
+    user_id, gate, _, current_id = await _amended_tenant(pool, repo, trust_repo)
+
+    decision = await gate(_context(user_id, current_id, execution_id=_unique_execution_id()))
+
+    assert decision.reason_codes != ("RISK_MANDATE_REVISION_STALE",)
+    with pytest.raises(AssertionError):
+        assert decision.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
+
+
+async def test_expired_revision_failure_injection_keeps_original_active(pool, repo, trust_repo):
+    """실패 주입: 개정 활성화가 예외로 실패하면 revision은 교체되지 않아 A 제출은 ALLOW 유지
+    (STALE 오판 없음), 예외는 삼켜지지 않고 전파된다."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    original_id = (await repo.get_mandate(user_id)).active_revision_id
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("injected activation failure")
+
+    results = await asyncio.gather(
+        _boom(),
+        gate(_context(user_id, original_id, execution_id=_unique_execution_id())),
+        return_exceptions=True,
+    )
+
+    assert isinstance(results[0], RuntimeError)
+    assert results[1].outcome == GateOutcome.ALLOW
+    assert (await repo.get_mandate(user_id)).active_revision_id == original_id
+
+
+# 로컬 실측(2026-11-12, best-of wall): ~3.6ms/건. 예산 250ms는 실측의 ~70배 여유(공유 DB/CI 편차 흡수).
+_EXPIRED_GATE_BUDGET_MS = 250.0
+
+
+@pytest.mark.perf
+async def test_expired_gate_decision_under_budget(pool, repo, trust_repo, perf_budget: PerfBudget):
+    """성능: 만료 revision STALE DENY 판정 1건의 wall 시간이 예산 안(best_of)."""
+    user_id, gate, expired_id, _ = await _amended_tenant(pool, repo, trust_repo)
+    ctx = _context(user_id, expired_id, execution_id=_unique_execution_id())
+
+    sample = await perf_budget.best_of_async(lambda: gate(ctx), n=5, warmup=1)
+
+    assert sample.wall_ms < _EXPIRED_GATE_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_EXPIRED_GATE_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_expired_gate_budget_turns_red_under_10x_virtual_delay(
+    pool, repo, trust_repo, perf_budget: PerfBudget
+):
+    """게이트 적색 재현: 예산 10배 가상 지연 주입 시 같은 단언이 적색이 된다."""
+    user_id, gate, expired_id, _ = await _amended_tenant(pool, repo, trust_repo)
+    ctx = _context(user_id, expired_id, execution_id=_unique_execution_id())
+    reset_virtual_totals()
+    delayed = virtual_delayed_async(gate, _EXPIRED_GATE_BUDGET_MS * 10 / 1000)
+
+    sample = await perf_budget.best_of_async(lambda: delayed(ctx), n=3, warmup=1)
+    reset_virtual_totals()
+
+    assert not sample.wall_ms < _EXPIRED_GATE_BUDGET_MS
