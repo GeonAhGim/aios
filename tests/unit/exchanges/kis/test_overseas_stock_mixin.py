@@ -111,6 +111,22 @@ async def test_round_trip_per_exchange_uses_distinct_codes(exchange: str):
     # 시세코드(3자리)는 주문코드(4자리)와 절대 같은 문자열이 아니다.
     assert codes.quote_excd != codes.order_excg_cd
 
+    # 변이 음성: 시세코드를 주문 바디에 넣으면 단언이 잡힌다.
+    order_body["OVRS_EXCG_CD"] = codes.quote_excd
+    with pytest.raises(AssertionError):
+        assert order_body["OVRS_EXCG_CD"] == codes.order_excg_cd
+
+    # 변이 음성: 주문코드를 시세 조회 파라미터에 넣으면 단언이 잡힌다.
+    quote_params = dict(quote_request.url.params)
+    quote_params["EXCD"] = codes.order_excg_cd
+    with pytest.raises(AssertionError):
+        assert quote_params["EXCD"] == codes.quote_excd
+
+    # 변이 음성: 취소 요청 바디에 시세코드를 넣으면 단언이 잡힌다.
+    cancel_body["OVRS_EXCG_CD"] = codes.quote_excd
+    with pytest.raises(AssertionError):
+        assert cancel_body["OVRS_EXCG_CD"] == codes.order_excg_cd
+
 
 @pytest.mark.perf
 def test_unsupported_exchange_is_rejected_explicitly():
