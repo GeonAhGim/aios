@@ -68,11 +68,138 @@ async def test_acquire_raises_rate_limited_when_wait_exceeds_timeout() -> None:
 
 
 async def test_acquire_more_than_burst_rejected_immediately() -> None:
+    """burst를 초과하는 토큰 요청은 즉시 RATE_LIMITED — negative 테스트 1:
+    burst+1 (6) 요청 시 sleep 호출 없이 즉시 실패."""
     bucket, _clock, sleep_calls = _make_bucket(rate=10, burst=5)
     with pytest.raises(ExchangeError) as exc_info:
         await bucket.acquire(6, timeout=100.0)
     assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
     assert sleep_calls == []
+
+
+async def test_acquire_exactly_twice_burst_rejected_immediately() -> None:
+    """negative 테스트 2: 2×burst 요청도 즉시 실패 — timeout이 커도 리필로
+    해결되지 않는 영역."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=100, burst=5)
+    with pytest.raises(ExchangeError) as exc_info:
+        await bucket.acquire(10, timeout=100.0)
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+    assert sleep_calls == []
+
+
+async def test_acquire_hundred_times_burst_rejected_immediately() -> None:
+    """negative 테스트 3: 극단적 초과(100×burst)도 즉시 실패 — timeout=0과
+    동일하게 fail-fast 한다."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=100_000, burst=1)
+    with pytest.raises(ExchangeError) as exc_info:
+        await bucket.acquire(100, timeout=0)
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+    assert sleep_calls == []
+
+
+async def test_acquire_more_than_burst_failure_injection_negative_clock() -> None:
+    """실패 주입 D2: clock가 역주행(regrssion)해도 burst 초과 경로는 즉시
+    실패해야 함 — _refill()가 elapsed<0으로 토큰을 줄이지 않는지 검증."""
+    clock = _FakeClock()
+    clock.now = 10.0
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        clock.now += seconds
+
+    bucket = TokenBucket(rate_per_sec=10, burst=5, clock=clock, sleep=fake_sleep)
+    # clock를 역주행시킴 (실제 시스템에서 발생할 수 있는 clock regression)
+    clock.now = 5.0
+    with pytest.raises(ExchangeError) as exc_info:
+        await bucket.acquire(6, timeout=100.0)
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+    assert sleep_calls == []  # _refill()도 호출되지 않아야 함 (burst check가 먼저)
+
+
+@pytest.mark.perf
+async def test_acquire_more_than_burst_fast_path_latency() -> None:
+    """성능 단언 D2: burst 초과 경로는 O(1) fast path — _refill()도 호출하지
+    않고 즉시 raise해야 함. 10만 호출의 p95가 5ms 미만이어야 한다."""
+    bucket, clock, _sleep_calls = _make_bucket(rate=10, burst=5)
+    started = perf_counter()
+    for _ in range(100_000):
+        clock.now += 1.0  # 매 호출마다 clock 전진 (dummy)
+        with pytest.raises(ExchangeError):
+            await bucket.acquire(6, timeout=100.0)
+    elapsed = perf_counter() - started
+    assert elapsed < 5.0, (
+        f"burst-exceed fast path: 100k calls took {elapsed:.3f}s "
+        f"(budget 5.0s, O(1) fast path expected)"
+    )
+
+
+def test_acquire_more_than_burst_gate_red_reproduction(tmp_path: Path) -> None:
+    """게이트 적색 재현 D2: burst 초과 검사(if n > self._burst:)를 제거하면
+    (burst+1) 요청이 예외 없이 통과하므로 pytest가 적색(exit 1)이 됨 —
+    단언이 실제로 잡는지 확인한다.
+
+    기존 timeout gate red와 동일한 패턴: baseline 확인 → conftest.py로
+    rate_limiter.py 모듈 객체만 변조 → 다시 실행 시 테스트가 실패함을 증명."""
+    test_copy = tmp_path / "test_burst_gate_red.py"
+    test_copy.write_text(Path(__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    config = tmp_path / "pytest.ini"
+    config.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
+        f"{test_copy}::test_acquire_more_than_burst_rejected_immediately",
+    ]
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    # baseline: 정상 소스에서는 테스트 통과
+    baseline = subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    assert "1 passed" in baseline.stdout
+
+    # rate_limiter.py 모듈 객체만 변조: burst 초과 검사 무력화
+    (tmp_path / "conftest.py").write_text(
+        "import importlib\nfrom pathlib import Path\n"
+        "name = 'src.exchanges.common.rate_limiter'\n"
+        "module = importlib.import_module(name)\n"
+        "source = Path(module.__file__).read_text(encoding='utf-8')\n"
+        "guard = '            if n > self._burst:'\n"
+        "assert source.count(guard) == 1\n"
+        "mutated_src = source.replace(guard, '            if False:')\n"
+        "mutant = compile(mutated_src, module.__file__, 'exec')\n"
+        "exec(mutant, module.__dict__)\n",
+        encoding="utf-8",
+    )
+    mutated = subprocess.run(
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    # burst check가 제거되면 acquire(6)가 예외 없이 통과 → 테스트 실패
+    assert mutated.returncode == 1, (
+        f"gate_red: expected pytest exit 1 (test should fail when burst check is removed), "
+        f"got {mutated.returncode}: {mutated.stdout}"
+    )
+    assert "1 failed" in mutated.stdout
 
 
 @pytest.mark.perf
