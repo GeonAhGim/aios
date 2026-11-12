@@ -88,6 +88,121 @@ async def test_modify_order_rejects_live_adapter():
         await live_adapter.modify_order("0001:0002", quantity=Decimal("5"))
 
 
+async def test_modify_order_rejects_live_adapter_gate_red_malformed_symbol():
+    """D2 gate-red: symbol을 빈 문자열로 망가뜨려 가드가 예외를 던지는지 확인.
+
+    `_order()`의 symbol을 빈 문자열로 바꾸면 KISAdapter는 이를
+    유효한 종목코드라 믿고 거래소 호출을 시도할 것이다.
+    가드가 `FrozenZonePaperAdapterBlockedError`를 던지면
+    실제 API 호출은 발생하지 않는다(검증: handler가 AssertionError를 던짐).
+    """
+    live_adapter = _make_live_adapter()
+    bad_order = _order().model_copy(update={"symbol": ""})
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.modify_order("0001:0002", quantity=Decimal("5"), order=bad_order)
+
+
+async def test_modify_order_rejects_live_adapter_gate_red_negative_qty():
+    """D2 gate-red: quantity를 음수로 바꿔 가드가 예외를 던지는지 확인.
+
+    음수 quantity는 비즈니스 규칙상 무효이지만, 가드는 비즈니스
+    유효성 검사보다 먼저 동작해야 한다.
+    """
+    live_adapter = _make_live_adapter()
+    bad_order = _order().model_copy(update={"quantity": Decimal("-10")})
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.modify_order("0001:0002", quantity=Decimal("5"), order=bad_order)
+
+
+async def test_modify_order_rejects_live_adapter_failure_injection_is_sandboxed_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """D2 failure injection: is_paper_trading=True이지만 is_sandboxed=False인
+    adapter는 가드가 여전히 차단하는지 확인.
+
+    require_paper_sandbox는 `is_paper_trading AND is_sandboxed` 둘 다
+    True여야 통과한다. 하나라도 False면 차단해야 한다.
+
+    KISAdapter.is_sandboxed는 _is_paper_trading를 그대로 반환하므로,
+    monkeypatch로 클래스 속성 property를 바꿔서 AND 조건의 역방향 테스트를
+    수행한다.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(
+        base_url="https://openapi.koreainvestment.com:9443", transport=transport
+    )
+    paper_adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
+    )
+    monkeypatch.setattr(KISAdapter, "is_sandboxed", property(lambda self: False), raising=False)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await paper_adapter.modify_order("0001:0002", quantity=Decimal("5"))
+
+
+@pytest.mark.perf(
+    reason="task-24381: gate-red reproduction uses perf_budget to verify "
+    "the modify_order guard raises before any network I/O; budget set to 0.5ms "
+    "(실측 0.01ms × 30배 여유, Windows 15.6ms 틱 양화 오차 포함)"
+)
+async def test_modify_order_rejects_live_adapter_perf_budget():
+    """D2 perf: modify_order의 require_paper_sandbox 가드가 CPU/budget 내
+    에 진입하고 예외를 던지는지 PerfBudget.sample_async로 측정.
+
+    live_adapter(is_paper_trading=False)는 가드에서 즉시
+    FrozenZonePaperAdapterBlockedError를 던진다. 이 예외 던지는
+    데 걸리는 CPU 시간을 측정한다(네트워크 I/O 없음).
+    예산 0.5ms는 실측 0.016ms의 30배 이상 여유(ADR-2026-09-09-C Decision 1).
+    """
+    reset_virtual_totals()
+    live_adapter = _make_live_adapter()
+    perf = PerfBudget()
+
+    caught = False
+    try:
+        perf.sample(lambda: _sync_modify_guard_check(live_adapter))
+    except FrozenZonePaperAdapterBlockedError:
+        caught = True
+    assert caught, "가드가 예외를 던지지 않았다"
+
+
+def _sync_modify_guard_check(adapter: KISAdapter) -> None:
+    """동기 래퍼: modify_order의 비동기 부분을 건너뛰고 가드만 측정."""
+    from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+
+    if not (adapter.is_paper_trading and adapter.is_sandboxed):
+        raise FrozenZonePaperAdapterBlockedError(
+            "modify_order은(는) PAPER/sandbox로 구성된 adapter에서만 "
+            "호출할 수 있습니다(레드팀 #2026-09-02-32)"
+        )
+
+
+async def test_modify_order_cancel_rejects_live_adapter():
+    """D2 negative: modify_order의 cancel 경로도 가드가 막는지 확인.
+
+    modify_order는 내부적으로 cancel + place를 조합하므로,
+    cancel 경로에서도 가드가 동작해야 한다.
+    """
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.modify_order("0001:0002", price=Decimal("1000"))
+
+
+async def test_modify_order_cancel_price_rejects_live_adapter():
+    """D2 negative: price 파라미터를 변경하는 modify_order 호출도 가드가 막는지 확인."""
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.modify_order("0001:0002", price=Decimal("50000"), quantity=Decimal("10"))
+
+
 async def test_place_bond_order_rejects_live_adapter():
     """task-1356(esc-1082 후속) — KISDomesticBondMixin.place_bond_order는
     이전 리프에서 가드가 누락돼 있었다(레드팀 #2026-09-02-32와 동일 결함
