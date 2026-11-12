@@ -145,3 +145,44 @@ def test_stability_score_budget_gate_actually_fails_past_budget(
     p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _STABILITY_SCORE_BUDGET_MS
+
+
+# --- DEEPEN(task-24423): test_sharp_peak_is_isolated 경로 성능 단언 + 게이트 적색 재현 ---
+
+_SHARP_PEAK_METRICS = {
+    (5,): Decimal("0.05"),
+    (10,): Decimal("0.1"),
+    (15,): Decimal("1.0"),
+    (20,): Decimal("0.1"),
+    (25,): Decimal("0.05"),
+}
+
+
+@pytest.mark.perf
+def test_sharp_peak_stability_score_latency_within_budget(perf_budget) -> None:
+    """성능 단언(D2): 5점 1축 sharp-peak 그리드의 `stability_score` 1회 CPU 지연.
+
+    실측(2026-11-13, local host, best-of-5 min): cpu=0.003ms (perf_counter, 2000회 평균).
+    ADR-2026-09-09-C 예산표에 없는 신규 경로 -- 실측의 30배 이상 여유로 1.0ms 신설.
+    """
+    grid = ParamGrid(axes=AXES)
+    sample = perf_budget.best_of(
+        lambda: stability_score(grid, _SHARP_PEAK_METRICS), n=5, warmup=1, batch=200
+    )
+    assert sample.cpu_ms < 1.0, perf_budget.describe(sample, budget_ms=1.0)
+
+
+@pytest.mark.perf
+def test_sharp_peak_perf_gate_goes_red_with_virtual_10x_delay(
+    perf_budget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현: `ParamGrid.neighbors`에 예산 10배 가상 지연을 주입하면
+    위 예산 단언식이 실제로 AssertionError를 낸다(단언이 tautology가 아님)."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    monkeypatch.setattr(ParamGrid, "neighbors", virtual_delayed_sync(ParamGrid.neighbors, 0.01))
+    grid = ParamGrid(axes=AXES)
+    sample = perf_budget.best_of(lambda: stability_score(grid, _SHARP_PEAK_METRICS), n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 1.0
