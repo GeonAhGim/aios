@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
 from tests.integration.conftest import create_test_user
+from tests.support.perf_budget import PerfBudget
 
 
 def _asyncpg_dsn() -> str:
@@ -189,6 +190,41 @@ async def test_empty_table_name_raises_syntax_error(pool):
             expected_state_value="ACTIVE",
             set_values={"status": "SUSPENDED"},
         )
+
+
+async def test_conditional_update_latency_within_relative_budget(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
+    """성능 단언 — 조건부 UPDATE 1회 비용을 동일 풀의 단순 SELECT 기준선 대비
+    상대 예산으로 검증한다(절대 ms 단언은 CI 호스트 속도에 흔들리므로 금지, task-7631).
+    상태를 ACTIVE<->SUSPENDED로 토글해 매 호출이 실제 쓰기 경로를 타게 한다."""
+    user_id = await create_test_user(pool)
+    state = {"cur": "ACTIVE"}
+
+    async def flip() -> None:
+        nxt = "SUSPENDED" if state["cur"] == "ACTIVE" else "ACTIVE"
+        async with pool.acquire() as conn:
+            await conditional_update(
+                conn,
+                table="users",
+                id_column="user_id",
+                id_value=user_id,
+                expected_state_column="status",
+                expected_state_value=state["cur"],
+                set_values={"status": nxt},
+            )
+        state["cur"] = nxt
+
+    async def baseline() -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT status FROM users WHERE user_id = $1", user_id)
+
+    write = await perf_budget.best_of_async(flip, n=3, warmup=1, batch=200)
+    read = await perf_budget.best_of_async(baseline, n=3, warmup=1, batch=200)
+    # CPU 기준 상대 예산 — 쓰기 경로가 단순 SELECT의 20배를 넘으면 회귀로 본다.
+    assert write.cpu_ms < 20.0 * read.cpu_ms, (
+        f"write={write.cpu_ms:.3f}ms read={read.cpu_ms:.3f}ms ratio>{20.0}x"
+    )
 
 
 async def test_dependency_failure_injected_raises(pool, monkeypatch):
