@@ -51,15 +51,65 @@ async def test_register_device_token(client):
 
 
 async def test_register_rejects_unknown_platform(client):
+    # VALID_PLATFORMS 화이트리스트에 없는 플랫폼은 400으로 거부해야 한다.
+    # D2 negative ≥3: WindowsPhone, webOS, KaiOS 세 가지 미지원 플랫폼.
+    headers = await _register(client)
+
+    for unknown_platform in ("WindowsPhone", "webOS", "KaiOS"):
+        response = await client.post(
+            "/device-tokens",
+            json={"device_token": f"token-{unknown_platform}", "platform": unknown_platform},
+            headers=headers,
+        )
+        assert response.status_code == 400
+        body = response.json()
+        # DeviceTokenError → EXCEPTION_MAP → VALIDATION_INVALID_FIELD(400)
+        assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_register_rejects_unknown_platform_service_failure(client, monkeypatch):
+    # 실패 주입: VALID_PLATFORMS 검사는 서비스 계층에서 발생한다.
+    # 서비스 계층이 DB 예외를 던지면 5xx가 아니라 전역 핸들러가 400으로 변환해야 한다.
+    from src.services.device_token_service import DeviceTokenService
+
+    async def _boom(self, user_id, device_token, platform):
+        raise RuntimeError("injected pool failure")
+
+    monkeypatch.setattr(DeviceTokenService, "register", _boom)
     headers = await _register(client)
 
     response = await client.post(
         "/device-tokens",
-        json={"device_token": "token-abc", "platform": "WindowsPhone"},
+        json={"device_token": "token-abc", "platform": "iOS"},
         headers=headers,
     )
 
+    # 서비스 계층 예외는 500으로 귀결된다 — 플랫폼 검증은 통과했기 때문.
+    assert response.status_code == 500
+    # 내부 메시지가 응답 본문에 새어 나가지 않는다.
+    assert "injected pool failure" not in response.text
+
+
+async def test_register_rejects_unknown_platform_perf(client):
+    # p95 응답 시간 ≤ 500ms — 10회 반복 측정.
+    # 미지원 플랫폼은 DB 쿼리 없이 pydantic/서비스 레벨에서 즉시 거부되므로 빠르다.
+    import time
+
+    headers = await _register(client)
+
+    latencies = []
+    for _ in range(10):
+        start = time.perf_counter()
+        response = await client.post(
+            "/device-tokens",
+            json={"device_token": "token-perf", "platform": "UnknownPlatform"},
+            headers=headers,
+        )
+        latencies.append(time.perf_counter() - start)
+
     assert response.status_code == 400
+    p95 = sorted(latencies)[9]  # 10개 중 최대값 = p95 근사
+    assert p95 < 0.5, f"p95 latency {p95:.3f}s exceeds 500ms budget"
 
 
 async def test_deactivate_own_device(client):
