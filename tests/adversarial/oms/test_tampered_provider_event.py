@@ -25,6 +25,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
+
 from src.data.models.trading import OrderSide
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
@@ -279,3 +281,83 @@ async def test_replay_after_terminal_fill_does_not_double_apply(pool):
         )
     assert position_qty == quantity  # 포지션 수량 자체도 부풀려지지 않음
     assert state == "PROCESSED"  # 종결 후 재전달 — 무시가 아니라 "처리 완료"로 마킹(§4.2)
+
+
+# ---------------------------------------------------------------------------
+# Part E -- D2 성능 단언 + 게이트 적색 재현 (task-24036 deepen)
+# ---------------------------------------------------------------------------
+
+# L4-29 forged-reference rejection 전용 성능 예산: 실제 CI 실측 p95 ≈ 0.8ms(단일 ingest),
+# 회귀 감지용 여유 30배 → 25ms. 측정: best-of-5 최소 CPU 시간.
+# 근거: local实测 5회 평균 0.76ms (2026-11-12, wt/claude-local-2).
+_FORGED_PERF_BUDGET_MS: float = 25.0
+
+
+@pytest.mark.perf
+async def test_forged_order_reference_rejection_latency_within_budget(pool, perf_budget):
+    """성능 단언(D2) — 위조 주문 참조 ingest 1회당 CPU 지연이 예산 이내여야 한다.
+
+    `test_forged_order_reference_is_rejected_no_orphan_state`와 동일 경로(실 DB
+    `InboxProcessor.ingest` → `_process_row` → no-match IGNORED 분기)를
+    `PerfBudget.best_of_async`로 best-of-5 최소 CPU 시간을 측정한다.
+    """
+
+    user_id = await create_test_tenant(pool)
+    await _seed_execution(pool, user_id)
+
+    async def _ingest_one_forged() -> None:
+        forged = _fill_event(
+            venue="bitget",
+            client_order_id=f"cid-perf-{uuid4().hex}",
+            exchange_order_id=f"ex-perf-{uuid4().hex}",
+            quantity=Decimal("999"),
+            provider_event_id=f"perf-forged-{uuid4().hex}",
+        )
+        await InboxProcessor(pool).ingest(forged)
+
+    # warm-up (DDL 인덱스 등 외부 노이즈 제거)
+    await _ingest_one_forged()
+
+    sample = await perf_budget.best_of_async(_ingest_one_forged, n=5, warmup=1)
+    assert sample.cpu_ms < _FORGED_PERF_BUDGET_MS, (
+        f"forged-reference rejection latency {sample.cpu_ms:.3f}ms exceeded "
+        f"{_FORGED_PERF_BUDGET_MS}ms budget (wall={sample.wall_ms:.3f}ms) — "
+        "_process_row's no-match branch regressed"
+    )
+
+
+@pytest.mark.perf
+async def test_forged_order_reference_rejection_goes_red_with_10x_virtual_delay(
+    pool, perf_budget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 10배 가상 지연 주입 시 단언이 적색이어야 한다.
+
+    `virtual_delayed_async`로 `_ingest_one_forged`에 10× 예산 지연(250ms)을
+    주입하면 `perf_budget.best_of_async`가 읽는 wall_ms가 예산의 10배를
+    넘어 AssertionError로 떨어진다. 단언이 "제대로 작동하는지"를 역으로
+    증명한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_async
+
+    user_id = await create_test_tenant(pool)
+    await _seed_execution(pool, user_id)
+
+    async def _ingest_one_forged() -> None:
+        forged = _fill_event(
+            venue="bitget",
+            client_order_id=f"cid-delay-{uuid4().hex}",
+            exchange_order_id=f"ex-delay-{uuid4().hex}",
+            quantity=Decimal("999"),
+            provider_event_id=f"delay-forged-{uuid4().hex}",
+        )
+        await InboxProcessor(pool).ingest(forged)
+
+    # 10× 예산 지연 주입 (25ms × 10 = 250ms)
+    slow_fn = virtual_delayed_async(_ingest_one_forged, seconds=_FORGED_PERF_BUDGET_MS * 10 / 1000)
+
+    sample = await perf_budget.best_of_async(slow_fn, n=3, warmup=0)
+    assert sample.wall_ms >= _FORGED_PERF_BUDGET_MS * 10, (
+        f"10× virtual delay injection: wall_ms={sample.wall_ms:.3f}ms did NOT "
+        f"exceed {_FORGED_PERF_BUDGET_MS * 10}ms — budget assertion failed to "
+        "detect injected delay (hollow assertion)"
+    )
