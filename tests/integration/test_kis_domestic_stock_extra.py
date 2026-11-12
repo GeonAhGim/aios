@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
+# loc-allow: task-24289 D2 하한 보강 — negative 3 + perf + gate_red for get_investor_trading_by_stock
 
 import httpx
 import pytest
@@ -80,6 +81,109 @@ async def test_get_investor_trading_by_stock_returns_dict():
     result = await adapter.get_investor_trading_by_stock("005930")
 
     assert result == {"frgn_ntby_qty": "500"}
+
+
+# ── D2 하한 보강: negative 3 + perf + gate_red (task-24289) ──────────────────
+
+
+async def test_get_investor_trading_by_stock_empty_output():
+    """output 가 빈 딕셔너리면 빈 딕셔너리를 반환한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": {}})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-investor": handler}
+        )
+    )
+    assert await adapter.get_investor_trading_by_stock("005930") == {}
+
+
+async def test_get_investor_trading_by_stock_missing_output_key():
+    """output 키가 없으면 빈 딕셔너리를 반환한다(FatalExchangeError 안 함)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok"})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-investor": handler}
+        )
+    )
+    assert await adapter.get_investor_trading_by_stock("005930") == {}
+
+
+async def test_get_investor_trading_by_stock_rt_cd_error_raises():
+    """rt_cd != "0" 이면 RetryableExchangeError 를 raise 한다."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "1", "msg_cd": "E001", "msg1": "invalid"})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-investor": handler}
+        )
+    )
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_investor_trading_by_stock("005930")
+
+
+@pytest.mark.perf
+async def test_get_investor_trading_by_stock_latency_under_budget():
+    """성능 단언(D2): 100회 평균 CPU < 2ms. 실측 ≈ 1.1ms, 예산 2배 이상 여유.
+    asyncawait/라우팅 오버헤드로 1ms 미만 불안정 — 2ms 로 설정.
+    """
+    import time
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": {"frgn_ntby_qty": "500"}}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-investor": handler}
+        )
+    )
+    cpu_times: list[float] = []
+    for _ in range(100):
+        t0 = time.process_time()
+        await adapter.get_investor_trading_by_stock("005930")
+        cpu_times.append(time.process_time() - t0)
+    avg_ms = (sum(cpu_times) / len(cpu_times)) * 1000
+    assert avg_ms < 2.0, f"평균 CPU {avg_ms:.3f}ms 가 예산 2ms 초과"
+
+
+@pytest.mark.perf
+async def test_get_investor_trading_by_stock_gate_red_10x_delay_injection(
+    perf_budget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 0.1s 가상 지연 주입 → wall_ms >= 50ms 를 확인."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": {"frgn_ntby_qty": "500"}}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-investor": handler}
+        )
+    )
+    original_request = adapter._client.request
+    monkeypatch.setattr(adapter._client, "request", virtual_delayed_async(original_request, 0.1))
+
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_investor_trading_by_stock("005930"),
+        n=5,
+        warmup=1,
+    )
+    assert sample.wall_ms >= 50.0, f"지연 주입 후 wall_ms={sample.wall_ms:.3f}ms 가 하한 50ms 미만"
 
 
 async def test_get_dividend_disclosures_returns_raw_rows():
