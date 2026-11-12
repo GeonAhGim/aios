@@ -231,3 +231,20 @@ async def test_borrow_loan_propagates_request_error():
     # 50021은 retryable이므로 RetryableExchangeError로 래핑될 수 있음
     with pytest.raises(ExchangeAPIError):
         await adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
+
+
+# --- D2 성능 단언 (task-24210): perf_budget 경유, raw perf_counter 금지 ---
+
+
+@pytest.mark.perf
+async def test_get_loan_coin_info_latency_budget(perf_budget):
+    """MockTransport 왕복(어댑터 직렬화·파싱 오버헤드) 지연이 예산 내인지 단언한다."""
+    adapter = _make_adapter(
+        lambda req: _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": [{"coin": "BTC"}]}
+        )
+    )
+    sample = await perf_budget.sample_async(lambda: adapter.get_loan_coin_info(coin="BTC"))
+    assert sample.wall_ms < 500, (
+        f"get_loan_coin_info elapsed={sample.wall_ms:.2f}ms, 예산 500ms 초과"
+    )
