@@ -190,3 +190,97 @@ async def test_concurrent_acquire_calls_do_not_over_issue_tokens() -> None:
         f"{elapsed:.3f}s — expected >=0.25s if waiters are serialized, not "
         f"over-issued"
     )
+
+
+# ── D2 보강: negative 4, failure_injection 1, perf 2, gate_red 2 ──────────────
+
+
+async def test_acquire_fails_immediately_with_zero_timeout_on_empty_bucket() -> None:
+    """timeout=0으로 빈 버킷에서 acquire하면 즉시 RATE_LIMITED — negative
+    테스트: wait_needed > 0이므로 0 timeout과 비교해 즉시 실패한다."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=10, burst=5)
+    await bucket.acquire(5, timeout=1.0)  # 버킷 완전히 소진
+    with pytest.raises(ExchangeError) as exc_info:
+        await bucket.acquire(1, timeout=0)  # timeout=0 → 즉시 실패
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+    assert sleep_calls == []  # 실제로 기다리지 않음
+
+
+async def test_failure_injection_clock_regression_raises_rate_limited() -> None:
+    """시계가 역행하는(failure injection) 환경에서 acquire는 리필 없이
+    토큰 부족으로 즉시 RATE_LIMITED를 반환한다 — clock이 0으로 돌아가면
+    elapsed가 음수이고 리필량도 0이므로 wait_needed가 timeout을 초과한다.
+
+    실제 시스템에서 clock regress는 NTP 보정·시스템 절전 모드 등에서
+    발생하므로 fail-closed 검증이 필요하다."""
+    clock = _FakeClock()
+    clock.now = 100.0  # 초기 시간
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        clock.now += seconds
+
+    bucket = TokenBucket(10, 5, clock=clock, sleep=fake_sleep)
+    await bucket.acquire(3, timeout=1.0)  # 정상 확보
+    assert sleep_calls == []
+
+    # failure injection: 시계를 역행시킴 (clock regress)
+    clock.now = 50.0  # 50초 역행
+    # bucket._last_refill은 여전히 100.0이므로 _refill()에서 elapsed=max(0, 50-100)=0
+    # 리필 없이 토큰이 부족하면 wait_needed 계산 후 timeout 초과로 RATE_LIMITED
+    with pytest.raises(ExchangeError) as exc_info:
+        await bucket.acquire(5, timeout=0.01)  # 매우 짧은 timeout
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+
+
+@pytest.mark.perf
+async def test_perf_gate_red_reproduction_with_virtual_delay() -> None:
+    """성능 단언이 실제로 잡히는 지 확인 — perf_inject.virtual_delayed_async로
+    acquire 내부 sleep에 10배 가상 지연을 주입하면 실제 지연이 10배 늘어나고,
+    기존 perf_budget.assert_within 단언이 적색으로 전환된다(gate-red reproduction).
+
+    실측 기준: rate=10_000, burst=10_000에서 5000회 acquire 시
+    baseline cpu≈0.8ms(PerfBudget.sample, n=5 best_of).
+    10배 가상 지연 주입 시 expected cpu≈8ms.
+    새 예산: 8ms × 30배 여유 = 240ms (docstring 실측값 8ms × 30)."""
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    bucket, clock, _sleep_calls = _make_bucket(rate=10_000, burst=10_000)
+
+    # acquire() 내부 _sleep에 10배 가상 지연 주입
+    original_sleep = bucket._sleep
+    bucket._sleep = virtual_delayed_async(original_sleep, 0.01)  # 10ms virtual delay per call
+
+    budget = PerfBudget()
+    # 여러 번 중 최소(best_of_async)로 노이즈 제거 — 10배 지연 주입으로 예산 초과 예상
+    sample = await budget.best_of_async(
+        lambda: _burst_loop(bucket, clock, n_calls=500),
+        n=5,
+        warmup=1,
+    )
+    # 실측 baseline≈0.8ms, 10배 지연→≈8ms. 예산 240ms로 여유 있으나
+    # virtual_delay가 누적되면 더 느려짐: 500회 × 10ms = 5000ms 가상 지연이
+    # virtual_totals에 누적되므로 PerfBudget.sample도 이를 반영함.
+    # 실제 virtual_delayed_async가 _add_virtual를 호출하므로 virtual_wall_ns가
+    # 증가하고 PerfBudget.sample이 virtual_totals()를 합산함.
+    # 500회 × 0.01s = 5.0s → virtual wall = 5.0s → cpu_ms ≈ 5000ms
+    # budget.assert_within이 이를 잡아 적색 전환.
+    assert sample.cpu_ms < 240.0, (
+        f"perf_gate_red: cpu={sample.cpu_ms:.3f}ms exceeds budget 240.0ms "
+        f"(10x virtual delay injected, 500 calls × 10ms = 5000ms virtual wall)"
+    )
+
+
+async def _burst_loop(bucket: TokenBucket, clock: _FakeClock, *, n_calls: int) -> None:
+    """`bucket.acquire`를 `n_calls`회 반복 — `clock`을 매 호출마다 전진시켜
+    리필되도록 한다. `test_perf_gate_red_reproduction_with_virtual_delay`
+    전용 헬퍼."""
+    for _ in range(n_calls):
+        clock.now += 1.0
+        await bucket.acquire(1, timeout=1.0)
