@@ -9,8 +9,9 @@ deepen_3179.py`(task-3179)와 동일한 구조를 이 새 라우터에 처음부
 
 - 라우터 레벨 HTTP 왕복 1건: 토큰 발급 -> 목록 -> 회전 -> revoke 전체를 실제
   ASGI 트랜스포트로 호출한다.
-- negative 4건: 빈 scopes(400), 존재하지 않는 토큰 revoke(404), 타 테넌트
-  토큰 revoke(404, 교차 테넌트), 타 테넌트 제안 조회(404, 교차 테넌트).
+- negative 5건: 빈 scopes(400), 존재하지 않는 토큰 revoke(404), 타 테넌트
+  토큰 revoke(404, 교차 테넌트), 타 테넌트 제안 조회(404, 교차 테넌트),
+  ttl_seconds=0(400).
 - 실패 주입 1: `get_agent_token_repository` 의존성을 EXCEPTION_MAP에 없는
   예외(민감정보 포함)를 던지는 이중으로 교체해 fail-closed 봉투화를 확인한다.
 - 수치 성능 단언 1: `GET /v1/ai/tokens`(빈 테넌트, 단일 SELECT 왕복) p95를
@@ -190,6 +191,19 @@ async def test_get_other_tenants_proposal_is_404(client, pool):
 
     assert response.status_code == 404
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+# --- negative 5: ttl_seconds <= 0 -> 400 ---
+
+
+async def test_issue_agent_token_with_zero_ttl_is_400(client, pool):
+    headers, _tenant_id = await _register(client)
+
+    response = await client.post(f"{BASE}/tokens", headers=headers, json=_issue_body(ttl_seconds=0))
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
 # --- 실패 주입: EXCEPTION_MAP에 없는 예외가 원본 메시지를 누출하지 않음 ---
