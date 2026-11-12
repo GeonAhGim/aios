@@ -250,23 +250,34 @@ async def test_account_scope_only_that_accounts_order(pool):
     assert await _status_of(pool, order_b) == "SUBMITTED"
 
 
-async def test_strategy_deployment_exec_prefix_only_that_execution(pool):
+@pytest.mark.perf
+async def test_strategy_deployment_exec_prefix_only_that_execution(pool, perf_budget, monkeypatch):
+    """R-39: exec: isolation + best-of timing + 10x injected delay goes red (100ms budget)."""
+    from tests.support.perf_inject import virtual_delayed_async
+
     user_id = await create_test_user(pool)
-    target_exec = await _seed_execution(pool, user_id)
-    other_exec = await _seed_execution(pool, user_id)
-    target_order = await _seed_order(pool, user_id, execution_id=target_exec)
-    other_order = await _seed_order(pool, user_id, execution_id=other_exec)
+    adapters = _adapters("bitget")
 
-    report = await sweep_open_orders(
-        pool,
-        _adapters("bitget"),
-        control_id=uuid4(),
-        scope=SafetyScope.STRATEGY_DEPLOYMENT,
-        scope_ref=f"exec:{target_exec}",
-    )
+    async def sweep_exec(execution_id):
+        scope, ref = SafetyScope.STRATEGY_DEPLOYMENT, f"exec:{execution_id}"
+        return await sweep_open_orders(
+            pool, adapters, control_id=uuid4(), scope=scope, scope_ref=ref
+        )
 
-    assert report.cancel_requested == (target_order,)
-    assert await _status_of(pool, other_order) == "SUBMITTED"
+    async def measured():
+        target_exec = await _seed_execution(pool, user_id)
+        other_exec = await _seed_execution(pool, user_id)
+        target_order = await _seed_order(pool, user_id, execution_id=target_exec)
+        other_order = await _seed_order(pool, user_id, execution_id=other_exec)
+        assert (await sweep_exec(target_exec)).cancel_requested == (target_order,)
+        assert await _status_of(pool, other_order) == "SUBMITTED"
+
+    baseline = await perf_budget.best_of_async(measured, n=5, warmup=1)
+    assert baseline.wall_ms < PERF_BUDGET_MS, baseline
+    delayed = virtual_delayed_async(adapters["bitget"].cancel_order, seconds=1.0)
+    monkeypatch.setattr(adapters["bitget"], "cancel_order", delayed)
+    slow = await perf_budget.best_of_async(measured, n=3, warmup=0)
+    assert slow.wall_ms >= PERF_BUDGET_MS * 10 > PERF_BUDGET_MS  # budget check would go red
 
 
 async def test_strategy_deployment_dep_prefix_is_paper_control_target_not_orders(pool):
