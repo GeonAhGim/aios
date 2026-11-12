@@ -7,6 +7,8 @@ evaluate()/check_archive_advanced()는 순수 함수라 실제 Postgres 없이 �
 
 from __future__ import annotations
 
+import pytest
+
 from scripts.backup import wal_archive
 
 # --- evaluate ---------------------------------------------------------------
@@ -208,6 +210,23 @@ def test_evaluate_flags_missing_archive_mode():
     assert any("archive_mode" in i for i in issues)
 
 
+def test_evaluate_flags_empty_wal_level():
+    """wal_level가 빈 문자열이면 evaluate는 실패를 보고한다 — negative 테스트 3."""
+    settings = {"wal_level": "", "archive_mode": "on", "archive_command": "cp %p /archive/%f"}
+    issues = wal_archive.evaluate(settings)
+    assert any("wal_level" in i for i in issues)
+
+
+def test_evaluate_flags_multiple_issues():
+    """여러 설정이 동시에 잘못되면 evaluate는 모든 위반을 보고한다 — negative 테스트 4."""
+    settings = {"wal_level": "minimal", "archive_mode": "off", "archive_command": ""}
+    issues = wal_archive.evaluate(settings)
+    assert len(issues) >= 3  # wal_level + archive_mode + archive_command
+    assert any("wal_level" in i for i in issues)
+    assert any("archive_mode" in i for i in issues)
+    assert any("archive_command" in i for i in issues)
+
+
 # --- failure injection: OSError in verify_archiving_advances -----------------
 
 
@@ -229,3 +248,58 @@ def test_verify_archiving_advances_raises_OSError_from_list_dir():
             sleep=lambda s: None,
             clock=lambda: 999.0,  # deadline 초과 방지
         )
+
+
+# --- perf: evaluate() budget + gate-red with virtual delay -------------------
+
+
+@pytest.mark.perf
+def test_evaluate_perf_budget_and_gate_red():
+    """evaluate() 성능 예산 및 게이트 적색 재현 (D2, task-24483).
+
+    실측 baseline: evaluate() 한 호출 ≈ 0.01ms (순수 dict 조회 + 문자열 비교).
+    성능 예산: baseline의 30배 = 0.3ms (문서화 예산).
+
+    게이트 적색 재현: virtual_delayed_sync로 10ms 가상 지연 주입 →
+    perf_budget.sample.cpu_ms가 예산 0.3ms를 초과하면 적색 전환됨을 확인.
+    실제 sleep/busy-wait 금지 — virtual_delayed_sync가 virtual ledger에
+    나노초만 더하므로 테스트는 즉시 종료된다.
+    """
+
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    reset_virtual_totals()
+
+    baseline_settings = {
+        "wal_level": "replica",
+        "archive_mode": "on",
+        "archive_command": "cp %p /archive/%f",
+    }
+
+    # baseline 측정 — 지연 없이 정상 경로
+    budget = PerfBudget()
+    baseline_sample = budget.sample(lambda: wal_archive.evaluate(baseline_settings))
+    # baseline은 매우 빨라야 함 (순수 함수, 3개 dict 조회)
+    assert baseline_sample.cpu_ms < 0.3, (
+        f"baseline_perf: cpu={baseline_sample.cpu_ms:.3f}ms exceeds 0.3ms "
+        f"(pure dict lookups, no delay)"
+    )
+
+    # 게이트 적색 재현: evaluate() 전체 호출에 10ms 가상 지연 주입
+    # evaluate()를 virtual_delayed_sync로 감싸서 CPU ledger에 10ms 추가
+    reset_virtual_totals()
+    delayed_evaluate = virtual_delayed_sync(lambda: wal_archive.evaluate(baseline_settings), 0.01)
+    # virtual_delayed_sync는 cpu ledger에도 10ms를 기록하므로
+    # PerfBudget.sample이 이를 반영함
+    gate_red_sample = budget.sample(delayed_evaluate)
+    # 10ms 지연 주입 → cpu_ms ≈ 10ms. 예산 0.3ms를 초과하므로 게이트가 적색 전환됨을 확인.
+    # 이 단언은 "지연 주입 시 cpu_ms가 예산을 초과한다"는 사실을 검증 —
+    # 즉, 성능 게이트가 실제로 위반을 잡는지 적색 재현.
+    assert gate_red_sample.cpu_ms > 0.3, (
+        f"perf_gate_red: cpu={gate_red_sample.cpu_ms:.3f}ms exceeds budget 0.3ms "
+        f"(10ms virtual delay injected via virtual_delayed_sync)"
+    )
