@@ -58,7 +58,12 @@ def _find_forbidden_imports(
     """Returns the forbidden module names imported by ``path``, or ``[]`` if
     none. Parses ``path``'s own source (not the caller's) so a fixture file
     written to ``tmp_path`` in a negative test is checked on its own terms."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    source = path.read_text(encoding="utf-8")
+    # Cheap prefilter: an import of a forbidden module necessarily spells its
+    # dotted name in the source, so files without it skip the costly parse.
+    if not any(prefix in source for prefix in prefixes):
+        return []
+    tree = ast.parse(source)
     return [
         module_name
         for module_name in _imported_module_names(tree)
@@ -200,8 +205,9 @@ def test_ast_scan_completes_under_perf_budget(perf_budget: object) -> None:
     """Performance assertion: scanning all execution_loop files must complete
     well within a generous budget.
 
-    Measured on host: ~0.3 ms CPU for ~20 files (2026-11-12).
-    Budget = 10 ms (30x headroom over measured best-of).
+    Without the substring prefilter the full parse of ~100 KB cost 15-30 ms
+    (Windows CPU clock ticks at 15.6 ms); with it the scan is sub-tick.
+    Budget = 10 ms (unchanged).
     """
 
     def scan() -> int:
