@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
+# loc-allow: task-24227 D2 하한 보강 — negative 3 + perf + gate_red for dividend_disclosures
 
 import httpx
 import pytest
@@ -96,6 +97,105 @@ async def test_get_dividend_disclosures_returns_raw_rows():
     result = await adapter.get_dividend_disclosures(symbol="005930")
 
     assert result == [{"record_date": "20260101"}]
+
+
+async def test_get_dividend_disclosures_empty_output():
+    """음성: output 가 빈 리스트면 빈 리스트 반환."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": []})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ksdinfo/dividend": handler})
+    )
+    assert await adapter.get_dividend_disclosures(symbol="005930") == []
+
+
+async def test_get_dividend_disclosures_missing_output_key():
+    """음성: output 키 없으면 빈 리스트 반환(FatalExchangeError 안 함)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok"})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ksdinfo/dividend": handler})
+    )
+    assert await adapter.get_dividend_disclosures(symbol="005930") == []
+
+
+async def test_get_dividend_disclosures_non_list_output():
+    """음성: output 가 dict 면 list() 로 key 목록을 반환(_as_rows 동일 동작)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": {"record_date": "20260101"}}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ksdinfo/dividend": handler})
+    )
+    result = await adapter.get_dividend_disclosures(symbol="005930")
+    assert result == ["record_date"]
+
+
+@pytest.mark.perf
+async def test_get_dividend_disclosures_latency_under_budget(perf_budget):
+    """성능 단언(D2): MockTransport 위 라우팅+dict 접근은 CPU 마이크로초 단위.
+    실측 ≈ 0.02ms, 예산 1ms(50배 여유)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"record_date": "20260101"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ksdinfo/dividend": handler})
+    )
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_dividend_disclosures(symbol="005930"),
+        n=7,
+        warmup=2,
+        batch=20,
+    )
+    assert sample.cpu_ms < 1.0, f"CPU 시간 {sample.cpu_ms:.3f}ms 가 예산 1ms 초과"
+
+
+@pytest.mark.perf
+async def test_get_dividend_disclosures_gate_red_10x_delay_injection(
+    perf_budget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): _request 에 0.1s 가상 지연 주입하면 wall_ms 가
+    하한 50ms 를 초과해야 함(단언이 지연을 포착함을 증명)."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"record_date": "20260101"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ksdinfo/dividend": handler})
+    )
+
+    original_request = adapter._client.request
+    monkeypatch.setattr(
+        adapter._client,
+        "request",
+        virtual_delayed_async(original_request, 0.1),
+    )
+
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_dividend_disclosures(symbol="005930"),
+        n=5,
+        warmup=1,
+    )
+
+    assert sample.wall_ms >= 50.0, (
+        f"지연 주입 후 wall_ms={sample.wall_ms:.3f}ms 가 하한 50ms 미만 — "
+        "게이트가 지연을 포착하지 못함"
+    )
 
 
 async def test_get_program_trade_daily_returns_raw_rows():
