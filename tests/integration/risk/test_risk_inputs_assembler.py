@@ -184,6 +184,63 @@ async def test_missing_distrust_level_denies_via_safety_state_rule(pool):
     assert result.reason_code == "RISK_INPUT_MISSING:safety.data_distrust_level"
 
 
+async def _assembled_safety_isolated(pool, strategy_id, distrust_level, **intent_update):
+    """Assemble real inputs, then isolate the distrust_level path of safety_state."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    symbol = "ETH/USDT"
+    inputs = await assemble_risk_inputs(
+        pool,
+        caches(),
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent(symbol, strategy_id),
+        balances=[
+            AccountBalance(
+                exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+            )
+        ],
+        candles=candles(symbol, "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+    update = {"active_control_scopes": (), "data_distrust_level": distrust_level}
+    isolated = inputs.model_copy(update={"safety": inputs.safety.model_copy(update=update)})
+    if intent_update:
+        isolated = isolated.model_copy(
+            update={"intent": isolated.intent.model_copy(update=intent_update)}
+        )
+    return isolated
+
+
+async def test_known_distrust_level_not_reported_as_missing(pool):
+    """Negative — a present NORMAL level must not yield the missing-input DENY,
+    so the reason_code assertion above cannot pass vacuously."""
+    isolated = await _assembled_safety_isolated(pool, "strat-distrust-normal", "NORMAL")
+    result = safety_state.safety_state(isolated, POLICY)
+    assert result.reason_code != "RISK_INPUT_MISSING:safety.data_distrust_level"
+    assert not (result.reason_code or "").startswith("RISK_DATA_DISTRUST_")
+
+
+async def test_distrusted_level_denies_with_distrust_reason_not_missing(pool):
+    """Negative — DISTRUSTED is denied with its own reason, distinct from the
+    missing-input reason (gate red: swapping the level flips the reason code)."""
+    isolated = await _assembled_safety_isolated(pool, "strat-distrust-bad", "DISTRUSTED")
+    result = safety_state.safety_state(isolated, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_DATA_DISTRUST_DISTRUSTED"
+    assert result.reason_code != "RISK_INPUT_MISSING:safety.data_distrust_level"
+
+
+async def test_distrusted_level_with_reduce_only_not_denied_for_distrust(pool):
+    """Negative — reduce_only exits are exempt from the distrust deny."""
+    isolated = await _assembled_safety_isolated(
+        pool, "strat-distrust-reduce", "DISTRUSTED", reduce_only=True
+    )
+    result = safety_state.safety_state(isolated, POLICY)
+    assert not (result.reason_code or "").startswith("RISK_DATA_DISTRUST_")
+
+
 async def test_other_tenants_positions_excluded(pool):
     """DoD (6) — 교차 테넌트: user_b의 포지션이 user_a의 조립 결과로 새지
     않는다."""
