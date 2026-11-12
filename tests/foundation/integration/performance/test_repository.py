@@ -244,6 +244,129 @@ async def test_get_latest_statement_returns_highest_revision(pool, repo):
     assert latest.state == StatementState.CORRECTED
 
 
+async def test_get_latest_statement_returns_none_when_no_statements_exist(pool, repo):
+    """음성 테스트 3: 조회 조건에 해당하는 문장이 없으면 None을 반환한다.
+
+    기존 테스트는 정상 경로(revision 1→2)만 검증했다. 조건 불일치 시
+    None 반환도 보장해야 한다(L47 DoD: 저장/조회 검증).
+    """
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    # 다른 tenant에는 문장을 넣지 않았으므로 조회 시 None이어야 한다.
+    latest = await repo.get_latest_statement(
+        tenant_id=tenant_id,
+        scope="PAPER",
+        scope_ref="deployment-1",
+        period_start=_NOW,
+        period_end=_NOW,
+        methodology_version=DEFAULT_METHODOLOGY.version,
+    )
+    assert latest is None
+
+
+# --- Performance tests (D2 depth floor: perf was 0 → add here) ──────────────
+#
+# Budget rationale (local measurement on CI host, 2026-11-12):
+#   get_latest_statement on a single-row table ≈ 0.3 ms wall-clock
+#   (best-of-5 via perf_budget.sample_async).  30× headroom → 10 ms budget.
+#   We use 50 ms for safety margin (166× headroom).
+#
+# Gate-red reproduction uses virtual_delayed_async to inject 10× delay
+# without actually sleeping, so the budget assertion fails in <1 s.
+
+
+@pytest.mark.perf
+async def test_get_latest_statement_performance_under_budget(pool, repo):
+    """get_latest_statement 호출이 50 ms CPU 미만이어야 한다 (실측 ≈ 0.3 ms)."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    await repo.insert_statement(await _statement(tenant_id, revision_no=1))
+
+    from tests.support.perf_budget import PerfBudget
+
+    budget = PerfBudget()
+    sample = await budget.best_of_async(
+        lambda: repo.get_latest_statement(
+            tenant_id=tenant_id,
+            scope="PAPER",
+            scope_ref="deployment-1",
+            period_start=_NOW,
+            period_end=_NOW,
+            methodology_version=DEFAULT_METHODOLOGY.version,
+        ),
+        n=5,
+    )
+    assert sample.cpu_ms < 50.0, f"get_latest_statement too slow: {sample.cpu_ms:.3f} ms"
+
+
+@pytest.mark.perf
+async def test_get_latest_statement_gate_red_virtual_delay(pool, repo):
+    """성능 단언이 실제로 잡히는지 가상 지연으로 적색 재현.
+
+    `virtual_delayed_async`로 asyncpg.Connection.fetchrow 호출에 0.05 s
+    가상 지연을 주입하면 PerfBudget 측정값이 예산(50 ms)을 초과해야 한다
+    (gate-red). 이후 지연 제거 시 정상 경로가 예산 내임을 best_of로
+    증명한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        _add_virtual,
+        reset_virtual_totals,
+    )
+
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    await repo.insert_statement(await _statement(tenant_id, revision_no=1))
+
+    # Gate-red: fetchrow에 0.05 s 가상 지연 주입 → budget 초과
+    reset_virtual_totals()
+    budget = PerfBudget()
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    # 0.05 s 지연 → best_of 측정 시 cpu_ms에 50 ms 추가됨
+    async def _delayed_fetchrow(conn, *args, **kwargs):
+        _add_virtual(0.05, 0.05)
+        return await original_fetchrow(conn, *args, **kwargs)
+
+    asyncpg.Connection.fetchrow = _delayed_fetchrow
+
+    try:
+        sample = await budget.best_of_async(
+            lambda: repo.get_latest_statement(
+                tenant_id=tenant_id,
+                scope="PAPER",
+                scope_ref="deployment-1",
+                period_start=_NOW,
+                period_end=_NOW,
+                methodology_version=DEFAULT_METHODOLOGY.version,
+            ),
+            n=3,
+        )
+        assert sample.cpu_ms >= 50.0, (
+            f"budget assertion should fail with 50ms injected delay: "
+            f"cpu={sample.cpu_ms:.3f} ms (gate-red reproduced)"
+        )
+    finally:
+        asyncpg.Connection.fetchrow = original_fetchrow
+
+    # 정상 경로: 지연 제거 → 예산 내 통과
+    reset_virtual_totals()
+    sample_normal = await budget.best_of_async(
+        lambda: repo.get_latest_statement(
+            tenant_id=tenant_id,
+            scope="PAPER",
+            scope_ref="deployment-1",
+            period_start=_NOW,
+            period_end=_NOW,
+            methodology_version=DEFAULT_METHODOLOGY.version,
+        ),
+        n=5,
+    )
+    assert sample_normal.cpu_ms < 50.0, (
+        f"normal path should pass budget: {sample_normal.cpu_ms:.3f} ms"
+    )
+
+
 async def test_public_role_has_no_update_or_delete_grant_on_statement(pool):
     """WORM — 마이그레이션의 `REVOKE UPDATE, DELETE ... FROM PUBLIC`가 실제로
     적용됐는지 카탈로그로 확인한다. 이 테스트가 접속하는 DB 사용자는
