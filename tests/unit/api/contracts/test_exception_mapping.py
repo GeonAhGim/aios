@@ -149,6 +149,71 @@ def test_exception_with_empty_message_preserves_empty_in_message():
     assert message == ""
 
 
+def test_exception_with_non_dict_details_ignores_details_attribute():
+    """부정: 예외가 details 속성에 dict가 아닌 값을 가지면 _structured_details가
+    {}를 반환한다 — INTERNAL_ERROR 경로든 매핑 경로든 details는 비워진다."""
+    from src.api.contracts.exception_mapping import map_exception
+
+    class BadDetails(AuthError):
+        details = "not a dict"
+
+    code, message, details = map_exception(BadDetails("bad details"))
+    assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+    assert message == "bad details"
+    assert details == {}
+
+
+def test_exception_with_none_details_ignores_none_attribute():
+    """부정: 예외가 details=None을 가지면 getattr가 None을 반환하고
+    isinstance(None, dict)가 False이므로 {}가 된다."""
+    from src.api.contracts.exception_mapping import map_exception
+
+    class NoneDetails(AuthError):
+        details = None
+
+    code, _, details = map_exception(NoneDetails("none details"))
+    assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+    assert details == {}
+
+
+def test_override_status_with_unmapped_exception_returns_none():
+    """부정: override_status는 EXCEPTION_MAP/STATUS_OVERRIDE에 없는 예외에
+    대해 None을 반환한다 — 호출자가 기본 상태코드를 사용하도록 한다."""
+    from src.api.contracts.exception_mapping import override_status
+
+    class UnknownException(Exception):
+        pass
+
+    assert override_status(UnknownException("unknown")) is None
+
+
+def test_override_status_with_mapped_exception_returns_custom_code():
+    """부정 아님: STATUS_OVERRIDE에 등록된 예외는 override_status가 상태코드를
+    반환한다 — 기본 HTTP_STATUS[code]가 아닌 오버라이드 값을 쓴다."""
+    from src.api.contracts import exception_mapping
+    from src.api.contracts.exception_mapping import override_status
+
+    original = exception_mapping.STATUS_OVERRIDE
+    try:
+        exception_mapping.STATUS_OVERRIDE = [(AuthError, 418)]
+        assert override_status(AuthError("teapot")) == 418
+    finally:
+        exception_mapping.STATUS_OVERRIDE = original
+
+
+def test_map_exception_with_exception_chained_by_cause_returns_outer_str():
+    """부정: __cause__로 체인된 예외가 있어도 map_exception은 str(exc)로
+    외곽 예외의 메시지만 반환한다 — 체인된 예외의 메시지는 누출되지 않는다."""
+    inner = RuntimeError("inner failure")
+    outer = AuthError("outer failure")
+    outer.__cause__ = inner
+
+    code, message, _ = map_exception(outer)
+    assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+    assert message == "outer failure"
+    assert "inner" not in message
+
+
 # ── failure-injection tests (monkeypatch) ────────────────────────────────
 
 

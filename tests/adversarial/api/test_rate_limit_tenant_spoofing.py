@@ -185,3 +185,77 @@ def test_flag_off_keeps_legacy_unverified_tenant_header_behavior(
     key = _resolve_key(request, POLICIES["admin"])
 
     assert key == "tenant:victim-tenant"
+
+
+# ── Performance tests (D2) ──────────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+def test_resolve_key_latency_within_budget(perf_budget) -> None:
+    """성능 단언(D2) — `_resolve_key` 1회 호출의 CPU 지연이 예산 이내여야 한다.
+
+    실측(2026-11-12, local host, best-of-5 min): cpu=0.045ms.
+    ADR-2026-09-09-C Decision 1 테이블에 없는 신규 경로이므로
+    실측의 30배 여유로 예산 신설: 0.045ms x 30 = 1.35ms -> 1.0ms로
+    안전 마진 확보. `_resolve_key`는 순수 동기 JWT 검증 + 문자열
+    결합이므로 1ms는 충분히 여유 있다.
+    """
+    request = _make_request(
+        headers={
+            "X-Tenant-Id": "perf-tenant",
+            "Authorization": f"Bearer {_valid_jwt()}",
+        }
+    )
+
+    sample = perf_budget.best_of(lambda: _resolve_key(request, POLICIES["admin"]), n=5, warmup=1)
+
+    assert sample.cpu_ms < 1.0, (
+        f"_resolve_key latency {sample.cpu_ms:.3f}ms exceeded 1.0ms budget "
+        f"(wall={sample.wall_ms:.3f}ms) — key resolution regressed"
+    )
+
+
+@pytest.mark.perf
+def test_resolve_key_gate_red_goes_red_with_virtual_jwt_delay(
+    perf_budget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): `jwt.decode`에 가상 지연 주입 시 성능 단언이
+    적색(AssertionError)이어야 한다.
+
+    FLAG_TENANT_JWT_VERIFY=1 상태에서 _resolve_key() 가 _verified_bearer_payload()
+    를 거쳐 jwt.decode() 를 호출하는 경로에 50ms 지연을 주입한다.
+    `_resolve_key`가 그 지연을 그대로 흡수하여 wall_ms가 50ms를 넘어
+    1.0ms 예산의 10배를 초과한다. 단언이 "제대로 작동하는지"를
+    역으로 증명한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    # FLAG_TENANT_JWT_VERIFY=1 — _verified_bearer_payload() 가 jwt.decode() 호출
+    monkeypatch.setenv(FLAG_TENANT_JWT_VERIFY, "1")
+    request = _make_request(
+        headers={
+            "X-Tenant-Id": "red-tenant",
+            "Authorization": f"Bearer {_valid_jwt()}",
+        }
+    )
+
+    original_decode = jwt.decode
+
+    def delayed_decode(*args, **kwargs):
+        return virtual_delayed_sync(original_decode, 50.0)(*args, **kwargs)
+
+    monkeypatch.setattr("jwt.decode", delayed_decode)
+
+    # 적색 주입 — jwt.decode에 50ms 지연
+    sample_red = perf_budget.best_of(
+        lambda: _resolve_key(request, POLICIES["admin"]), n=3, warmup=0
+    )
+    assert sample_red.wall_ms >= 50.0, (
+        f"virtual delay injection failed: wall_ms={sample_red.wall_ms:.3f}ms "
+        "did NOT absorb the 50ms injection — budget assertion may be hollow"
+    )
+    assert sample_red.cpu_ms >= 50.0, (
+        f"virtual delay injection failed: cpu_ms={sample_red.cpu_ms:.3f}ms "
+        "did NOT absorb the 50ms injection — budget assertion may be hollow"
+    )
