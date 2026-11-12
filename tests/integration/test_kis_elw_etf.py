@@ -10,6 +10,7 @@ import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.kis.rate_profile import reset_token_bucket_registry_for_test
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -20,6 +21,29 @@ def _make_adapter(handler) -> KISAdapter:
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
     return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+
+
+async def _instant_sleep(_seconds: float) -> None:
+    """Skip the rate-limit token bucket's real wait (perf tests measure cpu_ms only)."""
+
+
+def _make_instant_adapter(handler) -> KISAdapter:
+    # The bucket registry is a process-wide singleton that keeps its first owner's
+    # sleep, so reset it to make the injected sleep take effect.
+    reset_token_bucket_registry_for_test()
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    return KISAdapter(
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=client,
+        sleep_fn=_instant_sleep,
+    )
 
 
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:
@@ -212,7 +236,7 @@ async def test_get_elw_price_completes_within_budget(perf_budget):
             json={"rt_cd": "0", "msg1": "ok", "output": {"stck_prpr": "150", "acml_vol": "500"}},
         )
 
-    adapter = _make_adapter(
+    adapter = _make_instant_adapter(
         lambda request: _route(
             request, {"/uapi/domestic-stock/v1/quotations/inquire-elw-price": handler}
         )
@@ -242,7 +266,7 @@ async def test_get_etf_price_completes_within_budget(perf_budget):
             json={"rt_cd": "0", "msg1": "ok", "output": {"stck_prpr": "10000", "acml_vol": "2000"}},
         )
 
-    adapter = _make_adapter(
+    adapter = _make_instant_adapter(
         lambda request: _route(request, {"/uapi/etfetn/v1/quotations/inquire-price": handler})
     )
 
