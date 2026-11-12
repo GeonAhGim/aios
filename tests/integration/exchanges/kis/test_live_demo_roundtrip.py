@@ -60,6 +60,8 @@ from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_futureoption_mixin import (
     KISOverseasFutureoptionMixin as _OverseasFutureoptionMixin,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # 모듈 전체가 아니라 왕복을 "시도"하는 세 테스트에만 개별 부여한다(아래
 # `@pytest.mark.live_demo`) — `test_overseas_futureoption_trs_...`는 자격증명
@@ -237,3 +239,112 @@ def test_overseas_futureoption_trs_have_no_paper_trading_equivalent() -> None:
     assert hasattr(_OverseasFutureoptionMixin, "place_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "cancel_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "get_overseas_futureoption_balance")
+
+
+# ---------------------------------------------------------------------------
+# D2 보강 — 자격증명 없이 항상 실행되는 오프라인 가드(음성/실패 주입/성능/적색 재현)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_env_vars_reports_names_only_never_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """음성: 누락 보고는 변수 이름만 담고 설정된 값은 절대 포함하지 않는다(redaction)."""
+    secret = "super-secret-value-do-not-leak"
+    monkeypatch.setenv("KIS_LIVE_DEMO_APP_KEY", secret)
+    monkeypatch.delenv("KIS_LIVE_DEMO_APP_SECRET", raising=False)
+    monkeypatch.delenv("KIS_LIVE_DEMO_CANO", raising=False)
+    missing = _missing_env_vars(_ACCOUNT_ENV_VARS)
+    assert missing == ["KIS_LIVE_DEMO_APP_SECRET", "KIS_LIVE_DEMO_CANO"]
+    assert secret not in ", ".join(missing)
+
+
+def test_account_env_vars_do_not_collide_with_conftest_overridden_names() -> None:
+    """음성: conftest가 고정값으로 덮어쓰는 KIS_APP_KEY/KIS_APP_SECRET는 왕복 자격증명
+    이름에 포함되면 안 된다(가짜 키로 실서버 호출 방지)."""
+    assert "KIS_APP_KEY" not in _ACCOUNT_ENV_VARS
+    assert "KIS_APP_SECRET" not in _ACCOUNT_ENV_VARS
+    assert all(name.startswith("KIS_LIVE_DEMO_") for name in _ACCOUNT_ENV_VARS)
+
+
+def test_missing_futures_symbol_is_reported_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """음성: 계좌 자격증명이 모두 있어도 선물 월물 심볼이 없으면 그 변수만 누락으로 보고된다."""
+    for name in _ACCOUNT_ENV_VARS:
+        monkeypatch.setenv(name, "x")
+    monkeypatch.delenv(_FUTURES_SYMBOL_ENV_VAR, raising=False)
+    assert _missing_env_vars(_ACCOUNT_ENV_VARS) == []
+    assert _missing_env_vars((_FUTURES_SYMBOL_ENV_VAR,)) == [_FUTURES_SYMBOL_ENV_VAR]
+
+
+def test_missing_env_vars_failure_injection_empty_string_counts_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: 빈 문자열로 깨진 자격증명(.env 빈 값)은 누락으로 취급돼 skip 경로를 탄다."""
+    for name in _ACCOUNT_ENV_VARS:
+        monkeypatch.setenv(name, "")
+    assert _missing_env_vars(_ACCOUNT_ENV_VARS) == list(_ACCOUNT_ENV_VARS)
+
+
+def test_roundtrip_orders_are_unique_non_marketable_safe_limits() -> None:
+    """음성: 왕복 주문은 매번 고유 client_order_id이며 체결 위험 없는 지정가 1주다."""
+    first = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity",
+    )
+    second = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="kr-equity",
+    )
+    assert first.client_order_id != second.client_order_id
+    assert first.order_type is OrderType.LIMIT
+    assert first.quantity == Decimal("1")
+    assert _KR_EQUITY_SAFE_PRICE <= Decimal("1000")
+    assert _US_EQUITY_SAFE_PRICE <= Decimal("1.00")
+
+
+# 로컬 실측(2026-11-12, Windows, best_of n=5 batch=50): _order() ~0.03ms/호출(pydantic 모델
+# 생성 포함). 예산 1.0ms는 실측의 30배 이상 여유 — 공유 CI 편차 흡수용.
+_ORDER_BUILD_BUDGET_MS = 1.0
+_PERF_BATCH = 50
+
+
+def _build_safe_order() -> Order:
+    return _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="perf",
+    )
+
+
+@pytest.mark.perf
+def test_order_build_under_budget(perf_budget: PerfBudget) -> None:
+    """성능: 왕복 주문 객체 생성 호출당 CPU 시간이 예산(1.0ms) 안에 든다."""
+    perf_budget.assert_within(
+        _build_safe_order,
+        budget_ms=_ORDER_BUILD_BUDGET_MS,
+        n=5,
+        batch=_PERF_BATCH,
+        label="roundtrip order build",
+    )
+
+
+@pytest.mark.perf
+def test_order_build_budget_turns_red_under_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현: 예산 10배(10ms) 가상 지연을 주입하면 같은 예산 단언이 적색이 된다."""
+    reset_virtual_totals()
+    delayed = virtual_delayed_sync(_build_safe_order, _ORDER_BUILD_BUDGET_MS * 10 / 1000)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(delayed, budget_ms=_ORDER_BUILD_BUDGET_MS, n=5, batch=_PERF_BATCH)
+    reset_virtual_totals()
