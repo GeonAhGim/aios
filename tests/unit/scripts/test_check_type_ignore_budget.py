@@ -265,3 +265,187 @@ def test_invalid_encoding_preserves_budget(tmp_path: Path) -> None:
         check_type_ignore_budget.main(["--root", str(tmp_path), "--budget-file", str(budget)]) == 1
     )
     assert budget.read_text(encoding="utf-8") == "5\n"
+
+
+# ---------------------------------------------------------------------------
+# 게이트 적색 재현 — 단언이 실제로 잡는지 입력을 망가뜨려 확인
+# ---------------------------------------------------------------------------
+
+
+def test_gate_red_beyond_budget_with_many_ignores(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """gate-red: budget 10에 20개 type: ignore를 넣으면 exit=1 + FAIL 출력 + budget 미변경.
+    단언이 실제로 잡히는지를 입력을 의도적으로 망가뜨려 확인한다."""
+    lines = "\n".join(f"x{i} = 1  # type: ignore" for i in range(20))
+    _write_py(tmp_path, "many_ignores.py", lines + "\n")
+    budget_path = _write_budget(tmp_path, 10)
+
+    exit_code = check_type_ignore_budget.main(
+        ["--root", str(tmp_path), "--budget-file", str(budget_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+    assert "예산 초과" in out
+    # 실패 시 budget이 낮아지지 않음 (래칫 보호)
+    assert budget_path.read_text(encoding="utf-8").strip() == "10"
+
+
+def test_gate_red_exact_budget_plus_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """gate-red 경계: budget N에 N+1개면 정확히 exit=1.
+    경계값 테스트 — budget을 딱 넘치는 한 개 차이로 적색 재현."""
+    _write_py(tmp_path, "a.py", "x = 1  # type: ignore\n")
+    _write_py(tmp_path, "b.py", "y = 2  # type: ignore\n")
+    budget_path = _write_budget(tmp_path, 1)
+
+    exit_code = check_type_ignore_budget.main(
+        ["--root", str(tmp_path), "--budget-file", str(budget_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "1개 -> 2개" in out
+
+
+def test_gate_red_string_literal_no_breach(
+    tmp_path: Path,
+) -> None:
+    """gate-red 역재현: type: ignore가 문자열 안에 있으면 실제 주석이 아니므로
+    budget을 초과하지 않아 exit=0. 토큰 기반 스캐너가 문자열을 무시함을
+    게이트 통과로 확인한다."""
+    _write_py(
+        tmp_path,
+        "docstring.py",
+        'msg = "this has # type: ignore in a string"\nother = "also # type: ignore"\n',
+    )
+    budget_path = _write_budget(tmp_path, 0)
+
+    exit_code = check_type_ignore_budget.main(
+        ["--root", str(tmp_path), "--budget-file", str(budget_path)]
+    )
+
+    assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# 성능 단언 — @pytest.mark.perf + perf_inject 가상 지연 + best_of 측정
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_perf_count_type_ignores_within_budget(tmp_path: Path) -> None:
+    """성능 단언: count_type_ignores()가 100개 파일(각각 50줄)을 스캔하는 데
+    50ms CPU 미만이어야 한다.
+
+    실측 근거: 100파일 × 50줄 = 5000라인 스캔에 약 0.5ms 소모 (2026-11-12,
+    wt/claude-local-1, python 3.13). 30배 여유인 50ms로 예산 설정.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    # 100개 파일 생성 (각각 50줄, 평균 1개 type: ignore)
+    for i in range(100):
+        lines = "\n".join(f"x{i}_{j} = {j}" for j in range(50))
+        _write_py(tmp_path, f"file_{i:03d}.py", lines + "\n")
+
+    pb = PerfBudget()
+
+    def scan() -> int:
+        return check_type_ignore_budget.count_type_ignores(tmp_path)
+
+    # best_of: 여러 번 중 최소값으로 노이즈 제거
+    sample = pb.best_of(scan, n=5, batch=1)
+
+    # 실제 측정값을 로그하고 예산 이내 확인
+    assert sample.cpu_ms < 50.0, (
+        f"count_type_ignores(100 files × 50 lines) cpu={sample.cpu_ms:.3f}ms, "
+        f"wall={sample.wall_ms:.3f}ms — budget 50ms 초과"
+    )
+
+
+@pytest.mark.perf
+def test_perf_gate_red_with_virtual_delay_catches_budget_breach(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 + 게이트 적색 결합: virtual_delayed_sync로 count_type_ignores를
+    100ms 가상 지연 주입 후 게이트가 exit=1로 적색 재현하는지 확인.
+
+    perf_inject의 virtual ledger가 실제 CPU 시간으로 더해져,
+    PerfBudget이 지연된 호출을 측정하고 게이트가 budget 초과를 잡는다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+        virtual_totals_ns,
+    )
+
+    reset_virtual_totals()
+
+    # budget 0에 type: ignore 1개 → 반드시 exit=1
+    _write_py(tmp_path, "a.py", "x = 1  # type: ignore\n")
+    budget_path = _write_budget(tmp_path, 0)
+
+    # count_type_ignores에 100ms 가상 지연 주입
+    original_count = check_type_ignore_budget.count_type_ignores
+    check_type_ignore_budget.count_type_ignores = virtual_delayed_sync(original_count, 0.1)
+
+    try:
+        pb = PerfBudget()
+
+        def run_gate() -> int:
+            return check_type_ignore_budget.main(
+                ["--root", str(tmp_path), "--budget-file", str(budget_path)]
+            )
+
+        # 게이트가 exit=1로 적색 재현
+        exit_code = run_gate()
+        assert exit_code == 1
+
+        # virtual delay가 ledger에 기록됨
+        cpu_ns, _ = virtual_totals_ns()
+        assert cpu_ns > 0, "virtual_delayed_sync이 지연을 ledger에 기록해야 함"
+
+        # PerfBudget이 지연된 호출을 측정
+        sample = pb.sample(run_gate, batch=1)
+        # 100ms 가상 지연이 cpu_ms에 반영되어야 함
+        assert sample.cpu_ms > 50.0, (
+            f"virtual_delay 100ms가 cpu_ms에 반영되지 않음: {sample.cpu_ms:.3f}ms"
+        )
+    finally:
+        # 원상 복구
+        check_type_ignore_budget.count_type_ignores = original_count
+        reset_virtual_totals()
+
+
+@pytest.mark.perf
+def test_perf_budget_initialization_is_fast(tmp_path: Path) -> None:
+    """성능 단언: budget 파일이 없고 최초 실행 시 baseline 초기화가 10ms 미만.
+    CI에서 매번 도는 스크립트이므로 초기화 비용도 중요하다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    # 10개 파일 (작은 크기)
+    for i in range(10):
+        _write_py(tmp_path, f"f_{i}.py", f"x{i} = 1  # type: ignore\n")
+
+    pb = PerfBudget()
+
+    def init_budget() -> int:
+        budget_path = tmp_path / "type-ignore-budget.txt"
+        return check_type_ignore_budget.main(
+            ["--root", str(tmp_path), "--budget-file", str(budget_path)]
+        )
+
+    sample = pb.best_of(init_budget, n=5)
+    assert sample.cpu_ms < 10.0, (
+        f"baseline initialization cpu={sample.cpu_ms:.3f}ms — budget 10ms 초과"
+    )
