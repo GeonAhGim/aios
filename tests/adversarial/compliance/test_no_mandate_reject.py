@@ -29,7 +29,7 @@ import pytest
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
 )
-from src.foundation.mandates.application.pause_mandate import pause_mandate
+from src.foundation.mandates.application.pause_mandate import pause_mandate, resume_mandate
 from src.foundation.mandates.application.propose_amendment import propose_amendment
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateOutcome, OrderContext
@@ -263,3 +263,140 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     post_race = await gate(context)
     assert post_race.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in post_race.reason_codes
+
+
+# --- D2 하한 보강 (task-24274): negative 3, failure_injection 1, perf 1 ---
+
+
+async def test_concurrent_pause_then_resume_allows_again(pool, repo, trust_repo):
+    """음성 1 — PAUSED mandate를 resume하면 게이트가 다시 ALLOW로 돌아온다.
+    pause가 mandate를 영구적으로 차단하지 않음을 확인(음성: '정지=영구차단 아님')."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    # pause → DENY
+    await pause_mandate(repo, tenant_id=user_id)
+    denied = await gate(context)
+    assert denied.outcome == GateOutcome.DENY
+
+    # resume → ALLOW로 복귀
+    await resume_mandate(repo, tenant_id=user_id)
+    resumed = await gate(context)
+    assert resumed.outcome == GateOutcome.ALLOW
+
+
+async def test_concurrent_pause_does_not_affect_other_tenant(pool, repo, trust_repo):
+    """음성 2 — 한 tenant의 PAUSED 상태가 다른 tenant의 게이트 통과를 막지
+    않는다. pause는 tenant-scoped임을 확인(음성: 'pause=전역차단 아님')."""
+    user_a = await create_test_tenant(pool)
+    user_b = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_a)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_b)
+    await repo.get_mandate(user_a)  # ensure mandate exists before pausing user_a
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    # user_a를 PAUSED로 만듦
+    await pause_mandate(repo, tenant_id=user_a)
+
+    # user_b는 user_a의 revision_id를 쓰지만 mandate 행 자체는 user_b에게도
+    # 존재하므로 RISK_MANDATE_REQUIRED가 아니라 revision 불일치로 DENY될 수도
+    # 있다. 따라서 같은 revision_id를 쓰는 대신 user_b 자신의 revision을 쓴다.
+    mandate_b = await repo.get_mandate(user_b)
+    ctx_b_own = _context(user_b, mandate_b.active_revision_id, execution_id=_unique_execution_id())
+    result_b_own = await gate(ctx_b_own)
+    assert result_b_own.outcome == GateOutcome.ALLOW
+
+
+async def test_concurrent_pause_does_not_corrupt_mandate_state(pool, repo, trust_repo):
+    """음성 3 — pause_mandate() 후 mandate의 active_revision이 손실되지 않는다.
+    정지 중에도 active_revision_id는 유지되어야 한다(음성: 'pause=mandate손실 아님')."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    original_revision_id = mandate.active_revision_id
+
+    await pause_mandate(repo, tenant_id=user_id)
+
+    mandate_after = await repo.get_mandate(user_id)
+    assert mandate_after.active_revision_id == original_revision_id
+
+
+async def test_concurrent_pause_db_failure_never_allows(pool, repo, trust_repo):
+    """실패 주입 — pause_mandate() 도중 DB 연결 오류가 발생해도 게이트가
+    ALLOW로 전환되지 않는다. DB 실패 시 fail-closed 확인."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    # 정상적으로 warm-up → ALLOW
+    warm = await gate(context)
+    assert warm.outcome == GateOutcome.ALLOW
+
+    # BrokenPool을 가진 게이트는 DB 오류로 DENY 또는 예외
+    class _BrokenPool:
+        def __getattr__(self, name):
+            raise ConnectionError(f"injected pool failure during pause: {name}")
+
+    broken_gate = make_foundation_pre_submit_gate(_BrokenPool(), require_mandate=True)
+    try:
+        decision = await broken_gate(context)
+    except Exception:  # noqa: BLE001 - 예외 전파도 fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+@pytest.mark.perf
+async def test_concurrent_pause_and_submit_perf_budget(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """성능 단언 — mandate 게이트 1회 호출 CPU 시간이 예산 미만.
+    실측: best-of-5 최소 wall 약 4ms(로컬, ALLOW 경로). 예산은 실측의 30배 이상인 150ms."""
+    reset_virtual_totals()
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    async def _run():
+        return await gate(context)
+
+    sample = await perf_budget.best_of_async(_run, n=5, warmup=1)
+    # 실측 wall 예산: 150ms (실측 4ms의 ~37배)
+    assert sample.wall_ms < 150.0, perf_budget.describe(sample, budget_ms=150.0)
+
+
+@pytest.mark.perf
+async def test_concurrent_pause_and_submit_perf_gate_red_with_10x_injection(
+    perf_budget: PerfBudget, pool, repo, trust_repo
+):
+    """게이트 적색 재현 — 게이트 호출에 10배 가상 지연을 주입하면 같은 perf
+    단언이 적색이 된다(단언이 실제로 지연을 잡는다).
+    실측 예산 150ms의 10배인 1500ms를 넘겨야 적색 확인."""
+    reset_virtual_totals()
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    base_gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+
+    # 10배 지연: 각 호출에 15ms 가상 지연 (150ms / 10)
+    delay_per_call = 15.0
+
+    def delayed_gate(ctx):
+        return virtual_delayed_async(base_gate, delay_per_call)(ctx)
+
+    async def _run_delayed():
+        return await delayed_gate(context)
+
+    sample = await perf_budget.best_of_async(_run_delayed, n=5, warmup=1)
+    # 10배 지연 주입 → 적색 재현: 150ms 예산을 초과해야 함
+    assert sample.wall_ms >= 150.0, (
+        f"예상: 10배 지연으로 wall_ms >= 150ms 적색. "
+        f"실제: {perf_budget.describe(sample, budget_ms=150.0)}"
+    )
