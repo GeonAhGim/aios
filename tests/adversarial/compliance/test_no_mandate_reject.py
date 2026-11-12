@@ -24,6 +24,8 @@ from __future__ import annotations
 import asyncio
 import secrets
 
+import pytest
+
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
 )
@@ -34,6 +36,8 @@ from src.services.order_service.gate import GateOutcome, OrderContext
 from tests.foundation.integration.mandates.conftest import default_rules
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 
 def _unique_execution_id() -> int:
@@ -154,3 +158,101 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     post_race = await gate(context)
     assert post_race.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in post_race.reason_codes
+
+
+async def _paused_context(pool, repo, trust_repo):
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
+    mandate = await repo.get_mandate(user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+    return user_id, gate, context
+
+
+async def test_pause_race_burst_all_post_commit_submits_denied(pool, repo, trust_repo):
+    """음성 1: pause 커밋 이후 동시 다발 제출(8건) 전부 DENY — 하나라도 ALLOW면 적색."""
+    user_id, gate, context = await _paused_context(pool, repo, trust_repo)
+    assert (await gate(context)).outcome == GateOutcome.ALLOW
+    await pause_mandate(repo, tenant_id=user_id)
+
+    decisions = await asyncio.gather(*(gate(context) for _ in range(8)))
+
+    assert [d.outcome for d in decisions] == [GateOutcome.DENY] * 8
+    assert all("STATE_MANDATE_PAUSED" in d.reason_codes for d in decisions)
+
+
+async def test_pause_race_unbound_revision_still_denied(pool, repo, trust_repo):
+    """음성 2: pause 후 revision 바인딩이 없는 제출도 ALLOW되지 않는다."""
+    user_id, gate, _ = await _paused_context(pool, repo, trust_repo)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    decision = await gate(_context(user_id, None, execution_id=_unique_execution_id()))
+
+    assert decision.outcome == GateOutcome.DENY
+
+
+async def test_pause_race_other_tenant_unaffected_by_pause(pool, repo, trust_repo):
+    """음성 3: A 테넌트 pause가 B 테넌트 mandate 결정을 오염시키지 않고(ALLOW 유지),
+    A의 캐시된 ALLOW가 B 컨텍스트로 새지도 않는다(A는 DENY)."""
+    user_a, gate, ctx_a = await _paused_context(pool, repo, trust_repo)
+    user_b, _, ctx_b = await _paused_context(pool, repo, trust_repo)
+    assert (await gate(ctx_a)).outcome == GateOutcome.ALLOW
+    assert (await gate(ctx_b)).outcome == GateOutcome.ALLOW
+
+    await pause_mandate(repo, tenant_id=user_a)
+
+    assert (await gate(ctx_a)).outcome == GateOutcome.DENY
+    assert (await gate(ctx_b)).outcome == GateOutcome.ALLOW
+
+
+async def test_pause_failure_injection_keeps_mandate_active_and_gate_consistent(
+    pool, repo, trust_repo, monkeypatch
+):
+    """실패 주입: pause 쓰기가 예외로 실패하면 경합 제출이 정지로 오인되지 않고(ALLOW 유지),
+    예외는 삼켜지지 않고 gather로 전파된다(fail-visible)."""
+    user_id, gate, context = await _paused_context(pool, repo, trust_repo)
+    assert (await gate(context)).outcome == GateOutcome.ALLOW
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("injected pause failure")
+
+    results = await asyncio.gather(_boom(), gate(context), return_exceptions=True)
+
+    assert isinstance(results[0], RuntimeError)
+    assert results[1].outcome == GateOutcome.ALLOW
+    assert (await repo.get_mandate(user_id)).active_revision_id == context.mandate_revision_id
+    assert (await gate(context)).outcome == GateOutcome.ALLOW
+
+
+# 로컬 실측(2026-11-12, best-of wall): ~5.9ms/건.
+# 예산 250ms는 실측의 42배 여유(공유 DB/CI 편차 흡수).
+_PAUSED_GATE_BUDGET_MS = 250.0
+
+
+@pytest.mark.perf
+async def test_paused_gate_decision_under_budget(pool, repo, trust_repo, perf_budget: PerfBudget):
+    """성능: pause 이후 DENY 판정 1건의 wall 시간이 예산 안(best_of)."""
+    user_id, gate, context = await _paused_context(pool, repo, trust_repo)
+    await pause_mandate(repo, tenant_id=user_id)
+
+    sample = await perf_budget.best_of_async(lambda: gate(context), n=5, warmup=1)
+
+    assert sample.wall_ms < _PAUSED_GATE_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_PAUSED_GATE_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_paused_gate_budget_turns_red_under_10x_virtual_delay(
+    pool, repo, trust_repo, perf_budget: PerfBudget
+):
+    """게이트 적색 재현: 예산 10배 가상 지연 주입 시 같은 단언이 적색이 된다."""
+    user_id, gate, context = await _paused_context(pool, repo, trust_repo)
+    await pause_mandate(repo, tenant_id=user_id)
+    reset_virtual_totals()
+    delayed = virtual_delayed_async(gate, _PAUSED_GATE_BUDGET_MS * 10 / 1000)
+
+    sample = await perf_budget.best_of_async(lambda: delayed(context), n=3, warmup=1)
+    reset_virtual_totals()
+
+    assert not sample.wall_ms < _PAUSED_GATE_BUDGET_MS
