@@ -60,6 +60,8 @@ from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_futureoption_mixin import (
     KISOverseasFutureoptionMixin as _OverseasFutureoptionMixin,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 # 모듈 전체가 아니라 왕복을 "시도"하는 세 테스트에만 개별 부여한다(아래
 # `@pytest.mark.live_demo`) — `test_overseas_futureoption_trs_...`는 자격증명
@@ -237,3 +239,126 @@ def test_overseas_futureoption_trs_have_no_paper_trading_equivalent() -> None:
     assert hasattr(_OverseasFutureoptionMixin, "place_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "cancel_overseas_futureoption_order")
     assert hasattr(_OverseasFutureoptionMixin, "get_overseas_futureoption_balance")
+
+
+# ── D2 보강: 실패 주입 · 성능 단언 · 게이트 적색 재현 ──────────────────────────
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_cancel_with_bogus_order_id_raises(
+    demo_adapter: KISAdapter,
+) -> None:
+    """음성(negative) 테스트 — 잘못된 주문 ID로 cancel_order() 호출 시
+    예외가 발생한다(실패 주입)."""
+    with pytest.raises(Exception):  # noqa: B017 — 실제 KIS 서버가 반환하는 오류 형태 확인용
+        await demo_adapter.cancel_order("BOGUS-ORDER-ID-000000")
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_get_order_with_bogus_order_id_raises(
+    demo_adapter: KISAdapter,
+) -> None:
+    """음성(negative) 테스트 — 잘못된 주문 ID로 get_order() 호출 시
+    예외가 발생한다(실패 주입)."""
+    with pytest.raises(Exception):  # noqa: B017 — 실제 KIS 서버가 반환하는 오류 형태 확인용
+        await demo_adapter.get_order("BOGUS-ORDER-ID-000000")
+
+
+@pytest.mark.live_demo
+async def test_domestic_stock_place_order_with_invalid_symbol_raises(
+    demo_adapter: KISAdapter,
+) -> None:
+    """음성(negative) 테스트 — 존재하지 않는 종목 코드로 place_order() 호출 시
+    SymbolNormalizationError 또는 ExchangeError 가 발생한다(fail-closed)."""
+
+    bad_order = _order(
+        symbol="ZZZZZZZZZZZZZ",  # 존재하지 않는 종목
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="invalid-symbol",
+    )
+    with pytest.raises(Exception):  # noqa: B017 — fail-closed 검증: symbol_normalize 또는 KIS 서버가 reject
+        await demo_adapter.place_order(bad_order)
+
+
+@pytest.mark.perf
+async def test_domestic_stock_place_order_perf_budget(
+    demo_adapter: KISAdapter,
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언 — `place_order`의 CPU 시간이 예산 이내여야 한다.
+
+    예산: 50 ms (실측 ~0.5 ms × 100 배 여유 — CI xdist 환경의 CPU 경합·
+    MockTransport 오버헤드를 고려한 안전 마진).
+    """
+    order = _order(
+        symbol=_KR_EQUITY_SYMBOL,
+        price=_KR_EQUITY_SAFE_PRICE,
+        currency=Currency.KRW,
+        asset_class=AssetClass.KR_EQUITY,
+        tag="perf-budget-kr-equity",
+    )
+    sample = await perf_budget.sample_async(
+        lambda: demo_adapter.place_order(order),
+        batch=1,
+    )
+    budget_ms = 50.0
+    assert sample.cpu_ms < budget_ms, (
+        f"place_order CPU {sample.cpu_ms:.3f}ms 가 예산 {budget_ms:.3f}ms 초과"
+    )
+
+
+@pytest.mark.perf
+async def test_domestic_stock_place_order_gates_red_with_virtual_delay(
+    demo_adapter: KISAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현 — `place_order`에 가상 지연을 주입하면
+    `PerfBudget.sample_async` 가 반환한 cpu_ms 가 예산을 넘어선다.
+    단언이 실제로 성능 하한을 검증하는지 확인한다."""
+    injection_ms = 5.0
+
+    # 녹색 제어: 지연 없이 budget 이내
+    sample_green = await perf_budget.sample_async(
+        lambda: demo_adapter.place_order(
+            _order(
+                symbol=_KR_EQUITY_SYMBOL,
+                price=_KR_EQUITY_SAFE_PRICE,
+                currency=Currency.KRW,
+                asset_class=AssetClass.KR_EQUITY,
+                tag="gate-red-green",
+            )
+        ),
+        batch=1,
+    )
+    assert sample_green.cpu_ms < injection_ms, (
+        f"place_order CPU {sample_green.cpu_ms:.3f}ms 가 예산 "
+        f"{injection_ms}ms 초과 — 지연 주입 없이 적색"
+    )
+
+    # 적색 재현: 가상 지연 주입 → budget 초과
+    monkeypatch.setattr(
+        demo_adapter,
+        "place_order",
+        virtual_delayed_async(demo_adapter.place_order, injection_ms / 1000.0),
+    )
+    reset_virtual_totals()
+
+    sample_red = await perf_budget.sample_async(
+        lambda: demo_adapter.place_order(
+            _order(
+                symbol=_KR_EQUITY_SYMBOL,
+                price=_KR_EQUITY_SAFE_PRICE,
+                currency=Currency.KRW,
+                asset_class=AssetClass.KR_EQUITY,
+                tag="gate-red-red",
+            )
+        ),
+        batch=1,
+    )
+    assert sample_red.cpu_ms >= injection_ms, (
+        f"place_order 지연 주입 후 CPU {sample_red.cpu_ms:.3f}ms 가 "
+        f"예산 {injection_ms}ms 를 넘지 않음 — 가상 지연이 제대로 주입되지 않음"
+    )
