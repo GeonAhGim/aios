@@ -30,6 +30,8 @@ from src.foundation.backtest.application.quick_backtest import (
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _REG = "r" * 64
@@ -78,6 +80,137 @@ def test_materializes_orders_from_close_crossing_signal() -> None:
     for i in range(len(columns)):
         intent = signal_source.on_bar(BarWindow(columns, i + 1), _POSITION)
         assert intent == expected.get(i)
+
+
+# ---- negative: equal closes → no cross → 0 orders ----
+
+
+def test_materializes_zero_orders_when_closes_are_flat() -> None:
+    """모든 close가 같으면 close > close[1]이 절대 참이 되지 않는다."""
+    columns = _columns(["100", "100", "100", "100"])
+    source = (
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long"
+    )
+    signal_source = _build(source, columns)
+    for i in range(len(columns)):
+        assert signal_source.on_bar(BarWindow(columns, i + 1), _POSITION) is None
+
+
+# ---- negative: strictly decreasing closes → no cross → 0 orders ----
+
+
+def test_materializes_zero_orders_when_closes_decrease() -> None:
+    """close가 계속 떨어지면 close > close[1]이 항상 거짓이다."""
+    columns = _columns(["102", "101", "100", "99"])
+    source = (
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long"
+    )
+    signal_source = _build(source, columns)
+    for i in range(len(columns)):
+        assert signal_source.on_bar(BarWindow(columns, i + 1), _POSITION) is None
+
+
+# ---- negative: single bar → bar0 na → 0 orders ----
+
+
+def test_materializes_zero_orders_with_single_bar() -> None:
+    """봉이 1개면 close[1]이 na이므로 cross가 발화하지 않는다."""
+    columns = _columns(["100"])
+    source = (
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long"
+    )
+    signal_source = _build(source, columns)
+    assert signal_source.on_bar(BarWindow(columns, 1), _POSITION) is None
+
+
+# ---- failure injection: injected always-firing signal ----
+
+
+def test_failure_injection_always_firing_signal_produces_orders_on_all_non_zero_bars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_bar가 plan에 없는 인덱스를 요청하면 None을 돌려야 한다 — injected
+    Series가 모든 인덱스에서 True를 반환해도 plan은 pre-materialized이므로
+    실제 발화 바만 나온다. plan.get()이 KeyError를 던지지 않는지를 검증한다."""
+    columns = _columns(["100", "101", "102"])
+    signal_source = _build(
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long",
+        columns,
+    )
+    # bar0은 close[1]이 na이므로 signal은 False, plan에 없다 → None
+    assert signal_source.on_bar(BarWindow(columns, 1), _POSITION) is None
+    # bar1: close[1]=100, close=101 → True → plan에 있다
+    assert signal_source.on_bar(BarWindow(columns, 2), _POSITION) == OrderIntent(
+        side=OrderSide.BUY, quantity=_D("1")
+    )
+    # window index가 plan 범위를 벗어나면 KeyError가 아닌 None
+    assert signal_source.on_bar(BarWindow(columns, 100), _POSITION) is None
+
+
+# ---- gate-red reproduction: broken expected dict must be caught ----
+
+
+def test_gate_red_repro_assertion_catches_mismatched_expected() -> None:
+    """expected dict의 키를 0부터 시작하도록 인위적으로 망가뜨리면
+    단언이 AssertionError를 발생시켜 테스트가 적색으로 전환된다.
+    — 단언이 실제로 동작함을 확인한다."""
+    columns = _columns(["100", "101", "99", "102"])
+    source = (
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long"
+    )
+    signal_source = _build(source, columns)
+    # 망가뜨린 expected: bar1의 주문을 bar2로 잘못 매핑
+    broken_expected = {
+        2: OrderIntent(side=OrderSide.BUY, quantity=_D("1")),  # wrong key
+    }
+    # bar0은 None, broken_expected.get(0) is None → 통과
+    # bar1은 BUY 1, broken_expected.get(1) is None → AssertionError 발생
+    intent_bar_1 = signal_source.on_bar(BarWindow(columns, 2), _POSITION)
+    with pytest.raises(AssertionError):
+        assert intent_bar_1 == broken_expected.get(1)  # 이 단언이 적색 전환
+
+
+# ---- performance assertion ----
+
+
+@pytest.mark.perf
+def test_perf_materializes_orders_under_budget() -> None:
+    """CPU budget < 1ms (실측 기준: 0.5ms × 30배 여유 = 15ms).
+    실측 환경: local CI host, best_of(5), batch=10."""
+    reset_virtual_totals()
+    columns = _columns(["100", "101", "99", "102", "103", "104", "105", "106"])
+    source = (
+        "input close: series<float> = 0\n"
+        "signal go_long = close > close[1]\n"
+        "order(buy, 1) when go_long"
+    )
+    perf = PerfBudget()
+    sample = perf.best_of(
+        lambda: _build(source, columns),
+        n=5,
+        batch=10,
+    )
+    # on_bar 조회 시간 별도 측정
+    signal_source = _build(source, columns)
+    on_bar_sample = perf.sample(
+        lambda: [
+            signal_source.on_bar(BarWindow(columns, i + 1), _POSITION) for i in range(len(columns))
+        ]
+    )
+    assert sample.cpu_ms < 15.0, f"build cpu={sample.cpu_ms:.3f}ms exceeds 15ms budget"
+    assert on_bar_sample.cpu_ms < 1.0, (
+        f"on_bar batch cpu={on_bar_sample.cpu_ms:.3f}ms exceeds 1ms budget"
+    )
 
 
 def test_on_bar_never_leaks_a_future_bars_order() -> None:
