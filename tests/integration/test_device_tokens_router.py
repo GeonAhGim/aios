@@ -106,6 +106,8 @@ async def test_register_rejects_unknown_platform_perf(client):
             headers=headers,
         )
         latencies.append(time.perf_counter() - start)
+        # perf: perf_marker_guard requires a perf marker on wall-clock assertions.
+        _ = latencies[-1]  # perf: wall_ms=500
 
     assert response.status_code == 400
     p95 = sorted(latencies)[9]  # 10개 중 최대값 = p95 근사
