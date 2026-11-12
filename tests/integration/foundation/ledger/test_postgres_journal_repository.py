@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from src.data.models.base import Currency
@@ -89,18 +90,65 @@ def _event(*, event_ref: str | None = None, amount: Decimal = Decimal("10.00")) 
     )
 
 
-async def test_append_persists_entry_and_links_to_prior_hash(pool, repo, ports):
-    async with pool.acquire() as conn, conn.transaction():
-        before = await repo.last(conn)
-
+@pytest.mark.perf
+async def test_append_persists_entry_and_links_to_prior_hash(
+    pool, repo, ports, perf_budget, monkeypatch
+):
     event = _event()
+
+    async def _append() -> object:
+        async with pool.acquire() as conn, conn.transaction():
+            return await _post(conn, repo, ports, event)
+
+    # 성능 단언 — 단일 append(INSERT + 해체인 + ledger_balance UPDATE)가
+    # 절대시간 예산 내여야 한다. 실측 로컬(best-of-5 wall): 20-40ms.
+    # 예산 = 실측 최대의 30배 = 1200ms. Windows 양자화(15.6ms tick)와
+    # CI 병렬 CPU 경합(spikes 최대 10배)을 커버하기 위한 여유.
+    _APPEND_WALL_BUDGET_MS = 1200.0  # 30× 실측 최대 40ms
+
+    green = await perf_budget.best_of_async(_append, n=5, warmup=1)
+    assert green.wall_ms < _APPEND_WALL_BUDGET_MS, (
+        f"best-of-5 wall={green.wall_ms:.1f}ms budget<{_APPEND_WALL_BUDGET_MS}ms"
+    )
+
+    # 게이트 적색 재현: asyncpg.Connection.fetch에 가상 10× 예산 지연 주입.
+    # virtual_delayed_async는 wall_ledger만 늘리므로 wall 단언이 잡는다.
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    _original_fetch = asyncpg.Connection.fetch
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetch",
+        virtual_delayed_async(_original_fetch, _APPEND_WALL_BUDGET_MS * 10 / 1000),
+    )
+    slow = await perf_budget.best_of_async(_append, n=2, warmup=0)
+    assert slow.wall_ms >= _APPEND_WALL_BUDGET_MS * 10, (
+        f"injected delay not observed: {slow.wall_ms:.1f}ms"
+    )
+    assert not slow.wall_ms < _APPEND_WALL_BUDGET_MS
+
+    # 정상 동작 재확인 — 원복 후 기존 단언들
+    asyncpg.Connection.fetch = _original_fetch
+    # _append()가 7회 호출(5 green + 2 slow)한 후의 마지막 entry를 snapshot
     async with pool.acquire() as conn, conn.transaction():
-        view = await _post(conn, repo, ports, event)
+        last_before_verify = await repo.last(conn)
+
+    fresh_event = _event(event_ref=f"verify:{uuid4().hex}")
+
+    async def _append_fresh() -> object:
+        async with pool.acquire() as conn, conn.transaction():
+            return await _post(conn, repo, ports, fresh_event)
+
+    view = await _append_fresh()
 
     assert view.replayed is False
     assert view.lines_digest
     assert view.entry_hash
-    expected_prev = None if before is None else before.entry_hash
+    expected_prev = None if last_before_verify is None else last_before_verify.entry_hash
     assert view.prev_hash == expected_prev
     assert {line.account_code for line in view.lines} == {_DEBIT_ACCOUNT, _CREDIT_ACCOUNT}
 
