@@ -1,35 +1,25 @@
-# 파일 범위 분할 제안: task-23846 (QA, coverage 적색)
+# 파일 범위 분할 제안: task-23992 (QA, CI guards 적색)
 
 ## 분석
 
 - 원본 files: `["src/"]` — 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
-- 원본 증상: `[coverage] FAIL: 기준선 미달 94.83% -> 56.76% (-38.07%p)` (esc-ci-coverage).
-- `scripts/coverage_ratchet.py`는 `coverage.xml`만 읽는다. 94.83 -> 56.76 급락은 `src/` 한 파일의 회귀가 아니라
-  pytest가 중도 종료된 partial report(분모 `lines-valid` 축소 또는 일부 패키지 미임포트)일 가능성이 높다.
-  동일 패턴 선례: task-7644/7670, task-8680, task-9052, task-9120 (`coverage_ratchet.py` 모듈 docstring 참조).
-- 따라서 `src/` 전체를 한 리프로 두면 안 되고, "측정 신뢰성 판정" -> "패키지별 실제 미커버 파일 정정" 순으로 쪼갠다.
-  기준선 하향·ignore 추가는 금지(DECISION_GUIDELINES B-2).
+- 원본 증상: `[guards] timeout 300s` (esc-ci-guards). 단계는 `ci_recheck.build_steps`의 `guards`
+  (`C:\aios\meta\guards\run_guards.py`, 타임아웃 300s)이며 `src/`의 코드 결함이 아니라 fleet 측 Guard 실행의 문제다.
+- esc-ci-guards.json은 이미 `status=resolved` ("최신 CI 녹색 c65ab2ea99c6", closed 2026-11-11T12:54:49Z).
+- 재현 확인: `run_guards.py --base HEAD~1 --head HEAD`를 현 워크트리에서 실행하면 0.5s에 vetoed=false로 종료.
+  즉 상시 지연이 아니라 일시적 타임아웃(대형 diff 또는 머신 부하)이었고 현재는 재현되지 않는다.
+- 결론: `src/` 아래에 정정할 파일이 없다. 이 QA 리프를 `src/` 전체로 두면 매번 max_turns로 죽는다.
 
 ## 제안 분할 (실제 파일 단위)
 
-1. **리프 A — 측정 신뢰성 판정 (코드 수정 없음 가능)**
-   - files: `scripts/coverage_ratchet.py`, `coverage-baseline.txt` (읽기 전용 확인)
-   - 작업: 최신 `coverage.xml`의 `lines-valid`를 baseline 측정 시점과 비교, `gh run download`의 GitHub Actions 값과 대조.
-     partial run이면 noop-reason에 수치와 함께 done, 아니면 리프 B~E 발행.
-2. **리프 B — `src/core/` 하위 (FROZEN_PAPER_ONLY 제외)**
-   - files: `src/core/indicators/`, `src/core/eventstore/`, `src/core/safety/`, `src/core/security/`,
-     `src/core/validator/`, `src/core/scanner/`, `src/core/risk_stats/` 중 `coverage.xml`에서 line-rate 급락 클래스로 확인된 파일만
-   - 주의: `src/core/strategy|portfolio|risk|executor`는 FROZEN 승인 없이 수정 불가.
-3. **리프 C — `src/foundation/`** (리프 A에서 급락 확인된 aggregate 파일만 지정, 테스트는 `tests/unit/foundation/...`)
-4. **리프 D — `src/services/` 및 `src/api/`** (`router_registry.py`, `routers/`, `schemas/`) — 급락 확인된 모듈만.
-5. **리프 E — `src/exchanges/`, `src/db/`** — 급락 확인된 모듈만.
+1. **리프 A — noop 종결 (권장, 코드 수정 없음)**
+   - files: 없음(읽기 전용 확인).
+   - 작업: `--status done --noop-reason "esc-ci-guards resolved(c65ab2ea99c6), run_guards 0.5s 녹색 재현 불가"`.
+2. **리프 B — 재발 시에만: Guard 타임아웃 원인 계측 (ops, fleet 코드)**
+   - files: `C:\aios\meta\guards\architecture_guard.py`, `C:\aios\meta\guards\security_guard.py`
+     (worker 직접 수정 금지 — ops task로 요청).
+   - 작업: 대형 diff(수백 파일)에서 파일별 git 호출 반복 여부를 계측해 단일 `git diff --name-status`/배치 호출로 교체.
+3. **리프 C — 재발 시에만: 단계 타임아웃 근거 확인 (ops)**
+   - files: `ci_recheck.py`의 `guards` 단계(300s) — 타임아웃 상향이 아니라 B의 원인 정정이 우선(DECISION_GUIDELINES B-2).
 
-## 선행 조건
-
-리프 A의 결과(급락 클래스 목록: `coverage.xml`에서 line-rate 0 또는 미임포트 파일)가 B~E의 files 목록을 확정한다.
-A 없이 B~E를 발행하면 다시 `src/` 수준 범위가 되므로 A를 `depends_on`으로 둘 것.
-
-## 비고
-
-- 원본(task-23846) hold 해제·재큐·코드 수정은 하지 않았다(본 task는 제안만).
-- 이 환경에서는 coverage 실측(`pytest --cov=src`, 약 26분)을 돌리지 않았다. 위 원인은 스크립트 docstring과 선례 기반 추정이며 리프 A에서 검증한다.
+원본 hold 해제·재큐·코드 수정은 하지 않았다.
