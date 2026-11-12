@@ -277,3 +277,107 @@ async def test_to_legacy_dict_round_trips_fourteen_keys(pool):
     }
     assert legacy["leverage"] == Decimal("1")  # 열린 포지션 없음 — 무레버리지 기본값
     assert legacy["total_equity"] == Decimal("1000")
+
+
+def _count_selects(monkeypatch) -> list[str]:
+    queries: list[str] = []
+    original_fetchrow = asyncpg.Connection.fetchrow
+    original_fetch = asyncpg.Connection.fetch
+
+    async def counting_fetchrow(self, query, *args, **kwargs):
+        queries.append(query)
+        return await original_fetchrow(self, query, *args, **kwargs)
+
+    async def counting_fetch(self, query, *args, **kwargs):
+        queries.append(query)
+        return await original_fetch(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", counting_fetchrow)
+    monkeypatch.setattr(asyncpg.Connection, "fetch", counting_fetch)
+    return queries
+
+
+def _selects(queries: list[str]) -> int:
+    return sum(1 for q in queries if q.strip().upper().startswith(("SELECT", "WITH")))
+
+
+async def _assemble_once(pool, riskcaches, user_id, execution_id, tag):
+    return await assemble_risk_inputs(
+        pool,
+        riskcaches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent("BTC/USDT", tag),
+        balances=[
+            AccountBalance(
+                exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+            )
+        ],
+        candles=candles("BTC/USDT", "bitget", 3),
+        policy=POLICY,
+        now=NOW,
+    )
+
+
+def _seeded_caches(execution_id):
+    riskcaches = caches()
+    riskcaches.equity_tracker.seed(
+        execution_id,
+        day_start_date=date(2026, 1, 1),
+        day_start_equity=Decimal("1000"),
+        peak_equity=Decimal("1000"),
+    )
+    return riskcaches
+
+
+async def test_two_select_round_trips_repeat_calls_do_not_accumulate(pool, monkeypatch):
+    """negative — 두 번째 호출도 호출당 SELECT 2회를 넘지 않는다(캐시 미시딩
+    상태에서 늘어나는 왕복이 호출마다 누적되면 안 된다)."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    queries = _count_selects(monkeypatch)
+    riskcaches = _seeded_caches(execution_id)
+
+    await _assemble_once(pool, riskcaches, user_id, execution_id, "strat-rep-1")
+    first = _selects(queries)
+    await _assemble_once(pool, riskcaches, user_id, execution_id, "strat-rep-2")
+    second = _selects(queries) - first
+
+    assert first == 2, queries
+    assert second == 2, queries
+
+
+async def test_two_select_round_trips_counter_catches_extra_select(pool, monkeypatch):
+    """게이트 적색 재현 — 입력을 망가뜨려(추가 SELECT 1회 주입) 카운터 단언이
+    실제로 3회를 잡아 `== 2` 가 거짓이 됨을 확인한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    queries = _count_selects(monkeypatch)
+    riskcaches = _seeded_caches(execution_id)
+
+    await _assemble_once(pool, riskcaches, user_id, execution_id, "strat-red")
+    async with pool.acquire() as conn:
+        await conn.fetchrow("SELECT 1")  # 주입된 추가 왕복
+
+    assert _selects(queries) == 3, queries
+    assert _selects(queries) != 2
+
+
+async def test_two_select_round_trips_failure_injection_stops_at_first_query(pool, monkeypatch):
+    """실패 주입 + negative — 첫 SELECT가 실패하면 예외가 전파되고(삼키지 않음)
+    추가 왕복이 시도되지 않는다."""
+    user_id = await create_test_user(pool)
+    execution_id = await create_execution(pool, user_id)
+    riskcaches = _seeded_caches(execution_id)
+    calls: list[str] = []
+
+    async def failing(self, query, *args, **kwargs):
+        calls.append(query)
+        raise asyncpg.PostgresConnectionError("injected")
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", failing)
+    monkeypatch.setattr(asyncpg.Connection, "fetch", failing)
+
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await _assemble_once(pool, riskcaches, user_id, execution_id, "strat-fail")
+    assert len(calls) <= 2, calls
