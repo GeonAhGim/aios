@@ -24,6 +24,8 @@ from __future__ import annotations
 import asyncio
 import secrets
 
+import pytest
+
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
 )
@@ -34,6 +36,8 @@ from src.services.order_service.gate import GateOutcome, OrderContext
 from tests.foundation.integration.mandates.conftest import default_rules
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 
 def _unique_execution_id() -> int:
@@ -73,6 +77,111 @@ async def test_no_mandate_at_all_rejects(pool):
             str(execution_id),
         )
     assert audit_row is not None  # DENY 이전에도 감사 기록은 남는다
+
+
+async def test_no_mandate_other_tenant_with_mandate_not_rejected_as_required(
+    pool, repo, trust_repo
+):
+    """음성 1 — 무 mandate DENY는 해당 tenant에만 적용된다. mandate가 있는
+    다른 tenant는 RISK_MANDATE_REQUIRED를 받지 않는다."""
+    with_mandate = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(repo, trust_repo, tenant_id=with_mandate)
+    mandate = await repo.get_mandate(with_mandate)
+    without = await create_test_tenant(pool)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    ok = await gate(
+        _context(with_mandate, mandate.active_revision_id, execution_id=_unique_execution_id())
+    )
+    denied = await gate(_context(without, execution_id=_unique_execution_id()))
+
+    assert "RISK_MANDATE_REQUIRED" not in ok.reason_codes
+    assert denied.outcome == GateOutcome.DENY
+    assert denied.reason_codes == ("RISK_MANDATE_REQUIRED",)
+
+
+async def test_no_mandate_deny_does_not_leak_to_unrelated_execution_audit(pool):
+    """음성 2 — 무 mandate 감사 기록은 해당 execution_id에만 남고 다른
+    execution_id 조회에는 나타나지 않는다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = _unique_execution_id()
+    other_id = execution_id + 1 if execution_id < 2**31 - 1 else execution_id - 1
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+
+    await gate(_context(user_id, execution_id=execution_id))
+
+    async with pool.acquire() as conn:
+        other = await conn.fetchrow(
+            "SELECT 1 FROM audit_log WHERE action_type = 'risk_gate.unmandated_submit' "
+            "AND target_id = $1",
+            str(other_id),
+        )
+    assert other is None
+
+
+async def test_no_mandate_unknown_tenant_never_allows(pool):
+    """음성 3 — 존재하지 않는 tenant(user_id)도 ALLOW되지 않는다(fail-closed)."""
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    try:
+        decision = await gate(_context(2**31 - 5, execution_id=_unique_execution_id()))
+    except Exception:  # noqa: BLE001 - raising is also fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+async def test_no_mandate_db_failure_never_allows(pool):
+    """실패 주입 — 감사/조회 중 DB 연결 획득이 실패해도 게이트는 ALLOW를
+    반환하지 않는다(예외 전파 또는 DENY)."""
+    user_id = await create_test_tenant(pool)
+
+    class _BrokenPool:
+        def __getattr__(self, name):
+            raise ConnectionError(f"injected pool failure: {name}")
+
+    gate = make_foundation_pre_submit_gate(_BrokenPool(), require_mandate=True)
+    try:
+        decision = await gate(_context(user_id, execution_id=_unique_execution_id()))
+    except Exception:  # noqa: BLE001 - propagation is fail-closed
+        return
+    assert decision.outcome == GateOutcome.DENY
+
+
+# 성능 예산(task-24202): 무 mandate 게이트 1회 wall 실측 약 4.6ms(로컬, best-of-5).
+# 예산 _NO_MANDATE_BUDGET_MS는 실측의 30배 이상 여유로 신설했다.
+_NO_MANDATE_BUDGET_MS = 200.0  # 실측 4.6ms의 ~43배
+
+
+async def _measure_no_mandate_gate(perf_budget: PerfBudget, pool, *, delay_s: float = 0.0):
+    user_id = await create_test_tenant(pool)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
+    call = virtual_delayed_async(gate, delay_s) if delay_s else gate
+
+    async def _run():
+        return await call(_context(user_id, execution_id=_unique_execution_id()))
+
+    return await perf_budget.best_of_async(_run, n=5, warmup=1)
+
+
+@pytest.mark.perf
+async def test_no_mandate_gate_perf_budget(perf_budget: PerfBudget, pool):
+    """성능 단언 — 무 mandate 게이트 wall 지연이 예산 미만."""
+    reset_virtual_totals()
+    sample = await _measure_no_mandate_gate(perf_budget, pool)
+    assert sample.wall_ms < _NO_MANDATE_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_NO_MANDATE_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_no_mandate_gate_perf_gate_red_with_10x_injection(perf_budget: PerfBudget, pool):
+    """게이트 적색 재현 — 예산의 10배 가상 지연을 주입하면 같은 단언이 적색이
+    된다(단언이 실제로 지연을 잡는다)."""
+    reset_virtual_totals()
+    sample = await _measure_no_mandate_gate(
+        perf_budget, pool, delay_s=_NO_MANDATE_BUDGET_MS * 10 / 1000
+    )
+    assert not (sample.wall_ms < _NO_MANDATE_BUDGET_MS)
+    reset_virtual_totals()
 
 
 async def test_paused_mandate_rejects(pool, repo, trust_repo):
