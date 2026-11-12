@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
 from src.core.safety.watchdog_basket import BASKET_SYMBOLS, get_basket_returns
 from src.data.models.market_data import Candle
 
@@ -146,3 +148,58 @@ async def test_non_runtimeerror_fetch_exception_is_still_caught_and_dropped():
     returns = await get_basket_returns(adapter)
     assert "BTC/USDT" not in returns
     assert returns["ETH/USDT"] == Decimal("5")
+
+
+# --- 성능 단언 ---------------------------------------------------------------
+
+# 실측: cpu≈0.000ms (4 심볼 × 간단한 Decimal 연산). 30배 여유 = 0ms → 최소 0.5ms 예산.
+_PERF_BUDGET_MS = 0.5  # 30× 실측 여유 (실측 cpu≈0ms, wall≈0.007ms)
+
+
+@pytest.mark.perf
+async def test_get_basket_returns_within_perf_budget(perf_budget) -> None:
+    """성능 단언 (D2): 심볼당 1회 OHLCV 조회 + Decimal 계산이 예산 내야 한다.
+
+    실측 cpu≈0ms (4 심볼 trivial 계산). 예산 0.5ms는 실측의 30배 이상 여유.
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    pb = PerfBudget()
+    adapter = _FakeAdapter(
+        candles={s: [_candle(s, open_="100", close="100")] for s in BASKET_SYMBOLS}
+    )
+    sample = await pb.best_of_async(lambda: get_basket_returns(adapter), n=5, warmup=1)
+    assert sample.cpu_ms < _PERF_BUDGET_MS, (
+        f"basket returns cpu={sample.cpu_ms:.3f}ms exceeded "
+        f"{_PERF_BUDGET_MS}ms budget (wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_get_basket_returns_gate_red_10x_virtual_delay_injection(
+    perf_budget, monkeypatch
+) -> None:
+    """게이트 적색 재현 (D2): 가상 지연 10× 주입 시 단언이 적색이어야 한다.
+
+    `virtual_delayed_async`로 각 심볼 조회에 50ms 지연(총 4심볼×50ms=200ms)을
+    주입하면 perf_budget 단언이 AssertionError로 떨어진다. 단언이 "제대로
+    작동하는지"를 역으로 증명한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import virtual_delayed_async
+
+    pb = PerfBudget()
+    adapter = _FakeAdapter(
+        candles={s: [_candle(s, open_="100", close="100")] for s in BASKET_SYMBOLS}
+    )
+
+    # 10× 예산 지연: 0.5ms × 10 = 50ms per call × 4 symbols = 200ms total
+    original_get_ohlcv = adapter.get_ohlcv
+    adapter.get_ohlcv = virtual_delayed_async(original_get_ohlcv, seconds=0.05)
+
+    sample = await pb.best_of_async(lambda: get_basket_returns(adapter), n=3, warmup=0)
+    assert sample.wall_ms >= _PERF_BUDGET_MS, (
+        f"10× virtual delay injection: wall_ms={sample.wall_ms:.3f}ms did NOT "
+        f"exceed {_PERF_BUDGET_MS}ms — budget assertion failed to "
+        "detect injected delay (hollow assertion)"
+    )
