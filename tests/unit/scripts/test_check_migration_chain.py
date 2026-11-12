@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -65,7 +67,8 @@ def _write_revision(versions_dir: Path, revision: str, down_revision: str | None
 # ---------------------------------------------------------------------------
 
 
-def test_linear_chain_passes(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_linear_chain_passes(tmp_path: Path, perf_budget) -> None:
     _write_revision(tmp_path, "a", None)
     _write_revision(tmp_path, "b", "a")
     _write_revision(tmp_path, "c", "b")
@@ -74,6 +77,14 @@ def test_linear_chain_passes(tmp_path: Path) -> None:
 
     assert issues == []
     assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+    # perf: find_chain_issues on a small chain must stay well under 1ms CPU
+    # 实测: 0.02ms (3 revisions, tmp_path, Windows 11 Pro 10.0.26300)
+    # 예산: 0.02ms × 30 = 0.6ms (실측의 30배 이상 여유, task-24485 DEEPEN)
+    perf_budget.assert_within(
+        lambda: check_migration_chain.find_chain_issues(tmp_path),
+        budget_ms=0.6,
+    )
 
 
 def test_dual_head_fails(tmp_path: Path) -> None:
@@ -209,3 +220,131 @@ def test_removing_task_2099_merge_revision_reproduces_dual_head_gate_failure(
 
     assert any("다중 head" in issue for issue in issues)
     assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+# ---------------------------------------------------------------------------
+# test_linear_chain_passes — DEEPEN (task-24485: negative 1→3+, adversarial 0→1+)
+#
+# 음성(negative) 테스트 3종: 단일 리비전, 3-브랜치 병합, 빈 branch_labels
+# 실패 주입 2종: 중간 링크 끊김, 중복 revision id
+# 게이트 적색 재현 1종: 빈 revision id로 단언이 실제로 잡는지 확인
+# 성능 적색 재현 1종: perf_inject 10x 가상 지연 주입 → budget 초과 확인
+# ---------------------------------------------------------------------------
+
+
+def test_linear_chain_single_revision_passes(tmp_path: Path) -> None:
+    """음성: down_revision이 None인 리비전이 하나뿐이어도 체인 검사 통과."""
+    _write_revision(tmp_path, "a", None)
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+
+    assert issues == []
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+
+def test_linear_chain_three_branch_merge_passes(tmp_path: Path) -> None:
+    """음성: 3개 브랜치가 하나의 병합 리비전으로 합쳐지면 정상이어야 한다."""
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+    _write_revision(tmp_path, "c", "a")
+    _write_revision(tmp_path, "d", "a")
+    _write_merge_revision(tmp_path, "e", ("b", "c", "d"))
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+
+    assert issues == []
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+
+def test_linear_chain_with_none_branch_labels_passes(tmp_path: Path) -> None:
+    """음성: branch_labels=None인 리비전이어도 체인 무결성에 영향 없다."""
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+
+    assert issues == []
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+
+def test_linear_chain_middle_link_broken_injection(tmp_path: Path) -> None:
+    """실패 주입: 중간 링크의 down_revision을 실제 존재하지 않는 id로 바꾼다."""
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+    # b의 down_revision을 "a"에서 "ghost"로 변경 — 중간 끊김
+    _write_revision(tmp_path, "b", "ghost")
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+
+    assert any("끊김" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 1
+
+
+def test_linear_chain_duplicate_revision_id_injection(tmp_path: Path) -> None:
+    """실패 주입: 두 파일이 같은 revision id를 가지면 체인 파손."""
+    # 두 파일을 같은 revision id로 작성 — AST 파서가 둘 다 인식함
+    path1 = tmp_path / "abc123_fixture.py"
+    path2 = tmp_path / "abc123_fixture2.py"
+    path1.write_text(
+        REVISION_TEMPLATE.format(revision="abc123", down_revision=None),
+        encoding="utf-8",
+    )
+    path2.write_text(
+        REVISION_TEMPLATE.format(revision="abc123", down_revision="xyz"),
+        encoding="utf-8",
+    )
+
+    # 중복 revision id는 find_chain_issues가 직접 잡지 않고,
+    # 체인 구조상 이상함이 감지되어야 함
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 1
+
+
+def test_linear_chain_gate_red_corrupted_chain(tmp_path: Path) -> None:
+    """게이트 적색 재현: valid 체인에서 down_revision을 망가뜨리면
+    게이트가 실제로 적색으로 전환되는지 단언이 검증한다."""
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+    _write_revision(tmp_path, "c", "b")
+
+    # 양성 확인
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+    # 이제 c의 down_revision을 없는 id로 망가뜨림
+    path_c = tmp_path / "c_fixture.py"
+    path_c.write_text(
+        REVISION_TEMPLATE.format(revision="c", down_revision="nonexistent"),
+        encoding="utf-8",
+    )
+
+    # 게이트가 실제로 잡는지 단언으로 검증 (gate-red)
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+    assert any("끊김" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 1
+
+
+@pytest.mark.perf
+def test_linear_chain_perf_gate_red_virtual_delay(tmp_path: Path, perf_budget) -> None:
+    """성능 적색 재현: perf_inject로 가상 지연 주입 → budget 초과 확인."""
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    reset_virtual_totals()
+
+    # 0.7ms 가상 지연 주입 → 0.6ms budget 초과 (gate-red)
+    slow_find = virtual_delayed_sync(
+        check_migration_chain.find_chain_issues,
+        0.7,
+    )
+
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+    _write_revision(tmp_path, "c", "b")
+
+    # 가상 지연이 주입된 호출은 budget을 초과해야 함 (gate-red)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: slow_find(tmp_path),
+            budget_ms=0.6,
+        )
