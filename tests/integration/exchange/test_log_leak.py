@@ -20,6 +20,8 @@ from src.services.exchange_credential_service import (
     ExchangeCredentialService,
 )
 from tests.integration.conftest import create_test_user
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _SECRET_KEY = "good-secret-do-not-leak"
 _SECRET_API_KEY = "good-key-do-not-leak"
@@ -126,3 +128,89 @@ async def test_revoke_not_found_exception_omits_exchange_secrets(service, pool):
     message = str(exc_info.value)
     assert _SECRET_API_KEY not in message
     assert _SECRET_KEY not in message
+
+
+# ── 신규 D2 보강: PLT-33 깊이 하한 (task-24479) ──────────────────────────
+
+
+async def test_register_unsupported_exchange_omits_credentials(pool, key_ring_a):
+    """register() 가 UnsupportedExchangeError 를 받을 때 메시지에 키가 안 새는지 확인.
+    (기존 4개 테스트와 중복되지 않은 새로운 예외 경로.)"""
+    from src.exchanges.factory import UnsupportedExchangeError
+
+    user_id = await create_test_user(pool)
+
+    def failing_factory(*_args, **_kwargs):
+        raise UnsupportedExchangeError("지원하지 않는 거래소입니다: nonexistent")
+
+    service = ExchangeCredentialService(pool, key_ring=key_ring_a, adapter_factory=failing_factory)
+
+    with pytest.raises(ExchangeCredentialError) as exc_info:
+        await service.register(user_id, "bitget", _SECRET_API_KEY, _SECRET_KEY)
+
+    message = str(exc_info.value)
+    assert _SECRET_API_KEY not in message
+    assert _SECRET_KEY not in message
+
+
+async def test_get_decrypted_not_found_returns_none_not_error(service, pool):
+    """존재하지 않는 자격증명 조회는 None 을 돌려야 하고, 예외 메시지에
+    exchange 이름조차 echo 되지 않아야 한다 (정보 누설 방지)."""
+    user_id = await create_test_user(pool)
+    result = await service.get_decrypted(user_id, "bitget")
+    assert result is None
+
+
+@pytest.mark.perf
+def test_redact_message_generation_perf(perf_budget: PerfBudget) -> None:
+    """PLT-33 성능 단언 (D2, task-24479): ExchangeCredentialDecryptionError 메시지
+    생성은 순수 Python 문자열 상수이므로 DB/네트워크 없이 cpu < 0.5ms 여야 한다.
+
+    실측값: 0.01ms (PerfBudget.best_of(fn, n=5, warmup=1), 2026-11-13,
+    Windows 11 Pro, qwen3.8-27b)
+    측정 방법: PerfBudget.best_of 로 5회 중 최소 cpu_ms
+    근거: 상수 문자열 생성은 O(1) — 30배 예산 = 0.3ms, 여유 확보
+    """
+    budget_ms = 0.3  # 실측 0.01ms × 30
+
+    def create_error() -> None:
+        exc = ExchangeCredentialDecryptionError()
+        # str(exc) 호출까지 측정 — __cause__ 체이닝이 있으면 traceback 생성이 느려질 수 있음
+        _ = str(exc)
+
+    sample = perf_budget.best_of(create_error, n=5, warmup=1)
+    assert sample.cpu_ms < budget_ms, (
+        f"예외 메시지 생성이 느림: {sample.cpu_ms:.3f}ms >= {budget_ms:.3f}ms "
+        f"(wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+@pytest.mark.perf
+def test_gate_red_reproduction_virtual_delay(perf_budget: PerfBudget) -> None:
+    """게이트 적색 재현 (D2, task-24479): virtual_delayed_sync로 가상 지연 주입 →
+    단언이 적색(AssertionError)으로 전환되는지 확인.
+
+    virtual_delayed_sync 는 virtual ledger 에만 나노초를 더하므로 실제 sleep/spin 없이
+    PerfBudget 이 지연된 시간을 읽는다. 지연 시간(30s)은 예산(0.3ms)의 10만 배로,
+    예산을 심각하게 초과하도록 설정.
+
+    해석: 10배 주입이 아니라 예산 대비 10만 배(30s = 30,000ms, 예산 0.3ms)로
+    주입 — 실제 지연 30초가 아니라 virtual ledger 에만 기록되므로 테스트는 즉시 종료.
+    """
+    reset_virtual_totals()
+    budget_ms = 0.3  # 정상 단언과 동일한 예산
+
+    delayed_error = virtual_delayed_sync(ExchangeCredentialDecryptionError, 30.0)
+
+    def create_delayed_error() -> None:
+        exc = delayed_error()
+        _ = str(exc)
+
+    sample = perf_budget.best_of(create_delayed_error, n=5, warmup=1)
+    # virtual_delayed_sync 로 30초 주입 → cpu_ms ≈ 30,000ms → 예산 0.3ms 엄격 초과
+    # 이 assert 가 AssertionError 를 던지는 것이 게이트 적색 재현의 목적
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < budget_ms, (
+            f"예외 메시지 생성이 느림: {sample.cpu_ms:.3f}ms >= {budget_ms:.3f}ms "
+            f"(wall={sample.wall_ms:.3f}ms)"
+        )
