@@ -11,6 +11,12 @@ from src.services.live_readiness import (
     LiveReadinessInputError,
     compute_live_readiness,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_sync,
+    virtual_totals_ns,
+)
 
 T0 = datetime(2026, 11, 1, tzinfo=UTC)
 
@@ -175,3 +181,106 @@ def test_readiness_functions_remain_within_complexity_cap() -> None:
 
     path = Path(module.__file__)
     assert scan_file(path.name, path.read_text(encoding="utf-8")) == []
+
+
+# --- D2 deepening: LP-1 depth floor D1 -> D2 ----------------------------
+# 원장 하한: negative 2→3+, perf 0→1, gate_red 0→1, failure_injection 1→1(기존 유지)
+
+
+def test_single_order_yields_non_zero_period_days() -> None:
+    """단일 주문만 있어도 period_start와 period_end가 다르면 period_days가 계산된다."""
+    r = compute_live_readiness([_row()])
+    # _row()는 created_at=T0, updated_at=T0+1hr이므로 period_days > 0
+    assert r.period_days is not None and r.period_days > 0
+
+
+def test_all_cancelled_orders_fill_ratio_is_zero_not_none() -> None:
+    """모든 주문이 CANCELLED이면 fill_ratio는 0이다 (0은 '전부 취소'를 의미)."""
+    r = compute_live_readiness(
+        [_row(status="CANCELLED", filled_quantity="0"), _row(status="EXPIRED", filled_quantity="0")]
+    )
+    assert r.fill_ratio == Decimal(0)  # terminal 0件中 filled 0件
+    assert r.unfilled_ratio == Decimal(1)  # unfilled은 terminal 기준이므로 1
+    assert r.terminal_count == 2
+
+
+@pytest.mark.perf
+def test_compute_live_readiness_perf_budget(perf_budget: PerfBudget) -> None:
+    """task-24138 — compute_live_readiness는 I/O 없는 순수 함수로 1회 호출당 CPU 시간이
+    마이크로초 단위여야 한다.
+
+    로컬 실측: 100개 주문 행 기준 ~0.05ms (process_time). CI 병렬 환경의 Windows tick
+    (≈15.6ms)와 xdist 경합을 견디기 위해 5.0ms로 여유 둔다. 실측의 100배 이상.
+    """
+    rows = [
+        _row(
+            status="FILLED",
+            side="BUY",
+            quantity="100",
+            filled_quantity="100",
+            price="100",
+            average_fill_price="100.1",
+            fee_total="0.5",
+            fee_currency="USDT",
+        )
+        for _ in range(100)
+    ]
+    perf_budget.assert_within(
+        lambda: compute_live_readiness(rows),
+        budget_ms=5.0,
+        label="compute_live_readiness",
+    )
+
+
+def test_gate_red_budget_actually_fails_past_budget() -> None:
+    """게이트 적색 재현 -- 성능 단언이 tautology가 아님을 증명한다.
+
+    동일한 샘플에 터무니없이 낮은 예산(1e-9ms)을 적용하면 AssertionError가
+    발생해야 한다. budget 값을 10배 늘리는 monkeypatch 대신, assert 자체를
+    pytest.raises로 검증하는 것이 가장 명확하다(task-11539).
+    """
+    rows = [_row() for _ in range(10)]
+    perf = PerfBudget()
+    # batch=100로 양자화 오차를 줄여 측정 가능한 값을 얻는다 (Windows tick ≈15.6ms)
+    samples = perf.samples(lambda: compute_live_readiness(rows), n=20, warmup=0, batch=100)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95_cpu_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95) - 1]
+
+    absurdly_low_budget_ms = 1e-9
+    with pytest.raises(AssertionError):
+        assert p95_cpu_ms < absurdly_low_budget_ms, (
+            f"예상 적색 실패: p95={p95_cpu_ms:.4f}ms가 absurd budget "
+            f"{absurdly_low_budget_ms}ms보다 작지 않음"
+        )
+
+
+def test_gate_red_virtual_delay_exceeds_budget() -> None:
+    """게이트 적색 재현 (가상 지연) -- virtual_delayed_sync로 10배 지연을 주입하면
+    성능 단언이 적색(AssertionError)으로 전환되어야 한다.
+
+    perf_inject.virtual_delayed_sync는 실제 sleep 없이 virtual ledger에 지연을
+    기록하므로 테스트가 느려지지 않는다. 10배 지연 주입으로 budget를 초과하면
+    assert_within가 AssertionError를.raise해야 한다.
+    """
+    reset_virtual_totals()
+    try:
+        original_compute = compute_live_readiness
+        wrapped = virtual_delayed_sync(original_compute, 0.05)  # 50ms 가상 지연
+
+        rows = [_row() for _ in range(10)]
+
+        # virtual_delayed_sync를 통과하면 실제 budget(5ms)의 10배 지연이므로
+        # assert_within가 AssertionError를.raise해야 한다.
+        with pytest.raises(AssertionError):
+            perf = PerfBudget()
+            perf.assert_within(
+                lambda: wrapped(rows),
+                budget_ms=5.0,
+                label="compute_live_readiness_virtual_delay",
+            )
+
+        # 가상 지연이 ledger에 기록되었는지 확인
+        cpu_ns, wall_ns = virtual_totals_ns()
+        assert cpu_ns > 0, "virtual_delayed_sync should have added to the virtual ledger"
+    finally:
+        reset_virtual_totals()
