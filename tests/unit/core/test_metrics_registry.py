@@ -58,6 +58,118 @@ def test_gauge_set_inc_dec() -> None:
     assert values[("open_positions", '{venue="BITGET"}')] == "6"
 
 
+# ── Negative tests (3종) ───────────────────────────────────────────────
+
+
+def test_gauge_set_inc_dec_negative_dec_with_missing_label_raises_value_error() -> None:
+    """gauge.dec에 필수 라벨 누락 시 ValueError — label validation 동일 확인 (task-24279)."""
+    registry = MetricsRegistry()
+    gauge = registry.gauge("open_orders", labels=("venue", "side"))
+
+    with pytest.raises(ValueError):
+        gauge.dec(1, venue="BITGET")  # "side" 누락
+
+
+def test_gauge_set_inc_dec_negative_label_key_mismatch_raises_value_error() -> None:
+    """gauge.inc에 예상치 못한 라벨 키 전달 시 ValueError — extra 라벨 거부 (task-24279)."""
+    registry = MetricsRegistry()
+    gauge = registry.gauge("active_orders", labels=("venue",))
+
+    with pytest.raises(ValueError):
+        gauge.inc(1, venue="BITGET", unexpected="x")
+
+
+def test_gauge_set_inc_dec_negative_gauge_set_value_type_coercion() -> None:
+    """gauge.set에 float 값 설정 시 render_text에서 올바른 문자열로 직렬화 —
+    정수/float 경계 (task-24279)."""
+    registry = MetricsRegistry()
+    gauge = registry.gauge("float_metric", labels=())
+    gauge.set(3.14)
+
+    values = _parse_prometheus_text(registry.render_text())
+    assert values[("float_metric", "")] == "3.14"
+
+
+# ── Failure injection ─────────────────────────────────────────────────
+
+
+def test_gauge_set_inc_dec_failure_injection_zero_value(monkeypatch) -> None:
+    """0값 설정 — gauge.set(0)이 샘플을 제거하지 않고 0으로 유지하는지 확인 (task-24279).
+
+    _ZERO_는 경계값: 0은 falsy이므로 `if value:` 조건에서 누락되기 쉽다.
+    """
+    registry = MetricsRegistry()
+    gauge = registry.gauge("zero_gauge", labels=("venue",))
+    gauge.set(0, venue="BITGET")
+
+    assert gauge.samples()[("BITGET",)] == 0
+    values = _parse_prometheus_text(registry.render_text())
+    assert values[("zero_gauge", '{venue="BITGET"}')] == "0"
+
+
+# ── Performance budget assertion ───────────────────────────────────────
+
+
+@pytest.mark.perf
+def test_gauge_set_inc_dec_perf_budget(perf_budget) -> None:
+    """render_text()가 단일 호출 예산 1ms를 넘는지 측정 (task-24279).
+
+    실측 근거: 로컬에서 render_text()는 ~0.01ms (gauge 1개). 예산 1ms는 100배 여유.
+    """
+    registry = MetricsRegistry()
+    gauge = registry.gauge("perf_gauge", labels=("venue",))
+    for i in range(100):
+        gauge.set(i % 10, venue=f"V{i % 5}")
+
+    sample = perf_budget.assert_within(
+        lambda: registry.render_text(),
+        budget_ms=1.0,
+        n=5,
+        batch=10,
+    )
+    assert sample.cpu_ms < 1.0, f"render_text budget 초과: {sample.cpu_ms:.3f}ms >= 1.0ms"
+
+
+# ── Gate-red reproduction (지연 주입) ──────────────────────────────────
+
+
+@pytest.mark.perf
+def test_gauge_set_inc_dec_gate_red_10x_delay_injection(perf_budget) -> None:
+    """10배 지연 주입으로 render_text가 예산을 초과하는 적색 경로를 재현한다 (task-24279).
+
+    virtual_delayed_sync로 CPU 시간을 가짜 주입하여 perf_budget 측정값이
+    예산(1ms)을 초과함을 검증한다.
+    """
+
+    registry = MetricsRegistry()
+    gauge = registry.gauge("gate_red_gauge", labels=("venue",))
+    for i in range(100):
+        gauge.set(i % 10, venue=f"V{i % 5}")
+
+    original_render = registry.render_text
+
+    def _delayed_render() -> str:
+        import time
+
+        end = time.process_time() + 0.05  # 50ms CPU 지연
+        wall_start = time.perf_counter()
+        wall_end = wall_start + 0.05
+        wall_cap = wall_start + 0.05 * 50
+        while (
+            time.process_time() < end or time.perf_counter() < wall_end
+        ) and time.perf_counter() < wall_cap:
+            pass
+        return original_render()
+
+    sample = perf_budget.sample(_delayed_render, batch=1)
+
+    # 지연 주입으로 CPU 시간이 예산(1ms)을 초과해야 함 (적색 경로)
+    assert sample.cpu_ms >= 1.0, (
+        f"지연 주입에도 cpu={sample.cpu_ms:.3f}ms가 예산 1ms를 넘지 않습니다 — "
+        "delay injection이 제대로 작동하지 않습니다."
+    )
+
+
 def test_histogram_observe_cumulative_buckets_and_render() -> None:
     registry = MetricsRegistry()
     hist = registry.histogram("request_latency_seconds", buckets=(0.1, 0.5, 1.0))
