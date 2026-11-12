@@ -200,8 +200,11 @@ def test_ast_scan_completes_under_perf_budget(perf_budget: object) -> None:
     """Performance assertion: scanning all execution_loop files must complete
     well within a generous budget.
 
-    Measured on host: ~0.3 ms CPU for ~20 files (2026-11-12).
-    Budget = 10 ms (30x headroom over measured best-of).
+    Measured on host (2026-11-12, 40-scan average): ~10.2 ms CPU per scan for 18 files.
+    The earlier "~0.3 ms" figure was a Windows process_time tick artifact (15.625 ms
+    resolution reads 0 between ticks), which made this test pass or fail depending on
+    where the tick fell (full CI ae117ae6 read cpu_ms=15.625). Measure 20 scans per
+    sample so one sample spans ~200 ms (>> tick); budget = 30 ms per scan (3x headroom).
     """
 
     def scan() -> int:
@@ -211,9 +214,9 @@ def test_ast_scan_completes_under_perf_budget(perf_budget: object) -> None:
             count += len(_find_forbidden_imports(path))
         return count
 
-    sample = perf_budget.best_of(scan, n=5)
-    assert sample.cpu_ms < 10.0, (
-        f"AST scan took {sample.cpu_ms:.3f}ms (budget 10ms); wall={sample.wall_ms:.3f}ms"
+    sample = perf_budget.best_of(scan, n=5, batch=20)
+    assert sample.cpu_ms < 30.0, (
+        f"AST scan took {sample.cpu_ms:.3f}ms (budget 30ms); wall={sample.wall_ms:.3f}ms"
     )
 
 
@@ -227,8 +230,8 @@ def test_gate_red_detector_trips_when_input_corrupted(perf_budget: object, tmp_p
     as if the forbidden import triggered a slow path, which should fail the
     budget check.
 
-    Measured baseline: ~0.3 ms CPU. Budget = 10 ms.
-    Virtual delay = 50 ms (10x budget) -> must fail the assertion.
+    Measured baseline: ~10 ms CPU per scan. Budget = 30 ms.
+    Virtual delay = 300 ms (10x budget) -> must fail the assertion.
     """
     from tests.support.perf_inject import reset_virtual_totals
 
@@ -240,10 +243,10 @@ def test_gate_red_detector_trips_when_input_corrupted(perf_budget: object, tmp_p
 
     # Wrap _find_forbidden_imports with virtual delay to simulate a slow
     # violation path (10x the budget).
-    slow_scan = virtual_delayed_sync(lambda: _find_forbidden_imports(bad_file), 50.0)
+    slow_scan = virtual_delayed_sync(lambda: _find_forbidden_imports(bad_file), 300.0)
 
     sample = perf_budget.best_of(slow_scan, n=5)
-    # 50ms injected delay >> 10ms budget -> budget assertion must trip red,
+    # 300ms injected delay >> 30ms budget -> budget assertion must trip red,
     # proving the detector would catch a real slow violation in CI.
     with pytest.raises(AssertionError):
-        assert sample.cpu_ms < 10.0
+        assert sample.cpu_ms < 30.0
