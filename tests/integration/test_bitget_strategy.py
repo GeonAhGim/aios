@@ -150,3 +150,20 @@ async def test_place_strategy_order_raises_retryable_on_api_error():
         await adapter.place_strategy_order(
             "BTC/USDT", "buy", "twap", Decimal("1"), duration_seconds=3600
         )
+
+
+def test_place_strategy_order_invariant_rejection_within_budget(perf_budget):
+    """성능 단언(D2) — 불변식 위반 입력의 조기 거부는 perf_budget 경유로 예산 내여야 한다.
+    거부 경로는 venue 요청을 만들지 않으므로 지연이 예산을 넘으면 검증 경로에 I/O가 섞인 것이다."""
+    import asyncio
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("불변식 위반 입력은 요청을 보내기 전에 거부돼야 합니다.")
+
+    adapter = _make_adapter(handler)
+
+    def _reject():
+        with pytest.raises(ValueError, match="total_amount"):
+            asyncio.run(adapter.place_strategy_order("BTC/USDT", "buy", "twap", Decimal("0")))
+
+    perf_budget.assert_within(_reject, budget_ms=50.0, label="strategy_invariant_reject")
