@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -179,3 +181,127 @@ def test_find_bom_files_skips_files_that_raise_OSError(tmp_path, monkeypatch, ca
     assert "bom.py" in output
     # bad.py도 스캔 대상에 포함되었음 (OSError 시뮬레이션으로 False 반환)
     assert any(p.name == "bad.py" for p in call_log)
+
+
+# ── gate-red reproduction (단언이 실제로 잡는지 망가진 입력으로 확인) ───────────
+
+
+def test_gate_red_reproduction_bom_in_python_file(tmp_path, capsys):
+    """BOM이 심어진 .py 파일을 --repo에 두고 main()이 FAIL + 파일명을 출력하는지
+    망가진 입력으로 직접 재현한다. --repo=tmp_path/src/a.py (BOM 파일)를
+    스캔하면 rc=1, 출력에 'a.py'와 'FAIL'이 함께Must 나온다.
+    """
+    target = _write_bytes(tmp_path / "src" / "a.py", BOM + b"x = 1\n")
+    assert target.read_bytes()[: len(BOM)] == BOM
+
+    rc = check_no_bom.main(["--repo", str(tmp_path)])
+
+    assert rc == 1
+    output = capsys.readouterr().out
+    assert "FAIL" in output
+    assert "a.py" in output
+
+
+def test_gate_red_reproduction_bom_in_tsx_file(tmp_path, capsys):
+    """frontend/src 아래 .tsx 파일에도 BOM이 심어지면 find_bom_files가 캐치한다.
+    frontend/apps/web/src/App.tsx에 BOM을 심고 main()이 FAIL + 경로를 출력하는지
+    망가진 입력으로 직접 재현한다.
+    """
+    target = _write_bytes(
+        tmp_path / "frontend" / "apps" / "web" / "src" / "App.tsx",
+        BOM + b"export default function App() {}\n",
+    )
+    assert target.read_bytes()[: len(BOM)] == BOM
+
+    rc = check_no_bom.main(["--repo", str(tmp_path)])
+
+    assert rc == 1
+    output = capsys.readouterr().out
+    assert "FAIL" in output
+    assert "App.tsx" in output
+
+
+def test_gate_red_reproduction_multiple_bom_files_report_count(tmp_path, capsys):
+    """여러 BOM 파일이 있을 때 main()이 위반 수를 정확히 세어 출력하는지
+    망가진 입력으로 직접 재현한다. 3개 파일에 BOM을 심으면 '3건'이Must 나온다.
+    """
+    _write_bytes(tmp_path / "src" / "a.py", BOM + b"1\n")
+    _write_bytes(tmp_path / "tests" / "b.py", BOM + b"2\n")
+    _write_bytes(tmp_path / "docs" / "c.md", BOM + b"# hi\n")
+
+    rc = check_no_bom.main(["--repo", str(tmp_path)])
+
+    assert rc == 1
+    output = capsys.readouterr().out
+    assert "3건" in output
+
+
+# ── performance assertion (OPS-45: find_bom_files stays under budget) ─────────
+
+
+@pytest.mark.perf
+def test_find_bom_files_perf_under_budget(tmp_path, monkeypatch):
+    """find_bom_files()가 4.3k 파일 스캔 시 2s 미만이어야 한다(실측 0.35s,
+    60s CI 예산의 0.6% — ADR-2026-09-09-C Decision 1: gate step budget 60s).
+
+    virtual_delay 10x 주입(3.5s)으로도 4s 미만이어야 한다 — 실제 I/O가
+    더 빠르다는 전제에서 10x 여유.
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    # tmp_path에 더미 파일 100개 생성 (src/tests/scripts/docs)
+    for i in range(25):
+        _write_bytes(tmp_path / "src" / f"file_{i}.py", b"x = 1\n")
+        _write_bytes(tmp_path / "tests" / f"test_{i}.py", b"x = 2\n")
+        _write_bytes(tmp_path / "scripts" / f"run_{i}.py", b"x = 3\n")
+        _write_bytes(tmp_path / "docs" / f"doc_{i}.md", b"# doc\n")
+
+    budget = PerfBudget()
+
+    # 실제 측정: best_of 5 중 최소값
+    sample = budget.best_of(
+        lambda: check_no_bom.find_bom_files(tmp_path),
+        n=5,
+        batch=1,
+    )
+
+    # 실측 0.35s → 2s 예산 (실측의 ~6x 여유)
+    assert sample.cpu_ms < 2000, budget.describe(sample, budget_ms=2000)
+
+
+@pytest.mark.perf
+def test_find_bom_files_perf_under_budget_with_10x_virtual_delay(
+    tmp_path,
+    monkeypatch,
+):
+    """virtual_delay 10x 주입(= 실제보다 10배 느리게 측정)해도 4s 미만이어야 한다.
+    gate-red reproduction + perf assertion이 동시에 만족된다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    # tmp_path에 더미 파일 100개 생성
+    for i in range(25):
+        _write_bytes(tmp_path / "src" / f"file_{i}.py", b"x = 1\n")
+        _write_bytes(tmp_path / "tests" / f"test_{i}.py", b"x = 2\n")
+        _write_bytes(tmp_path / "scripts" / f"run_{i}.py", b"x = 3\n")
+        _write_bytes(tmp_path / "docs" / f"doc_{i}.md", b"# doc\n")
+
+    # has_bom을 10x 가상 지연으로 감싸서 측정만 느리게 만든다
+    original_has_bom = check_no_bom.has_bom
+    monkeypatch.setattr(
+        check_no_bom,
+        "has_bom",
+        virtual_delayed_sync(original_has_bom, 0.0035),  # 3.5ms × 100개 = 350ms 추가
+    )
+
+    budget = PerfBudget()
+
+    sample = budget.best_of(
+        lambda: check_no_bom.find_bom_files(tmp_path),
+        n=5,
+        batch=1,
+    )
+
+    # 10x 가상 지연 주입 후에도 4s 미만
+    assert sample.cpu_ms < 4000, budget.describe(sample, budget_ms=4000)
