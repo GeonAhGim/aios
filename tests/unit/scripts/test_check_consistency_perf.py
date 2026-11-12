@@ -98,6 +98,93 @@ def test_port_protocol_implementations_skips_unparseable_adapter_file(tmp_path: 
     assert hits == [("src/ctx/adapters/postgres_repository.py", 1)]
 
 
+def test_port_protocol_implementations_detects_missing_method(tmp_path: Path) -> None:
+    """negative 1: Protocol 메서드를 구현하지 않은 어댑터 클래스가 hits로 검출된다."""
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        # 클래스 이름이 WidgetRepository로 끝나지만 save() 메서드가 없다.
+        "class PostgresWidgetRepository:\n    async def get(self) -> None:\n        return None\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    assert len(hits) == 1
+    assert "postgres_repository.py" in hits[0][0]
+
+
+def test_port_protocol_implementations_detects_missing_mixin_methods(tmp_path: Path) -> None:
+    """negative 2: 로컬 mixin 베이스 클래스가 protocol 메서를 일부만 구현하면
+    누락된 메서드가 hits로 검출된다 (P1-D 300줄 분할의 mixin 병합 로직 검증)."""
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    # mixin: get()만 구현, save()는 NotImplementedError
+    _write(
+        tmp_path,
+        "src/ctx/adapters/base_repository.py",
+        "class BaseWidgetRepository:\n"
+        "    async def get(self) -> None:\n"
+        "        return None\n"
+        "    async def save(self) -> None:\n"
+        "        raise NotImplementedError()\n",
+    )
+    # 실제 어댑터가 mixin을 상속받지만 save()를 오버라이드하지 않음
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository(BaseWidgetRepository):\n    pass\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    # base_repository.py(자신의 NotImplementedError) + postgres_repository.py(상속받은 누락)
+    assert len(hits) == 2
+    rel_paths = {h[0] for h in hits}
+    assert "src/ctx/adapters/base_repository.py" in rel_paths
+    assert "src/ctx/adapters/postgres_repository.py" in rel_paths
+
+
+def test_check_consistency_cli_exits_nonzero_on_protocol_violation(tmp_path: Path) -> None:
+    """gate-red reproduction: 위반이 주입된 tmp_root에서 check_consistency CLI가
+    exit code 2를 반환한다 (baseline에 port_protocol_unimplemented=0이 기록된
+    상태라면 증가분으로 적색)."""
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/broken_repository.py",
+        "class BrokenWidgetRepository:\n    async def get(self) -> None:\n        return None\n",
+    )
+    # baseline에 METRICS 전체 키를 0으로 채워야 read_baseline이 통과한다
+    baseline_path = tmp_path / "consistency-baseline.json"
+    baseline_path.write_text(
+        '{"authority_duplication": 0, "env_key_undocumented": 0, '
+        '"event_type_unconsumed": 0, "feature_flag_undocumented": 0, '
+        '"migration_hygiene": 0, "money_float": 0, "naive_datetime": 0, '
+        '"openapi_client_mismatch": 0, "port_method_unimplemented": 0, '
+        '"port_protocol_unimplemented": 0, "router_unregistered": 0, '
+        '"spec_leaf_untraced": 0, "spec_template_incomplete": 0, '
+        '"symbol_id_assembly": 0}\n',
+        encoding="utf-8",
+    )
+
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "check_consistency.py"),
+            "--root",
+            str(tmp_path),
+            "--baseline",
+            str(baseline_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 2, (
+        f"Expected exit code 2 (red), got {result.returncode}. "
+        f"stdout: {result.stdout!r} stderr: {result.stderr!r}"
+    )
+    assert "port_protocol_unimplemented" in result.stdout
+
+
 @pytest.mark.perf
 def test_port_protocol_implementations_perf_budget(tmp_path: Path, perf_budget) -> None:
     """numeric perf assertion: 60 adapter 파일 x 20 클래스(1,200 클래스,
