@@ -3,6 +3,7 @@
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
 
+import asyncio
 import json
 from decimal import Decimal
 
@@ -227,3 +228,44 @@ async def test_create_subaccount_raises_on_api_error_code():
         await adapter.create_subaccount("duplicate-name")
 
     assert "Bitget API 오류" in str(exc_info.value)
+
+
+async def test_create_subaccount_apikey_blocked_on_live_configured_adapter():
+    """불변식: 라이브 설정 어댑터는 서브계정 API 키 발급 요청을 네트워크로
+    내보내지 않는다(fail-closed). 가드가 막으므로 handler는 호출되면 안 된다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 API 키 발급 요청이 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.create_subaccount_apikey("u-1", "passphrase123")
+
+
+# --- performance assertion (perf_budget 픽스처 경유) ---
+
+
+def test_get_subaccounts_within_latency_budget(perf_budget):
+    """성능 단언: 목 전송 기준 서브계정 목록 조회(파싱 포함)가 예산 내에 끝난다.
+    네트워크가 없으므로 어댑터 래퍼 오버헤드 상한을 본다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"subAccountList": [{"subAccountUid": f"u-{i}"} for i in range(200)]},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+
+    def _run() -> None:
+        subaccounts = asyncio.run(adapter.get_subaccounts())
+        assert len(subaccounts) == 200
+
+    perf_budget.assert_within(_run, budget_ms=500, label="bitget_get_subaccounts")
