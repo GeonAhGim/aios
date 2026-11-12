@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -16,6 +17,13 @@ from src.exchanges.common.instrumented_adapter import (
     InstrumentedAdapter,
     instrumented_adapter_factory,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+# Local measurement (task-24096): 50 proxied get_ticker calls on the fake adapter take ~0.064 ms
+# wall best-of-5. The budget below leaves >700x headroom (>30x required) for shared CI hosts.
+_PROXY_CALL_BATCH = 50
+_PROXY_BATCH_BUDGET_MS = 50.0
 
 
 class _FakeAdapter:
@@ -36,6 +44,10 @@ class _FakeAdapter:
         return "caps"
 
 
+def _wrap(adapter: _FakeAdapter, tracker: ApiCallTracker) -> Any:
+    return InstrumentedAdapter(cast(Any, adapter), tracker)
+
+
 @pytest.fixture
 def tracker() -> ApiCallTracker:
     return ApiCallTracker()
@@ -48,6 +60,72 @@ async def test_successful_coroutine_call_is_recorded_and_passed_through(tracker)
 
     assert result == "ticker:BTC/USDT"
     assert tracker.error_rate_pct() == 0
+
+
+async def test_unknown_attribute_raises_and_records_nothing(tracker):
+    wrapped = _wrap(_FakeAdapter(), tracker)
+
+    with pytest.raises(AttributeError):
+        await wrapped.no_such_method()
+
+    assert tracker.error_rate_pct() == 0
+
+
+async def test_mixed_calls_record_exact_error_rate(tracker):
+    wrapped = _wrap(_FakeAdapter(), tracker)
+
+    for _ in range(3):
+        await wrapped.get_ticker("ETH/USDT")
+    with pytest.raises(RuntimeError):
+        await wrapped.place_order({})
+
+    assert tracker.error_rate_pct() == 25
+
+
+async def test_success_result_is_not_masked_by_prior_failure(tracker):
+    wrapped = _wrap(_FakeAdapter(), tracker)
+
+    with pytest.raises(RuntimeError):
+        await wrapped.place_order({})
+
+    assert await wrapped.get_ticker("SOL/USDT") == "ticker:SOL/USDT"
+    assert tracker.error_rate_pct() == 50
+
+
+@pytest.mark.perf
+async def test_successful_call_batch_within_perf_budget(tracker):
+    wrapped = _wrap(_FakeAdapter(), tracker)
+
+    async def fn() -> None:
+        for _ in range(_PROXY_CALL_BATCH):
+            await wrapped.get_ticker("BTC/USDT")
+
+    sample = await PerfBudget().best_of_async(fn, n=5, warmup=1)
+
+    assert sample.wall_ms < _PROXY_BATCH_BUDGET_MS, f"{sample.wall_ms:.3f}ms"
+    assert tracker.error_rate_pct() == 0
+
+
+@pytest.mark.perf
+async def test_injected_10x_delay_turns_perf_budget_red(tracker, monkeypatch):
+    reset_virtual_totals()
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        adapter,
+        "get_ticker",
+        virtual_delayed_async(adapter.get_ticker, _PROXY_BATCH_BUDGET_MS * 10 / 1000),
+    )
+    wrapped = _wrap(adapter, tracker)
+
+    async def fn() -> None:
+        for _ in range(_PROXY_CALL_BATCH):
+            await wrapped.get_ticker("BTC/USDT")
+
+    sample = await PerfBudget().best_of_async(fn, n=3, warmup=0)
+
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < _PROXY_BATCH_BUDGET_MS
+    reset_virtual_totals()
 
 
 async def test_failing_coroutine_call_is_recorded_and_reraised(tracker):
