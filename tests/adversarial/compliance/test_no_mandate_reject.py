@@ -363,7 +363,8 @@ async def test_expired_revision_failure_injection_keeps_original_active(pool, re
     assert (await repo.get_mandate(user_id)).active_revision_id == original_id
 
 
-# 로컬 실측(2026-11-12, best-of wall): ~3.6ms/건. 예산 250ms는 실측의 ~70배 여유(공유 DB/CI 편차 흡수).
+# 로컬 실측(2026-11-12, best-of wall): ~3.6ms/건.
+# 예산 250ms는 실측의 ~70배 여유(공유 DB/CI 편차 흡수).
 _EXPIRED_GATE_BUDGET_MS = 250.0
 
 
