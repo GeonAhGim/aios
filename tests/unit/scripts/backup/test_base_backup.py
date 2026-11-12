@@ -161,6 +161,9 @@ def test_pg_basebackup_command_includes_wal_method_stream_and_replication_slot(
     assert "-C" in cmd, "-C (replication slot 생성) 이 없다"
     assert "-S" in cmd, "-S 가 없다"
     assert "aios_drill" in cmd, "슬롯 이름 aios_drill 이 없다"
+    # 총량 추정(-P)은 시작 WAL 위치 응답을 수 분 지연시켜 WAL 소실을 일으켰다(-P와 병용 불가).
+    assert "--no-estimate-size" in cmd, "총량 추정이 켜져 있다 — 시작 WAL 응답 지연"
+    assert "-P" not in cmd, "-P(진행률)는 시작 WAL 위치 응답 전에 총량 추정을 강제한다"
 
 
 def test_stale_slot_is_dropped_before_pg_basebackup(tmp_path: Path) -> None:

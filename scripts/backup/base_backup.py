@@ -152,7 +152,15 @@ def run_base_backup(
         # 원인 제거 — B-2).
         "-Ft",
         "-z",
-        "-P",
+        # 2026-11-12 근본 원인(esc-health-backup_drill_failed, 드릴 재현으로 확인): 진행률(-P)은
+        # 서버가 시작 WAL 위치를 돌려주기 *전에* 데이터 디렉터리 전체를 훑어 총량을 추정한다
+        # ("estimating backup size"). 고아 aios_test_* DB가 쌓인 이 클러스터에서는 그 추정이
+        # 9~14분 걸리고, 그동안 pg_basebackup은 WAL 수신 프로세스·복제 슬롯을 만들지 못한다
+        # (재현: 슬롯이 545초에야 생김). 그 사이 CI의 강제 체크포인트(CREATE DATABASE)와 WAL 생산
+        # (~6GB/h)으로 시작 WAL 조각이 wal_keep_size(512MB)를 넘어 재활용돼 스트림 시작이
+        # "요청한 WAL 조각이 이미 지워졌음"으로 죽었다. 진행률은 진단용일 뿐이므로 -P를 쓰지
+        # 않는다(-P와 --no-estimate-size는 병용 불가). 수정 후 같은 백업: 슬롯 15초, 12분 성공.
+        "--no-estimate-size",
         "-l",
         backup_label,
         "--wal-method=stream",
