@@ -147,10 +147,8 @@ async def test_no_sender_for_channel_records_failure(pool):
     await bus.stop()
 
 
-async def test_database_error_propagates_via_pool_acquire(pool):
-    """실패주입: _record에서 DB 오류 발생 시 예외가 전파된다."""
-    import asyncpg
-
+async def test_record_db_failure_injection_propagates_unchanged(pool, monkeypatch):
+    """실패주입: _record가 DB 오류를 던지면 그 예외가 가공 없이 전파되고 기록은 남지 않는다."""
     user_id = await create_test_user(pool)
 
     async def dummy_sender(uid, event_type, payload):
@@ -161,10 +159,13 @@ async def test_database_error_propagates_via_pool_acquire(pool):
     gateway.register(bus)
     await bus.start()
 
-    # pool을 닫아 _record의 conn.execute()가 오류를 던지도록 유도
-    await pool.close()
+    async def failing_record(*args, **kwargs):
+        raise asyncpg.InterfaceError("injected: connection lost")
 
-    with pytest.raises((asyncpg.PostgresSyntaxError, asyncpg.InterfaceError, OSError, Exception)):
+    monkeypatch.setattr(gateway, "_record", failing_record)
+
+    with pytest.raises(asyncpg.InterfaceError, match="injected: connection lost"):
         await gateway.handle_event({"event_type": "alert.triggered", "user_id": str(user_id)})
 
+    assert await _history(pool, user_id) == []
     await bus.stop()
