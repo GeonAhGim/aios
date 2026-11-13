@@ -31,9 +31,7 @@ async def payout_trial(pool):
     buyer = await create_test_user(pool)
     seller = await create_test_user(pool)
     captures = [
-        _record_for(
-            await _captured_hold(pool, ports, buyer, seller, Decimal("10.00")), seller
-        )
+        _record_for(await _captured_hold(pool, ports, buyer, seller, Decimal("10.00")), seller)
         for _ in range(_CAPTURE_COUNT)
     ]
     period_start = min(record.captured_at for record in captures).date()
@@ -63,10 +61,13 @@ async def payout_trial(pool):
                 assert batch.amount == Decimal("8.50") * _CAPTURE_COUNT
                 assert batch.state == "RELEASED"
                 assert set(batch.capture_entry_ids) == {record.entry_id for record in captures}
-                assert await conn.fetchval(
-                    "SELECT COUNT(*) FROM ledger_payout_item WHERE batch_id = $1",
-                    batch.batch_id,
-                ) == _CAPTURE_COUNT
+                assert (
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM ledger_payout_item WHERE batch_id = $1",
+                        batch.batch_id,
+                    )
+                    == _CAPTURE_COUNT
+                )
                 return batch
             finally:
                 await transaction.rollback()

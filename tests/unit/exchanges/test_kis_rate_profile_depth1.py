@@ -56,6 +56,7 @@ def test_invalid_profile_rejected_without_caching(
 
 def test_bucket_creation_failure_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     """실패 주입: 생성자 예외 이후 재시도가 정상 싱글턴을 만든다."""
+
     def fail(*args: object, **kwargs: object) -> None:
         raise OSError("injected bucket creation failure")
 
