@@ -231,6 +231,41 @@ async def test_list_statements_scoped_to_tenant(pool, repo):
     assert view_b == ()
 
 
+async def test_list_statements_negatives_and_failure_injection(pool, repo):
+    """negative: scope mismatch/unknown tenant are empty; failure injection: broken pool."""
+    tenant_a, tenant_b = await create_test_tenant(pool), await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    for t in (tenant_a, tenant_b):
+        await repo.insert_statement(await _statement(t))
+    assert await repo.list_statements(tenant_id=tenant_a, scope="LIVE") == ()
+    assert await repo.list_statements(tenant_id=uuid4()) == ()
+    assert [s.tenant_id for s in await repo.list_statements(tenant_id=tenant_a)] == [tenant_a]
+    broken = type("_B", (), {"acquire": lambda self: (_ for _ in ()).throw(ConnectionError("x"))})
+    with pytest.raises(ConnectionError):
+        await PostgresPerformanceRepository(broken()).list_statements(tenant_id=tenant_a)
+
+
+@pytest.mark.perf
+async def test_list_statements_latency_within_budget_and_gate_red(
+    pool, repo, perf_budget, monkeypatch
+):
+    """perf: best-of-5 < 500ms (local ~1 ms, >=30x); gate-red: 5s virtual delay fails it."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    await repo.insert_statement(await _statement(tenant_id))
+    call = lambda: repo.list_statements(tenant_id=tenant_id)  # noqa: E731
+    fast = await perf_budget.best_of_async(call, n=5, warmup=1)
+    assert len(fast.result) == 1 and fast.wall_ms < 500, perf_budget.describe(fast, budget_ms=500)
+    monkeypatch.setattr(repo, "list_statements", virtual_delayed_async(repo.list_statements, 5.0))
+    slow = await perf_budget.best_of_async(call, n=3)
+    reset_virtual_totals()
+    with pytest.raises(AssertionError):
+        assert slow.wall_ms < 500, perf_budget.describe(slow, budget_ms=500)
+
+
 async def test_get_latest_statement_returns_highest_revision(pool, repo):
     tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
