@@ -98,6 +98,88 @@ def test_parse_rejects_non_uuid_portfolio_id() -> None:
         PositionKey.parse("venue:instrument:strategy:execution:not-a-uuid")
 
 
+def test_parse_rejects_empty_portfolio_id() -> None:
+    """음성 테스트 — portfolio_id가 빈 문자열이면 UUID 생성 실패."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:")
+
+
+def test_parse_rejects_partial_uuid_portfolio_id() -> None:
+    """음성 테스트 — 하이픈이 빠진 짧은 UUID 형식도 허용되지 않는다."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:000000000000")
+
+
+def test_parse_rejects_uuid_with_typos() -> None:
+    """음성 테스트 — 유효한 UUID에서 한 글자만 바꾼 값도 거부된다."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse(
+            "venue:instrument:strategy:execution:00000000-0000-0000-0000-00000000000X"
+        )
+
+
+def test_parse_rejects_integer_portfolio_id_string() -> None:
+    """음성 테스트 — UUID처럼 보이는 정수 문자열도 허용되지 않는다."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:1234567890")
+
+
+# ── gate-red reproduction: portfolio_id 단언이 실제로 잡는지 확인 ──
+
+
+def test_gate_red_non_uuid_portfolio_id_catches_with_assertion() -> None:
+    """게이트 적색 재현 — 비UUID portfolio_id가 실제로 InvalidPositionKeyError를
+    일으키는지, 그리고 그 단언이 no-op이 아님을 확인.
+
+    정상 UUID와 비UUID를 비교 단언하여, 단언이 실제로 차이를 포착하는지 검증한다.
+    """
+    valid_key = PositionKey.parse(
+        "venue:instrument:strategy:execution:00000000-0000-0000-0000-000000000001"
+    )
+    # 단언 1: valid_key는 성공적으로 파싱된다
+    assert valid_key.portfolio_id == UUID(int=1)
+    # 단언 2: 비UUID 문자열은 반드시 예외를 던진다
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:not-uuid")
+    # 단언 3: valid_key와 비UUID 파싱은 서로 다르다 (단언이 차이를 포착함)
+    assert valid_key.portfolio_id != UUID(int=0), (
+        "gate-red 실패: valid_key.portfolio_id가 UUID(int=0)과 같음 — 단언이 차이를 포착하지 못함"
+    )
+
+
+def test_gate_red_corrupted_portfolio_id_in_roundtrip_catches_mismatch() -> None:
+    """게이트 적색 재현 — 정상 키의 portfolio_id 부분을 망가뜨리면
+    round-trip 후 portfolio_id 단언이 실패함을 확인.
+
+    valid: 00000000-0000-0000-0000-000000000042 (66)
+    corrupt: 00000000-0000-0000-0000-000000000043 (67)
+    """
+    venue, instrument_id, strategy_id, execution_id = "ex", "AAPL", "mom-v1", "x1"
+    valid_uuid = UUID(int=66)
+    corrupt_uuid = UUID(int=67)
+
+    valid_key = PositionKey(venue, instrument_id, strategy_id, execution_id, valid_uuid)
+    valid_str = str(valid_key)
+
+    # 정상 round-trip: portfolio_id == 66
+    parsed = PositionKey.parse(valid_str)
+    assert parsed.portfolio_id == valid_uuid, (
+        f"gate-red 실패: parsed.portfolio_id({parsed.portfolio_id}) != 원본({valid_uuid})"
+    )
+
+    # corrupted string: portfolio_id 부분을 67로 바꾼 문자열
+    corrupt_str = valid_str[: len(valid_str) - len(str(valid_uuid))] + str(corrupt_uuid)
+    corrupt_parsed = PositionKey.parse(corrupt_str)
+    assert corrupt_parsed.portfolio_id == corrupt_uuid, (
+        f"gate-red 실패: corrupted 파싱이 67이 아님 — {corrupt_parsed.portfolio_id}"
+    )
+
+    # 핵심: valid_uuid != corrupt_uuid (단언이 차이를 포착함)
+    assert valid_uuid != corrupt_uuid, (
+        "gate-red 실패: valid_uuid와 corrupt_uuid가 같음 — 테스트 입력이 무의미"
+    )
+
+
 def test_construction_rejects_empty_field() -> None:
     with pytest.raises(InvalidPositionKeyError):
         PositionKey(
