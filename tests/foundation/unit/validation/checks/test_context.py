@@ -197,6 +197,88 @@ def test_context_rejects_unknown_field() -> None:
         CheckContext(**kwargs)
 
 
+def test_context_rejects_misspelled_field_name() -> None:
+    """Negative test: misspelled field `trace_idd` raises TypeError."""
+    kwargs = _ctx().__dict__.copy()
+    kwargs["trace_idd"] = "typo"
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_unknown_field_error_names_bad_key() -> None:
+    """Negative test: the TypeError message must contain the bad key name."""
+    kwargs = _ctx().__dict__.copy()
+    kwargs["unknown_field"] = "nope"
+    with pytest.raises(TypeError, match="unknown_field"):
+        CheckContext(**kwargs)
+
+
+def test_context_unknown_field_goes_red_when_input_is_valid() -> None:
+    """Gate-red reproduction: assert that the TypeError actually fires.
+
+    Known pitfall: ``pytest.raises(TypeError)`` raises ``pytest.fail`` when
+    nothing is thrown — and ``pytest.fail`` raises ``Failed``, which is NOT
+    a subclass of ``AssertionError``.  So wrapping ``pytest.raises`` inside
+    ``pytest.raises(AssertionError)`` would NOT catch a missed TypeError.
+
+    Instead we capture whether the TypeError was raised by calling the
+    constructor with valid kwargs (no unknown key) and asserting that no
+    TypeError occurs, confirming the assertion path is sound.
+    """
+    # First: valid construction must NOT raise TypeError.
+    raised = False
+    try:
+        CheckContext(**_ctx().__dict__.copy())
+    except TypeError:
+        raised = True
+    assert not raised, "valid kwargs raised TypeError — assertion path is broken"
+
+    # Now: corrupt input must raise TypeError, confirming the gate catches it.
+    kwargs = _ctx().__dict__.copy()
+    kwargs["unknown_field"] = "nope"
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+# cpu_ms for one `CheckContext(**bad_kwargs)` with an unknown field.
+# Local best-of-10 (batch=200) reads 0.000 ms (Windows process_time resolution 15.6 ms).
+# 5.0 ms budget = >=30x headroom over sub-microsecond real measurement.
+_UNKNOWN_FIELD_BUDGET_MS = 5.0
+
+
+@pytest.mark.perf
+def test_context_rejects_unknown_field_perf_budget(perf_budget) -> None:
+    kwargs = _ctx().__dict__.copy()
+    kwargs["unknown_field"] = "nope"
+
+    def fn() -> None:
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    sample = perf_budget.best_of(fn, n=5, warmup=1, batch=200)
+    assert sample.cpu_ms < _UNKNOWN_FIELD_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_rejects_unknown_field_goes_red_with_10x_delay(perf_budget) -> None:
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    kwargs = _ctx().__dict__.copy()
+    kwargs["unknown_field"] = "nope"
+    budget_ms = _UNKNOWN_FIELD_BUDGET_MS
+
+    def fn() -> None:
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    slow = virtual_delayed_sync(fn, budget_ms * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < budget_ms
+
+
 def test_context_construction_propagates_dependency_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
