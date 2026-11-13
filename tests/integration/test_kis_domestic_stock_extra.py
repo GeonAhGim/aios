@@ -160,6 +160,11 @@ async def test_get_investor_trading_by_stock_latency_under_budget():
         )
     )
 
+    # warmup: 첫 호출의 토큰 발급·트랜스포트 생성·limiter 초기화 비용을
+    # 측정에서 제외한다(평균 1.4ms 로 오염되던 원인, 마지막 10회 평균은 0ms).
+    await adapter.get_investor_trading_by_stock("005930")
+    await adapter.get_investor_trading_by_stock("005930")
+
     cpu_times: list[float] = []
     for _ in range(100):
         t0 = time.process_time()
