@@ -245,14 +245,20 @@ def test_main_decrease_without_update_keeps_baseline(tmp_path: Path) -> None:
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 3
 
 
-def test_main_decrease_with_update_ratchets_down(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_main_decrease_with_update_ratchets_down(tmp_path: Path, perf_budget) -> None:
+    """Perf: local best-of-5 main(--update) ~10 ms CPU; budget 5000 ms (>30x); 10x delay is red."""
+    from tests.support import perf_inject as pi
+
     _write(tmp_path, "src/foo.py", "x = 1\n")
     baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
-
-    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path), "--update"])
-
-    assert exit_code == 0
+    argv = ["--root", str(tmp_path), "--baseline", str(baseline_path), "--update"]
+    assert cc.main(argv) == 0
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 0
+    assert perf_budget.best_of(lambda: cc.main(argv), n=5).cpu_ms < 5000.0
+    slow = perf_budget.best_of(lambda: pi.virtual_delayed_sync(cc.main, 50.0)(argv), n=3).cpu_ms
+    assert slow >= 5000.0
+    pi.reset_virtual_totals()
 
 
 def test_main_malformed_baseline_fails(tmp_path: Path) -> None:
