@@ -22,6 +22,8 @@ from src.foundation.positions.domain.position_key import (
     InvalidPositionKeyError,
     PositionKey,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # ':'(구분자)만 제외한 비어있지 않은 문자열 — 다른 특수문자·유니코드는 허용.
 _FIELD_TEXT = st.text(
@@ -107,3 +109,83 @@ def test_construction_rejects_empty_field() -> None:
             execution_id="exec-1",
             portfolio_id=UUID(int=0),
         )
+
+
+# ── gate_red: 단언이 실제로 잡는지 확인 (입력을 망가뜨려 적색 재현) ──
+
+
+@given(st.text(min_size=1))
+def test_gate_red_parse_extra_delimiter_causes_part_count_mismatch(
+    extra: str,
+) -> None:
+    """gate_red 재현 — 6부분 문자열을 parse()에 넘기면 part_count 단언이
+    반드시 잡는다. 만약 단언이 제거되면 InvalidPositionKeyError가 발생하지
+    않고 잘못된 PositionKey가 돌아온다."""
+    # 5부분에 extra를 붙여 6부분 이상 만든다.
+    raw = f"v:{extra}:instr:strat:exec:{UUID(int=42)}"
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse(raw)
+
+
+def test_gate_red_parse_empty_field_in_string() -> None:
+    """gate_red 재현 — 빈 필드(`::`)가 문자열에 있으면 parse()가
+    InvalidPositionKeyError를 던진다. PositionKey.__post_init__의
+    empty-check가 .parse() 복원 경로에서도 유효함을 확인한다.
+
+    단언이 제거되면 빈 문자열을 가진 PositionKey가 생성되어
+    downstream에서 silent corruption이 일어난다."""
+    raw = "venue::strategy:execution:00000000-0000-0000-0000-000000000042"
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse(raw)
+
+
+def test_gate_red_construction_non_uuid_portfolio() -> None:
+    """gate_red 재현 — portfolio_id에 UUID가 아닌 값을 넣으면
+    __post_init__이 isinstance(portfolio_id, UUID) 단언으로
+    InvalidPositionKeyError를 던진다.
+
+    단언 제거 시 문자열 portfolio_id가 PositionKey에 유입되어
+    DB 조회 시 키 불일치를 유발한다."""
+    with pytest.raises(InvalidPositionKeyError):
+        # Dynamically pass a non-UUID to bypass static type checking
+        PositionKey(
+            venue="venue",
+            instrument_id="BTC/USDT",
+            strategy_id="strat-1",
+            execution_id="exec-1",
+            **{"portfolio_id": "not-a-uuid"},
+        )
+
+
+@pytest.mark.perf
+def test_perf_parse_measurement_sensitivity_to_virtual_delay() -> None:
+    """성능 게이트 적색 재현 — PerfBudget이 가상 지연을 정확히 감지하는지
+    확인한다. 지연 0ms와 지연 50ms를 비교해 측정 시스템이 지연을 포착함을
+    증명한다.
+
+    virtual_delayed_sync로 50ms(10x 기준) 지연을 주입한 후
+    PerfBudget.best_of로 측정한다. 지연 없는 baseline과 비교해
+    측정값이 ~50ms 증가함을 단언한다.
+
+    실측 기준: 단일 parse() 호출은 보통 <0.05ms CPU (local SSD,
+    Python 3.13). 50ms 가상 지연은 실측의 1000배 이상."""
+    reset_virtual_totals()
+
+    original_parse = PositionKey.parse
+    parse_str = "venue:instrument:strategy:execution:00000000-0000-0000-0000-000000000042"
+
+    budget = PerfBudget()
+
+    # baseline: 지연 없음
+    baseline = budget.best_of(lambda: original_parse(parse_str), n=5)
+
+    # 10x 가상 지연(50ms) 주입
+    reset_virtual_totals()
+    delayed_parse = virtual_delayed_sync(original_parse, 0.05)
+    with_delay = budget.best_of(lambda: delayed_parse(parse_str), n=5)
+
+    # 측정값이 ~50ms 증가했어야 함 (실측 오차 ±10ms 허용)
+    delta_ms = with_delay.cpu_ms - baseline.cpu_ms
+    assert delta_ms >= 40.0, (
+        f"PerfBudget failed to detect 50ms virtual delay: delta={delta_ms:.3f}ms (expected>=40.0ms)"
+    )
