@@ -26,6 +26,7 @@ from src.foundation.performance.domain.models import (
     StatementState,
 )
 from tests.integration.conftest import create_test_tenant
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime.now(UTC)
 
@@ -221,6 +222,7 @@ async def test_round_trip_latency_gate_goes_red_with_10x_injected_delay(
 
 
 async def test_list_statements_scoped_to_tenant(pool, repo):
+    """tenant B는 tenant A의 statement를 볼 수 없다."""
     tenant_a = await create_test_tenant(pool)
     tenant_b = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
@@ -295,8 +297,6 @@ async def test_get_latest_statement_performance_under_budget(pool, repo):
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     await repo.insert_statement(await _statement(tenant_id, revision_no=1))
 
-    from tests.support.perf_budget import PerfBudget
-
     budget = PerfBudget()
     sample = await budget.best_of_async(
         lambda: repo.get_latest_statement(
@@ -321,7 +321,6 @@ async def test_get_latest_statement_gate_red_virtual_delay(pool, repo):
     (gate-red). 이후 지연 제거 시 정상 경로가 예산 내임을 best_of로
     증명한다.
     """
-    from tests.support.perf_budget import PerfBudget
     from tests.support.perf_inject import (
         _add_virtual,
         reset_virtual_totals,
