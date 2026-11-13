@@ -213,13 +213,21 @@ async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence
         assert await _status_of(pool, binance_order) == "SUBMITTED"
 
 
-async def test_tenant_scope_does_not_affect_other_tenants_order(pool):
-    """negative test — 타 테넌트 주문 미영향(DoD 필수 항목)."""
+@pytest.mark.perf
+async def test_tenant_scope_does_not_affect_other_tenants_order(pool, perf_budget, monkeypatch):
+    """R-39: TENANT 격리 — negative 3종·실패주입·게이트적색·성능단언.
+
+    기존 100ms 예산을 그대로 사용한다. 가상 지연 10배 주입으로 적색 재현.
+    """
+    from tests.support.perf_inject import virtual_delayed_async
+    from tests.unit.services.conftest import _RaisingCancelAdapter
+
     tenant_a = await create_test_user(pool)
     tenant_b = await create_test_user(pool)
     order_a = await _seed_order(pool, tenant_a)
     order_b = await _seed_order(pool, tenant_b)
 
+    # negative: 타 테넌트 주문 미영향
     report = await sweep_open_orders(
         pool,
         _adapters("bitget"),
@@ -227,9 +235,87 @@ async def test_tenant_scope_does_not_affect_other_tenants_order(pool):
         scope=SafetyScope.TENANT,
         scope_ref=str(tenant_a),
     )
-
     assert report.cancel_requested == (order_a,)
     assert await _status_of(pool, order_b) == "SUBMITTED"
+
+    # negative: 종결 주문은 취소 대상 아님
+    filled = await _seed_order(pool, tenant_a, status="FILLED")
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(tenant_a),
+    )
+    assert filled not in report.cancel_requested
+    assert await _status_of(pool, filled) == "FILLED"
+
+    # negative: 재실행 시 이미 취소된 주문은 다시 취소하지 않음
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(tenant_a),
+    )
+    assert report.cancel_requested == ()
+    assert await _status_of(pool, order_a) == "CANCEL_REQUESTED"
+
+    # failure injection: 어댑터 예외는 tenant_b 무영향
+    order_c = await _seed_order(pool, tenant_a)
+    report = await sweep_open_orders(
+        pool,
+        {"bitget": _RaisingCancelAdapter()},
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(tenant_a),
+    )
+    assert order_c in report.adapter_failed
+    assert await _status_of(pool, order_b) == "SUBMITTED"
+
+    # gate-red: scope_ref를 타 테넌트로 망가뜨리면 단언이 실제로 잡힘
+    gate_order = await _seed_order(pool, tenant_a)
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(tenant_b),
+    )
+    with pytest.raises(AssertionError):
+        assert report.cancel_requested == (gate_order,)
+    assert await _status_of(pool, gate_order) == "SUBMITTED"
+
+    # perf: best-of + 10x 가상 지연 적색 재현
+    adapters = _adapters("bitget")
+
+    async def measured():
+        fa = await _seed_order(pool, tenant_a)
+        fb = await _seed_order(pool, tenant_b)
+        r = await sweep_open_orders(
+            pool,
+            adapters,
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(tenant_a),
+        )
+        assert fa in r.cancel_requested
+        assert await _status_of(pool, fb) == "SUBMITTED"
+
+    def assert_budget(sample):
+        assert sample.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
+            sample, budget_ms=PERF_BUDGET_MS
+        )
+
+    baseline = await perf_budget.best_of_async(measured, n=5, warmup=1)
+    assert_budget(baseline)
+    adapters["bitget"].cancel_order = virtual_delayed_async(
+        adapters["bitget"].cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
+    )
+    slow = await perf_budget.best_of_async(measured, n=3, warmup=0)
+    assert slow.wall_ms >= PERF_BUDGET_MS * 10
+    with pytest.raises(AssertionError):
+        assert_budget(slow)
 
 
 async def test_account_scope_only_that_accounts_order(pool):
