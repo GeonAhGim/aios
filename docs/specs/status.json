@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-12T17:40:22+00:00",
+ "refreshed_at": "2026-11-13T17:43:07+00:00",
  "specs": [
   {
    "below_floor": 1,
@@ -10,11 +10,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 3,
+   "reopened": 0,
    "depth": {
     "D1": 1,
-    "D2": 10,
-    "D3": 12
+    "D2": 9,
+    "D3": 13
    }
   },
   {
@@ -26,11 +26,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 17,
-   "reopened": 5,
+   "reopened": 6,
    "depth": {
     "D1": 5,
-    "D2": 30,
-    "D3": 55
+    "D2": 21,
+    "D3": 64
    }
   },
   {
@@ -135,7 +135,7 @@
    "depth": {}
   },
   {
-   "below_floor": 10,
+   "below_floor": 8,
    "file": "L4_platform_observability_tenancy_api_v1.0.md",
    "spec": "platform_observability_tenancy_api",
    "total": 42,
@@ -143,11 +143,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 2,
    "depth": {
-    "D1": 10,
-    "D2": 7,
-    "D3": 25
+    "D1": 8,
+    "D2": 8,
+    "D3": 26
    }
   },
   {
@@ -183,7 +183,7 @@
    }
   },
   {
-   "below_floor": 2,
+   "below_floor": 1,
    "file": "L4_risk_and_safety_v1.0.md",
    "spec": "risk_and_safety",
    "total": 58,
@@ -193,12 +193,12 @@
    "hold": 5,
    "reopened": 0,
    "depth": {
-    "D1": 2,
-    "D3": 51
+    "D1": 1,
+    "D3": 52
    }
   },
   {
-   "below_floor": 6,
+   "below_floor": 5,
    "file": "L4_strategy_portfolio_backtest_v1.0.md",
    "spec": "strategy_portfolio_backtest",
    "total": 46,
@@ -206,10 +206,10 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 2,
    "depth": {
-    "D1": 6,
-    "D2": 9,
+    "D1": 5,
+    "D2": 10,
     "D3": 31
    }
   }
