@@ -91,6 +91,25 @@ def test_context_is_frozen_rejects_mutation_of_mutable_field() -> None:
         setattr(ctx, "prior_results", {})  # noqa: B010 -- exercises __setattr__, not a field write
 
 
+def test_context_is_frozen_rejects_mutable_field_rebind_to_dict_keeps_original() -> None:
+    # Rebinding prior_results to a new dict must raise FrozenInstanceError,
+    # and ctx.prior_results must still be the original object (identity).
+    ctx = _ctx()
+    original = ctx.prior_results
+    attr_name = "prior_results"
+    with pytest.raises(FrozenInstanceError):
+        setattr(ctx, attr_name, {"x": 1})  # noqa: B010 -- exercises __setattr__, not a field write
+    assert ctx.prior_results is original
+
+
+def test_context_is_frozen_rejects_delattr_of_mutable_field() -> None:
+    # delattr on a frozen dataclass field must raise FrozenInstanceError.
+    ctx = _ctx()
+    attr_name = "prior_results"
+    with pytest.raises(FrozenInstanceError):
+        delattr(ctx, attr_name)
+
+
 def test_context_is_frozen_rejects_delattr() -> None:
     ctx = _ctx()
     with pytest.raises(FrozenInstanceError):
@@ -151,6 +170,42 @@ def test_field_order_introspection_goes_red_with_10x_delay(perf_budget) -> None:
     sample = perf_budget.best_of(slow, n=3, warmup=0)
     with pytest.raises(AssertionError):
         assert sample.cpu_ms < _FIELD_INTROSPECTION_BUDGET_MS
+
+
+# cpu_ms for one `setattr(ctx, "prior_results", {})` on a frozen CheckContext.
+# Local best-of-10 (batch=200) reads 0.000 ms (Windows process_time resolution 15.6 ms).
+# 50 ms budget = >=30x headroom over sub-microsecond real measurement.
+_FROZEN_REBIND_BUDGET_MS = 50.0
+
+
+@pytest.mark.perf
+def test_context_is_frozen_mutable_field_perf_budget(perf_budget) -> None:
+    ctx = _ctx()
+
+    def fn() -> None:
+        with pytest.raises(FrozenInstanceError):
+            setattr(ctx, "prior_results", {})  # noqa: B010 -- exercises __setattr__, not a field write
+
+    sample = perf_budget.best_of(fn, n=10, warmup=1, batch=200)
+    assert sample.cpu_ms < _FROZEN_REBIND_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_is_frozen_mutable_field_goes_red_with_10x_delay(perf_budget) -> None:
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    ctx = _ctx()
+
+    def fn() -> None:
+        with pytest.raises(FrozenInstanceError):
+            setattr(ctx, "prior_results", {})  # noqa: B010 -- exercises __setattr__, not a field write
+
+    slow = virtual_delayed_sync(fn, _FROZEN_REBIND_BUDGET_MS * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _FROZEN_REBIND_BUDGET_MS
 
 
 def test_field_order_assertion_detects_reordered_fields() -> None:
