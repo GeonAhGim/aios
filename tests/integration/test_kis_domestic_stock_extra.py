@@ -138,16 +138,14 @@ async def test_get_investor_trading_by_stock_rt_cd_nonzero():
 
 
 @pytest.mark.perf
-async def test_get_investor_trading_by_stock_latency_under_budget():
+async def test_get_investor_trading_by_stock_latency_under_budget(perf_budget):
     """수치 성능 단언(D2) — `get_investor_trading_by_stock`는 MockTransport
     위에서도 순수 HTTP 라우팅 + dict 접근 + dict() 감싸기만 하므로 CPU 시간은
-    마이크로초 단위여야 한다. 100회 호출 평균 CPU가 1ms를 넘어선다면 경로에
+    마이크로초 단위여야 한다. best-of-7 CPU가 1ms를 넘어선다면 경로에
     불필요한 루프/캐시 탐색/직렬화가 섞였음을 의미한다.
 
-    실측 근거: 로컬 테스트에서 100회 호출 평균 cpu_ms ≈ 0.02ms.
-    예산 1ms는 실측의 50배 여유.
+    실측 근거: 로컬 테스트에서 cpu_ms ≈ 0.02ms. 예산 1ms는 실측의 50배 여유.
     """
-    import time
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -160,21 +158,16 @@ async def test_get_investor_trading_by_stock_latency_under_budget():
         )
     )
 
-    # warmup: 첫 호출의 토큰 발급·트랜스포트 생성·limiter 초기화 비용을
-    # 측정에서 제외한다(평균 1.4ms 로 오염되던 원인, 마지막 10회 평균은 0ms).
-    await adapter.get_investor_trading_by_stock("005930")
-    await adapter.get_investor_trading_by_stock("005930")
-
-    cpu_times: list[float] = []
-    for _ in range(100):
-        t0 = time.process_time()
-        await adapter.get_investor_trading_by_stock("005930")
-        cpu_times.append(time.process_time() - t0)
-
-    avg_ms = (sum(cpu_times) / len(cpu_times)) * 1000
-    assert avg_ms < 1.0, (
-        f"평균 CPU 시간 {avg_ms:.3f}ms 가 예산 1ms 초과 — "
-        f"마지막 10회 평균: {(sum(cpu_times[-10:]) / 10) * 1000:.3f}ms"
+    # 평균 대신 best-of-N(perf_budget): Windows process_time 해상도가 거칠고
+    # 병렬 실행의 CPU 경합 spike 가 평균을 오염시키므로 최소 샘플로 판정한다.
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_investor_trading_by_stock("005930"),
+        n=7,
+        warmup=2,
+        batch=20,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"CPU 시간 {sample.cpu_ms:.3f}ms 가 예산 1ms 초과 (best-of-7, batch=20)"
     )
 
 
