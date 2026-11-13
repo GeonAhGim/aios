@@ -208,6 +208,42 @@ def test_context_is_frozen_mutable_field_goes_red_with_10x_delay(perf_budget) ->
         assert sample.cpu_ms < _FROZEN_REBIND_BUDGET_MS
 
 
+# cpu_ms for one `delattr(ctx, "trace_id")` on a frozen CheckContext.
+# Local best-of-10 (batch=200) reads 0.000 ms (Windows process_time resolution 15.6 ms).
+# 50 ms budget = >=30x headroom over sub-microsecond real measurement.
+_DELATTR_BUDGET_MS = 50.0
+
+
+@pytest.mark.perf
+def test_context_is_frozen_rejects_delattr_perf_budget(perf_budget) -> None:
+    ctx = _ctx()
+
+    def fn() -> None:
+        with pytest.raises(FrozenInstanceError):
+            delattr(ctx, "trace_id")
+
+    sample = perf_budget.best_of(fn, n=10, warmup=1, batch=200)
+    assert sample.cpu_ms < _DELATTR_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_is_frozen_rejects_delattr_goes_red_with_10x_delay(perf_budget) -> None:
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    ctx = _ctx()
+
+    def fn() -> None:
+        with pytest.raises(FrozenInstanceError):
+            delattr(ctx, "trace_id")
+
+    slow = virtual_delayed_sync(fn, _DELATTR_BUDGET_MS * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _DELATTR_BUDGET_MS
+
+
 def test_field_order_assertion_detects_reordered_fields() -> None:
     names = _field_names()
     names[0], names[1] = names[1], names[0]
