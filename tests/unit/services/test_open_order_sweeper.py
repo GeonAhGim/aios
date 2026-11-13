@@ -186,7 +186,7 @@ async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence
             assert report.cancel_requested == (bitget_order,)
         with pytest.raises(AssertionError):
             assert await _status_of(pool, binance_order) == "SUBMITTED"
-    else:
+    elif evidence == "perf":
         adapter = _adapters("bitget")["bitget"]
 
         async def measured_sweep():
