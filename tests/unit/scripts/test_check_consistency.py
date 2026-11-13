@@ -311,4 +311,3 @@ def test_main_baseline_missing_metric_key_fails(tmp_path: Path) -> None:
     exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
 
     assert exit_code == 1
-
