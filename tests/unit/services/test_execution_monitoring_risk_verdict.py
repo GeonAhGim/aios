@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
@@ -25,6 +26,7 @@ import asyncpg
 import pytest
 
 from src.services.execution_monitoring_service import ExecutionMonitoringService
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 _EVALUATED_AT = datetime(2026, 9, 20, 12, 0, 0, tzinfo=UTC)
 
@@ -161,6 +163,60 @@ async def test_verdict_null_reason_codes_normalize_to_empty_list() -> None:
     verdict = cards[0].last_risk_verdict
     assert verdict is not None
     assert verdict.reason_codes == []
+
+
+async def test_gate_red_null_reason_codes_assertion_catches_unnormalized() -> None:
+    """gate-red repro — 정규화가 깨져 reason_codes가 None으로 새면 위 단언
+    (`== []`)이 실제로 적색이 되는지 확인한다(단언이 공허하지 않음의 증명)."""
+    service = _service(
+        [
+            _base_row(
+                risk_outcome="ALLOW",
+                risk_reason_codes=None,
+                risk_evaluated_at=_EVALUATED_AT,
+            )
+        ]
+    )
+    verdict = (await service.list_for_user(uuid4()))[0].last_risk_verdict
+    assert verdict is not None
+    assert verdict.reason_codes == []  # 정상 입력은 녹색
+
+    broken = SimpleNamespace(outcome=verdict.outcome, reason_codes=None)
+    with pytest.raises(AssertionError):
+        assert broken.reason_codes == []
+
+
+async def test_gate_red_verdict_mapping_perf_catches_injected_delay(
+    perf_budget: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate-red repro (perf) — 가상 지연 10배(2ms 예산 대비 20ms)를 fetch에
+    주입하면 best_of 측정이 예산을 넘어 AssertionError가 나야 한다.
+
+    정상 경로는 best_of(최소값)로 예산 이내임을 먼저 확인한다. 예산 2000ms는
+    단건 매핑 로컬 실측(<1ms)의 30배 이상 여유다."""
+    reset_virtual_totals()
+    service = _service(
+        [
+            _base_row(
+                risk_outcome="ALLOW",
+                risk_reason_codes=None,
+                risk_evaluated_at=_EVALUATED_AT,
+            )
+        ]
+    )
+
+    async def _once() -> list[Any]:
+        return await service.list_for_user(uuid4())
+
+    sample = await perf_budget.best_of_async(_once, n=5, warmup=1, batch=1)
+    assert sample.cpu_ms < 2000.0
+
+    monkeypatch.setattr(_FakeConn, "fetch", virtual_delayed_async(_FakeConn.fetch, 20.0))
+    slow = await perf_budget.best_of_async(_once, n=5, warmup=1, batch=1)
+    assert slow.wall_ms >= 20000.0
+    with pytest.raises(AssertionError):
+        assert max(slow.wall_ms, slow.cpu_ms) < 2000.0
+    reset_virtual_totals()
 
 
 async def test_multiple_executions_each_get_own_verdict_not_mixed() -> None:
