@@ -232,8 +232,8 @@ class ExecutionService:
         new_exposure_pct: Decimal,
         available_balance: Decimal,
     ) -> ExecutionSummary:
-        """J8 LP-4: LIVE 실행의 허용 자본을 목표의 new_exposure_pct%로 올린다.
-        확대만 가능하고 자동 확대는 없다."""
+        """J8 LP-4: Raise the allowed capital of a LIVE execution to the target
+        new_exposure_pct%. Expansion only — no automatic increase."""
         return await execution_exposure.expand(
             self._pool,
             self._risk_policy,
@@ -293,8 +293,8 @@ class ExecutionService:
                 result.id,
                 source_execution_id,
             )
-            # J8 LP-4 -- 목표 자본의 초기 노출%로 내려 시작하고,
-            # 손실 한도는 기존 실행별 가드(max_drawdown_pct)로 환산한다.
+            # J8 LP-4: Start from initial exposure% of target capital,
+            # and convert loss limit to the per-execution guard (max_drawdown_pct).
             staged, guard_pct = await execution_exposure.apply_initial_stage(
                 conn,
                 result.id,
@@ -322,8 +322,8 @@ class ExecutionService:
                     "exchange": exchange,
                     "mode_before": "PAPER",
                     "mode_after": "LIVE",
-                    # J8 LP-3 -- 사용자가 명시한 한도와 결정 시 본 근거 요약
-                    # (전략 버전과 함께 결정 계보를 이룬다).
+                    # J8 LP-3: Summary of limits specified by the user and rationale
+                    # at decision time (forms a decision lineage with the strategy version).
                     "strategy_id": source["strategy_id"],
                     "strategy_version": source["strategy_version"],
                     "max_loss_amount": max_loss_amount,
