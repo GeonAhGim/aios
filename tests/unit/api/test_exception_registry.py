@@ -322,6 +322,43 @@ def test_adversarial_empty_map_forces_internal_error(monkeypatch):
     assert details == {}
 
 
+def test_wallet_topup_invalid_transition_is_not_validation_invalid_field():
+    """negative — WalletTopupInvalidTransitionError(409)가 VALIDATION_INVALID_FIELD(400)
+    로 뭉개지면 안 된다(자녀 409가 부모 400으로 붕괴하는 패턴의 반대 케이스)."""
+    code, _, _ = map_exception(
+        WalletTopupInvalidTransitionError("이미 다른 관리자가 처리했습니다.")
+    )
+    assert code != ErrorCode.VALIDATION_INVALID_FIELD
+
+
+def test_adversarial_corrupted_map_cannot_force_internal_error(monkeypatch):
+    """적대적 테스트/I-10 배선 증명 — EXCEPTION_MAP에 임의의 (Exception, ErrorCode)
+    쌍을 주입해도 INTERNAL_ERROR 경로는 절대 덮여선 안 된다. map_exception의
+    마지막 return 문(매칭 실패 시 INTERNAL_ERROR)은 EXCEPTION_MAP 순회 바깥에
+    있으므로, 어떤 corrupted map 입력에도 INTERNAL_ERROR가 뚫리지 않음을
+    INVARIANTS I-10("구현됨 ≠ 작동함")에 따라 적대적으로 검증한다.
+
+    전략: EXCEPTION_MAP에 임의 예외를 맨 앞에 추가한 뒤, (1) 추가된 예외는
+    매핑 표대로 동작하고 (2) 표에 없는 제3의 예외는 여전히 INTERNAL_ERROR임을
+    확인한다. 이는 "매핑 표가 전체를 대체하는 것이 아니라 순회 기반 폴스루
+    모델임을" 증명한다."""
+    import tests.unit.api.test_exception_registry as mod
+
+    _original_map = exception_mapping_module.EXCEPTION_MAP
+
+    # 적대적 입력: 매핑 표에 임의 예외를 추가한다.
+    corrupted = [(UserAdminError, ErrorCode.AUTH_INVALID_CREDENTIALS)] + _original_map
+    monkeypatch.setattr(exception_mapping_module, "EXCEPTION_MAP", corrupted)
+
+    # 1) 매핑 표에 있는 예외는 표에 따른다
+    code, _, _ = mod.map_exception(UserAdminError("테스트"))
+    assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+
+    # 2) 매핑 표에 없는 예외는 여전히 INTERNAL_ERROR (fail-closed 유지)
+    code2, _, _ = mod.map_exception(_UnrelatedDependencyError("표 밖"))
+    assert code2 == ErrorCode.INTERNAL_ERROR
+
+
 def test_subclasses_are_registered_before_their_parent():
     """매핑 우선순위 고정 — 이 순서가 뒤바뀌면(부모가 먼저 오면) 위 개별
     테스트들이 실제로는 통과해도(현재 파이썬 등록 상태에서만) 회귀를 못
