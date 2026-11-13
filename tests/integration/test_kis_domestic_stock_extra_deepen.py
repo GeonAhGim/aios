@@ -9,6 +9,7 @@ import pytest
 
 from src.core.exceptions import RetryableExchangeError
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.kis.rate_profile import reset_token_bucket_registry_for_test
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -19,6 +20,33 @@ def _make_adapter(handler) -> KISAdapter:
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
     return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+
+
+async def _no_sleep(_seconds: float) -> None:
+    """성능 측정용: 모의투자 토큰 버킷 대기(초당 호출 제한)를 실제로 자지 않는다.
+
+    100회 루프가 50~70초 걸려 시간 단언이 흔들리고 full CI의 직렬 perf 단계를 늘렸다(2026-11-13).
+    측정 대상은 어댑터 CPU 경로이지 제한 대기가 아니다."""
+
+
+def _make_perf_adapter(handler) -> KISAdapter:
+    # 프로세스 전체 싱글턴 버킷은 처음 만든 어댑터의 sleep을 쓴다.
+    # 앞선 일반 테스트가 실제 asyncio.sleep으로 만든 버킷이 남아 있으면
+    # no-op sleep을 줘도 70초씩 진짜로 잔다 -- 비워서 새로 만들게 한다.
+    reset_token_bucket_registry_for_test()
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    return KISAdapter(
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=client,
+        sleep_fn=_no_sleep,
+    )
 
 
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:
@@ -87,7 +115,7 @@ async def test_get_financial_ratio_rt_cd_nonzero():
 
 
 @pytest.mark.perf
-async def test_get_financial_ratio_latency_under_budget():
+async def test_get_financial_ratio_latency_under_budget(perf_budget):
     """수치 성능 단언(D2) — `get_financial_ratio`는 MockTransport
     위에서도 순수 HTTP 라우팅 + dict 접근만 하므로 CPU 시간은 마이크로초
     단위여야 한다. 100회 호출 평균 CPU가 1ms를 넘어선다면 경로에
@@ -96,39 +124,27 @@ async def test_get_financial_ratio_latency_under_budget():
     실측 근거: 로컬 테스트에서 100회 호출 평균 cpu_ms ≈ 0.02ms.
     예산 1ms는 실측의 50배 여유.
     """
-    import time
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200, json={"rt_cd": "0", "msg1": "ok", "output": [{"stac_yymm": "202412"}]}
         )
 
-    adapter = _make_adapter(
+    adapter = _make_perf_adapter(
         lambda request: _route(
             request, {"/uapi/domestic-stock/v1/finance/financial-ratio": handler}
         )
     )
 
-    # warmup: 첫 호출은 토큰 발급·트랜포트 생성·rate limiter 초기화
-    # 오버헤드가 포함되므로 측정 전에 2회 호출해 모든 캐시를 채운다.
-    # 이후 루프는 순수 CPU 시간만 측정. process_time()은 프로세스 내 모든
-    # 스레드(DB 풀·백그라운드 스레드)의 CPU를 합산해 rate limiter 대기 중
-    # 타 스레드 작업이 섞여 간헐 적색이 되므로 thread_time()으로 이벤트 루프
-    # 스레드만 측정한다.
-    await adapter.get_financial_ratio("005930")
-    await adapter.get_financial_ratio("005930")
-
-    cpu_times: list[float] = []
-    for _ in range(100):
-        t0 = time.thread_time()
-        await adapter.get_financial_ratio("005930")
-        cpu_times.append(time.thread_time() - t0)
-
-    avg_ms = (sum(cpu_times) / len(cpu_times)) * 1000
-    assert avg_ms < 1.0, (
-        f"평균 CPU 시간 {avg_ms:.3f}ms 가 예산 1ms 초과 — "
-        f"마지막 10회 평균: {(sum(cpu_times[-10:]) / 10) * 1000:.3f}ms"
+    # 평균 대신 best-of-N(perf_budget): Windows process_time 해상도(15.6ms 눈금)와 호스트 경쟁에
+    # 흔들리지 않는다. 예산 1ms는 그대로다. 제한 대기는 _make_perf_adapter가 건너뛴다.
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_financial_ratio("005930"),
+        n=7,
+        warmup=2,
+        batch=20,
     )
+    assert sample.cpu_ms < 1.0, f"CPU 시간 {sample.cpu_ms:.3f}ms 가 예산 1ms 초과"
 
 
 @pytest.mark.perf
@@ -151,7 +167,7 @@ async def test_get_financial_ratio_gate_red_10x_delay_injection(
             200, json={"rt_cd": "0", "msg1": "ok", "output": [{"stac_yymm": "202412"}]}
         )
 
-    adapter = _make_adapter(
+    adapter = _make_perf_adapter(
         lambda request: _route(
             request, {"/uapi/domestic-stock/v1/finance/financial-ratio": handler}
         )
