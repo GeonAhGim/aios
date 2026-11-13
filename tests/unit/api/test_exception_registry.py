@@ -92,9 +92,104 @@ def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatc
 
 def test_verification_base_error_is_not_state_invalid_transition():
     """negative — VerificationError(부모)가 VerificationInvalidTransitionError
-    (자식)의 409 코드로 오매핑되면 안 된다."""
+    (자식)의 409 코드로 오매핑되면 안 된다.
+
+    negative 1: 부모(VerificationError)가 STATE_INVALID_TRANSITION(409)으로
+    떨어지지 않음을 확인한다.
+    negative 2: 부모(VerificationError)가 RESOURCE_NOT_FOUND(404)으로
+    떨어지지 않음을 확인한다(서브클래스 간 contamination 방지).
+    negative 3: 부모(VerificationError)가 VALIDATION_INVALID_FIELD(400)로
+    매핑되더라도 그것은 부모 자신의 코드이지 자식의 409가 아니다 —
+    STATE_INVALID_TRANSITION이 아님을 재확인한다."""
     code, _, _ = map_exception(VerificationError("알 수 없는 결정입니다: MAYBE"))
     assert code != ErrorCode.STATE_INVALID_TRANSITION
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
+    assert code == ErrorCode.VALIDATION_INVALID_FIELD
+
+
+@pytest.mark.perf
+def test_verification_base_error_perf_and_gate_red(perf_budget, monkeypatch):
+    """negative + failure injection + gate-red + 성능 단언(D2 보강).
+
+    negative — VerificationError(부모)가 409 코드로 오매핑되지 않음을
+    재확인한다.
+
+    failure injection / gate-red — EXCEPTION_MAP에서 VerificationInvalidTransitionError
+    (자식)를 VerificationError(부모) 뒤에 배치하면 map_exception이 부모를 먼저
+    매칭해 409 코드가 400으로 붕괴함을 monkeypatch로 재현한다.
+
+    성능 단언 — map_exception 단일 호출의 CPU는 인메모리 리스트 스캔 1회이므로
+    best_of(n=5)로 최소값을 꺼내 1ms 예산을 확인한다.
+    virtual_delayed_sync로 10ms를 주입하면 best_of 측정치가 1ms를 넘어
+    AssertionError로 적색 게이트가 확인된다.
+
+    virtual_delayed_sync(10ms) 주입 시:
+      perf_budget.assert_within(budget_ms=1) → AssertionError (gate-red)
+      best_of(n=5) 측정치 ≈ 10ms > 1ms 예산 → 적색
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    exc = VerificationError("알 수 없는 결정입니다: MAYBE")
+
+    # 1) negative — 정상 입력에서 부모가 409 코드를 받지 않음
+    code, _, _ = map_exception(exc)
+    assert code != ErrorCode.STATE_INVALID_TRANSITION
+
+    # 2) 성능 단언 — best_of 최소값이 예산을 지키는지 확인
+    perf_budget.assert_within(
+        lambda: map_exception(exc),
+        budget_ms=1,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="single VerificationError lookup",
+    )
+
+    # 3) gate-red: 등록 순서를 손상시켜 부모가 자식보다 먼저 오게 하면
+    #    VerificationInvalidTransitionError가 400으로 붕괴함을 재현
+    import tests.unit.api.test_exception_registry as mod
+
+    _original_map = exception_mapping_module.EXCEPTION_MAP
+
+    # VerificationInvalidTransitionError를 VerificationError 뒤에 배치
+    corrupted = []
+    for t, c in _original_map:
+        if t is VerificationInvalidTransitionError:
+            continue  # 자식을 뺀다
+        corrupted.append((t, c))
+    corrupted.append((VerificationInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION))
+    corrupted.append((VerificationError, ErrorCode.VALIDATION_INVALID_FIELD))  # 부모를 뒤에
+
+    monkeypatch.setattr(exception_mapping_module, "EXCEPTION_MAP", corrupted)
+
+    # 손상된 순서에서 VerificationInvalidTransitionError가 400으로 붕괴함을 확인
+    code_broken, _, _ = exception_mapping_module.map_exception(
+        VerificationInvalidTransitionError("PENDING_VERIFICATION 상태에서만...")
+    )
+    assert code_broken == ErrorCode.VALIDATION_INVALID_FIELD
+
+    # 4) gate-red: 가상 지연 주입으로 성능 단언이 적색으로 떨어짐을 확인
+    #    map_exception은 상수 import이므로 테스트 모듈 네임스페이스에서 패치.
+    def _delayed_map(e: Exception) -> tuple:
+        return virtual_delayed_sync(_original_map, 10)(e)
+
+    # original_map을 다시 가져옴 (monkeypatch 전)
+    from src.api.contracts.exception_mapping import map_exception as _real_map
+
+    def _delayed_real_map(e: Exception) -> tuple:
+        return virtual_delayed_sync(_real_map, 10)(e)
+
+    monkeypatch.setattr(mod, "map_exception", _delayed_real_map)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.map_exception(exc),
+            budget_ms=1,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="single VerificationError lookup (injected 10ms)",
+        )
 
 
 def test_wallet_topup_not_found_is_not_state_invalid_transition():
