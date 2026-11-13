@@ -12,7 +12,6 @@ lifecycle.py`는 application 계층(run_reconciliation/resolve_reconciliation)�
 from __future__ import annotations
 
 import os
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -416,27 +415,13 @@ async def test_insert_run_with_items_fails_closed_without_tenant_guc(
         await app_role_repo.insert_run_with_items(_run(tenant_id, uuid4()), ())
 
 
-async def _get_run_by_input_hash_p95_ms(
-    app_role_repo: PostgresReconciliationRepository,
-    target_ref: UUID,
-    input_hash: str,
-    tenant_id: UUID,
-    *,
-    n: int,
-) -> float:
-    durations_ms: list[float] = []
-    for _ in range(n):
-        start = time.perf_counter()
-        await app_role_repo.get_run_by_input_hash(target_ref, input_hash, tenant_id)
-        durations_ms.append((time.perf_counter() - start) * 1000)
-    durations_ms.sort()
-    return durations_ms[int(len(durations_ms) * 0.95)]
-
-
-async def test_get_run_by_input_hash_under_app_role_p95_under_borrowed_order_ack_budget(pool, repo):
+@pytest.mark.perf
+async def test_get_run_by_input_hash_under_app_role_p95_under_borrowed_order_ack_budget(
+    pool, repo, perf_budget
+):
     """수치 성능 단언: `tenant_transaction` + `SET ROLE aios_app` + RLS 정책
     평가를 포함한 단일 실DB 왕복의 p95가 예산(위 상수) 이내인지 30회 반복으로
-    확인한다."""
+    확인한다. 측정은 `perf_budget.sample_async()` 경유(raw perf_counter 금지)."""
     tenant_id = await _tenant(pool)
     target_ref = uuid4()
     await repo.insert_run_with_items(
@@ -444,8 +429,15 @@ async def test_get_run_by_input_hash_under_app_role_p95_under_borrowed_order_ack
     )
     app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
 
-    p95_ms = await _get_run_by_input_hash_p95_ms(
-        app_role_repo, target_ref, "perf-hash", tenant_id, n=30
-    )
+    async def _lookup_once() -> None:
+        await app_role_repo.get_run_by_input_hash(target_ref, "perf-hash", tenant_id)
 
-    assert p95_ms < _RLS_SELECT_P95_BUDGET_MS
+    samples = sorted(
+        [await perf_budget.sample_async(_lookup_once) for _ in range(30)],
+        key=lambda s: s.wall_ms,
+    )
+    p95_ms = samples[int(len(samples) * 0.95)].wall_ms
+
+    assert p95_ms < _RLS_SELECT_P95_BUDGET_MS, (
+        f"p95 {p95_ms:.3f}ms over {_RLS_SELECT_P95_BUDGET_MS}ms"
+    )
