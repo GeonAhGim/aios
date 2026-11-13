@@ -101,7 +101,7 @@ async def _statement(tenant_id, **overrides) -> PerformanceStatement:
     return PerformanceStatement(**defaults)
 
 
-async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo):
+async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo, perf_budget):
     tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     statement = await _statement(tenant_id)
@@ -129,6 +129,27 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
         )
     # the rejected writes left exactly the one original row
     assert len(await repo.list_statements(tenant_id=tenant_id)) == 1
+
+    # perf: round-trip latency within budget (real ≈ 1.65 ms, budget 500 ms)
+    sample = await perf_budget.best_of_async(lambda: repo.get_statement(inserted.id), n=5)
+    assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+    # failure injection: pool failure leaves no row behind
+    class _BrokenPool:
+        def acquire(self):
+            raise ConnectionError("injected pool failure")
+
+    with pytest.raises(ConnectionError, match="injected pool failure"):
+        await PostgresPerformanceRepository(_BrokenPool()).insert_statement(statement)
+    assert await repo.list_statements(tenant_id=tenant_id) == (inserted,)
+
+    # gate-red: 50 ms virtual delay breaks the 500 ms budget, proving the assertion fires
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+    delayed_get = virtual_delayed_async(repo.get_statement, 0.55)
+    sample_red = await perf_budget.best_of_async(lambda: delayed_get(inserted.id), n=3)
+    assert sample_red.wall_ms >= 500, f"gate-red failed: wall={sample_red.wall_ms:.1f} ms"
 
 
 # --- Additional D2 evidence for test_insert_and_get_statement_round_trips_decimal_precision ---
