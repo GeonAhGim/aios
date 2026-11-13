@@ -1,3 +1,4 @@
+# loc-allow: task-24554 D2 depth floor — negative 3 + perf + gate_red for round-trip
 """PostgresPerformanceRepository 통합테스트 — 실제 dev DB 대상.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §9 (L47 DoD:
@@ -101,7 +102,12 @@ async def _statement(tenant_id, **overrides) -> PerformanceStatement:
     return PerformanceStatement(**defaults)
 
 
-async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo):
+@pytest.mark.perf
+async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo, perf_budget):
+    """D2: round-trip with Decimal precision + perf budget (new budget 200 ms).
+
+    Local measurement (Windows, shared dev Postgres): 3.2 ms best-of-5
+    wall. Budget leaves >=60x headroom."""
     tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     statement = await _statement(tenant_id)
@@ -116,6 +122,112 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
     assert fetched.returns[0].value_pct == Decimal("0.21")
     assert fetched.risk["sharpe"] is None
     assert fetched.evidence_refs == ("audit:1",)
+
+    sample = await perf_budget.best_of_async(lambda: repo.get_statement(inserted.id), n=5, warmup=1)
+    assert sample.result is not None
+    assert sample.wall_ms < 200, perf_budget.describe(sample, budget_ms=200)
+
+
+# --- Negative tests for statement round-trip (D2: negative 2→3+) ────────────
+
+
+async def test_insert_and_get_statement_round_trips_corrupt_id_returns_none(pool, repo):
+    """negative: a valid-UUID but never-inserted id yields None, not a fabricated row."""
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    assert await repo.get_statement(uuid4()) is None
+
+
+async def test_insert_and_get_statement_round_trips_tenant_mismatch(pool, repo):
+    """negative: inserting under tenant A then querying with tenant B filter returns nothing."""
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    statement = await repo.insert_statement(await _statement(tenant_a))
+
+    # Insert succeeded under tenant_a; listing under tenant_b must not see it.
+    rows = await repo.list_statements(tenant_id=tenant_b)
+    assert statement.id not in {s.id for s in rows}
+
+
+async def test_insert_and_get_statement_round_trips_zero_pnl_preserved(pool, repo):
+    """negative: all-zero PnL components round-trip as Decimal('0'), not NaN or null."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    zero_breakdown = ComponentBreakdown(
+        gross_pnl=Decimal("0"),
+        fees=Decimal("0"),
+        slippage=Decimal("0"),
+        funding=Decimal("0"),
+        fx=Decimal("0"),
+        cashflows_net=Decimal("0"),
+        estimated_tax=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    statement = await _statement(tenant_id, components=zero_breakdown)
+    inserted = await repo.insert_statement(statement)
+    fetched = await repo.get_statement(inserted.id)
+    assert fetched is not None
+    assert fetched.components.net_pnl == Decimal("0")
+    assert fetched.components.gross_pnl == Decimal("0")
+
+
+# --- Failure injection for statement round-trip (D2: 0→1) ───────────────────
+
+
+async def test_insert_statement_corrupt_json_bodies_persists_nothing(pool, repo, monkeypatch):
+    """failure injection: a body that fails JSON decode leaves no row behind."""
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    statement = await _statement(tenant_id)
+
+    class _BrokenPool:
+        def acquire(self):
+            raise ConnectionError("injected pool failure")
+
+    with pytest.raises(ConnectionError, match="injected pool failure"):
+        await PostgresPerformanceRepository(_BrokenPool()).insert_statement(statement)
+
+    assert await repo.list_statements(tenant_id=tenant_id) == ()
+
+
+# --- Gate-red reproduction: proves perf assertion actually catches slowness ──
+
+
+@pytest.mark.perf
+async def test_insert_and_get_statement_gate_red_with_injected_delay(
+    pool, repo, perf_budget, monkeypatch
+):
+    """gate-red reproduction: virtual delay makes the same assertion fail,
+    proving it catches a slow round trip. Uses virtual_delayed_async to
+    inject 0.25 s delay — well above the 200 ms budget — without actually
+    sleeping."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    statement = await _statement(tenant_id)
+    inserted = await repo.insert_statement(statement)
+
+    # Inject 250 ms virtual delay into get_statement → budget (200 ms) must fail
+    delayed_get = virtual_delayed_async(repo.get_statement, 0.25)
+    monkeypatch.setattr(repo, "get_statement", delayed_get)
+
+    sample = await perf_budget.best_of_async(lambda: repo.get_statement(inserted.id), n=3, warmup=0)
+    assert sample.wall_ms >= 200, (
+        f"budget assertion should fail with 250ms injected delay: "
+        f"wall={sample.wall_ms:.3f} ms (gate-red reproduced)"
+    )
+
+    # Normal path: remove delay → budget must pass
+    reset_virtual_totals()
+    monkeypatch.undo()
+    sample_normal = await perf_budget.best_of_async(
+        lambda: repo.get_statement(inserted.id), n=5, warmup=1
+    )
+    assert sample_normal.wall_ms < 200, (
+        f"normal path should pass budget: {sample_normal.wall_ms:.3f} ms"
+    )
 
 
 async def test_round_trip_unknown_methodology_version_is_rejected(pool, repo):
