@@ -125,6 +125,47 @@ def test_verify_uses_kid_from_header_after_active_kid_rotates() -> None:
     assert jwt.get_unverified_header(new_token)["kid"] == "v2"
 
 
+# kid rotation issue+verify best-of-10 reading is ~0-20 ms (HS256 sign+verify);
+# budget has >=30x headroom (ADR-2026-09-09-C Decision 1).
+_KID_ROTATION_BUDGET_MS = 1000.0
+
+
+def _kid_rotation_fn() -> Callable[[], object]:
+    old_issuer, new_issuer = _issuer("v1"), _issuer("v2")
+    verifier = _verifier()
+
+    def _run() -> object:
+        token = old_issuer.issue_access(
+            user_id=uuid4(), tenant_id=uuid4(), session_id=uuid4(), auth_level="PASSWORD"
+        )
+        new_token = new_issuer.issue_access(
+            user_id=uuid4(), tenant_id=uuid4(), session_id=uuid4(), auth_level="PASSWORD"
+        )
+        verifier.verify(token)
+        return verifier.verify(new_token)
+
+    return _run
+
+
+@pytest.mark.perf
+def test_verify_uses_kid_from_header_after_active_kid_rotates_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    cpu_ms = _roundtrip_cpu_ms(perf_budget, _kid_rotation_fn())
+    assert cpu_ms < _KID_ROTATION_BUDGET_MS, f"budget exceeded: {cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_verify_uses_kid_from_header_after_active_kid_rotates_goes_red_with_10x_delay_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red repro: a virtual 10x-budget delay makes the same assertion fail."""
+    slowed = virtual_delayed_sync(_kid_rotation_fn(), _KID_ROTATION_BUDGET_MS * 10 / 1000.0)
+    cpu_ms = _roundtrip_cpu_ms(perf_budget, slowed)
+    with pytest.raises(AssertionError):
+        assert cpu_ms < _KID_ROTATION_BUDGET_MS, f"budget exceeded: {cpu_ms} ms"
+
+
 def test_verify_rejects_unknown_kid() -> None:
     issuer = TokenIssuer(keys={"v9": bytes.fromhex(KEY_V1)}, active_kid="v9")
     token = issuer.issue_access(
