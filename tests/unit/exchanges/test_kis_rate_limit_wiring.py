@@ -268,14 +268,14 @@ async def test_rate_limit_perf_gate_red_when_sleep_delayed_10x(
         tr_call_count += 1
         return httpx.Response(200, json={"rt_cd": "0"})
 
-    client = _paper_client(handler)
-
     # rate_limiter의 TokenBucket이 쓰는 asyncio.sleep을 가상 지연으로 교체
     import asyncio
 
     original_sleep = asyncio.sleep
     # 10배 지연: 실제 sleep은 0.01s 단위지만 가상으로 0.1s 주입
     monkeypatch.setattr(asyncio, "sleep", virtual_delayed_async(original_sleep, 0.1))
+    # 클라이언트는 생성 시점의 asyncio.sleep을 sleep_fn으로 캡처하므로 패치 이후에 만든다.
+    client = _paper_client(handler)
     try:
         pb = PerfBudget()
 
@@ -289,9 +289,8 @@ async def test_rate_limit_perf_gate_red_when_sleep_delayed_10x(
 
         sample = await pb.best_of_async(seq, n=3, warmup=0, batch=1)
         # 정상 경로의 예산 — 10배 지연 주입으로 이 예산을 크게 초과해야 함
-        budget_ms = 100.0
-        assert sample.wall_ms < budget_ms, (
-            f"게이트 적색 단언 실패 예상: wall={sample.wall_ms:.3f}ms budget={budget_ms}ms"
-        )
+        budget_ms = 200.0  # 정상 경로 테스트와 동일 예산
+        with pytest.raises(AssertionError):
+            assert sample.wall_ms < budget_ms, f"wall={sample.wall_ms:.3f}ms budget={budget_ms}ms"
     finally:
         reset_virtual_totals()
