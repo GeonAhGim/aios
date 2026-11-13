@@ -11,7 +11,7 @@ negative/failure-injection/성능/동시성 증빙이 전혀 없었다). 이 파
 보강 항목 (task-23191 D1→D3):
 - negative 테스트 3종 (원장: 1 → 보강 후: 3)
 - 성능 단언 0 → perf 마커 + PerfBudget 측정 + virtual_delayed_sync 적색 재현 추가
-- adversarial 1 → 2 (결정론성 증명 추가)
+- adversarial 1 → 2 (결정론성 + 통계 불변식 proof)
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import pytest
 from src.core.safety.watchdog import WatchdogAction
 from src.core.safety.watchdog_simulator import (
     EquityPoint,
+    ScenarioResult,
     SimulationReport,
     SimulationScenario,
     default_scenarios,
@@ -280,3 +281,66 @@ async def test_run_scenario_deterministic_across_sequential_runs(tmp_path: Path)
         assert r == first, (
             f"run {i} 결과가 run 0과 다름: {r} != {first} — watchdog 판정이 비결정적이다"
         )
+
+
+# ---- adversarial — SimulationReport 통계 불변식 proof ------------------------------------
+def test_simulation_report_fp_fn_rate_invariants() -> None:
+    """adversarial(D3, task-24640 신설): SimulationReport.false_positive_rate와
+    false_negative_rate가 모든 경계 케이스에서 수학적 불변식을 만족해야 한다.
+
+    불변식:
+    - negatives가 0이면 FP rate = 0.0 (ZeroDivisionError 금지)
+    - positives가 0이면 FN rate = 0.0 (ZeroDivisionError 금지)
+    - 모든 결과가 FP면 FP rate = 1.0
+    - 모든 결과가 FN이면 FN rate = 1.0
+    - FP+정상이混재면 0 < FP rate < 1.0
+
+    I-01(정수/소수 정확성)과 직접 연결: FP/FN율이 float로 새어나가면
+    리스크 임계값 비교에서 부동소수점 오차가 판정을 뒤집을 수 있다.
+    """
+    # 1) negatives=0 → FP rate = 0.0
+    report_empty_neg = SimulationReport(results=[])
+    assert report_empty_neg.false_positive_rate == 0.0
+    assert report_empty_neg.false_negative_rate == 0.0
+
+    # 2) positives=0 → FN rate = 0.0
+    report_no_positives = SimulationReport(
+        results=[
+            ScenarioResult("ok", WatchdogAction.NORMAL, "within_thresholds", expect_trigger=False),
+        ]
+    )
+    assert report_no_positives.false_negative_rate == 0.0
+    assert report_no_positives.false_positive_rate == 0.0
+
+    # 3) all FP → FP rate = 1.0
+    report_all_fp = SimulationReport(
+        results=[
+            ScenarioResult("fp1", WatchdogAction.HALT, "drawdown", expect_trigger=False),
+            ScenarioResult(
+                "fp2", WatchdogAction.LIQUIDATE, "correlated_drop", expect_trigger=False
+            ),
+        ]
+    )
+    assert report_all_fp.false_positive_rate == 1.0
+    assert report_all_fp.false_negative_rate == 0.0
+
+    # 4) all FN → FN rate = 1.0
+    report_all_fn = SimulationReport(
+        results=[
+            ScenarioResult("fn1", WatchdogAction.NORMAL, "within_thresholds", expect_trigger=True),
+            ScenarioResult("fn2", WatchdogAction.NORMAL, "within_thresholds", expect_trigger=True),
+        ]
+    )
+    assert report_all_fn.false_negative_rate == 1.0
+    assert report_all_fn.false_positive_rate == 0.0
+
+    # 5) mixed FP+TN → 0 < FP rate < 1.0
+    report_mixed = SimulationReport(
+        results=[
+            ScenarioResult("fp", WatchdogAction.HALT, "drawdown", expect_trigger=False),
+            ScenarioResult("tn", WatchdogAction.NORMAL, "within_thresholds", expect_trigger=False),
+        ]
+    )
+    assert 0.0 < report_mixed.false_positive_rate < 1.0
+    assert report_mixed.false_positive_rate == 0.5
+    assert report_mixed.false_negative_rate == 0.0
