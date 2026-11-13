@@ -64,10 +64,11 @@ async def test_create_pos_account_propagates_connection_failure() -> None:
 async def test_asyncpg_dsn_raises_when_database_url_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """negative: `DATABASE_URL`이 비어 있으면(설정 누락) 조용히 빈 DSN을
-    만들어내지 말고 명시적으로 실패해야 한다."""
+    """negative: `DATABASE_URL`/`TEST_DATABASE_URL`이 비어 있으면(설정 누락)
+    조용히 빈 DSN을 만들어내지 말고 명시적으로 실패해야 한다."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    with pytest.raises(KeyError):
+    monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
         _asyncpg_dsn()
 
 
