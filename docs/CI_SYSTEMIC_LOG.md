@@ -3948,3 +3948,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 판정: 저장소 측 공통 설계 결함 신규 없음 → 검사 규칙·임계값·기준선 변경 없음(DECISION_GUIDELINES B-2). 코드 변경 없음(noop, 본 로그 append만).
 - 재발 시 확인 순서: (1) 실패 nodeid가 `RelativeBudget`/`PerfBudget.sample`을 쓰는 perf 테스트인지, (2) `ruff format --check` 실패 여부, (3) replay 계열이면 `skipped -- pre-cutover order` 진단인지 먼저 본다.
 - D2: N/A(조사·기록 리프, 실행 코드 변경 없음).
+
+## task-24862 — esc-ci-pytest "seq=7 from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-11-14)
+
+- 카드 본문은 `scripts/replay_verify.py::_order_pair`의 설계된 pre-cutover skip 진단과 `src/core/eventstore/projections/orders.py`의 `EventChainBrokenError` 메시지 포맷이며 FAILED 신호가 아니다 — task-21172/21849/21877/23608/23884와 동형. 실제 실패 nodeid는 카드에 없다.
+- `git log -- scripts/replay_verify.py src/core/eventstore src/services/oms` 최근 변경은 스타일/번역/StrEnum 전환뿐이고 최근 커밋(ledger 테스트·format)은 이 경로를 건드리지 않는다.
+- 로컬 재현(aios_test_backend_2): `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/test_replay_verify{,_order_chain}.py` **58 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인; 58 passed 수치로 대체).
