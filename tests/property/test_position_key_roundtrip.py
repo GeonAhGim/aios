@@ -89,8 +89,49 @@ def test_delimiter_inside_a_field_is_rejected_instead_of_silently_corrupting_the
 
 
 def test_parse_rejects_wrong_part_count() -> None:
+    """음성 테스트 — part 수가 5가 아닌 모든 입력을 거부한다.
+
+    게이트 적색 재현: 유효한 직렬화 문자열에서 한 부분을 제거해
+    재조합한 뒤 거부를 단언한다. 제거 전 문자열은 성공함을
+    함께 확인한다.
+    """
+    # --- 0부분: 빈 문자열 ---
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("")
+    # --- 1부분 ---
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue")
+    # --- 2부분 ---
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument")
+    # --- 3부분 (기존 단언 — 예외 타입과 입력 변경 없음) ---
     with pytest.raises(InvalidPositionKeyError):
         PositionKey.parse("venue:instrument:strategy")
+    # --- 4부분 ---
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution")
+    # --- 6부분 이상 ---
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("v:i:s:e:p:extra")
+
+    # --- 양성 대조군: 유효 키는 성공 ---
+    valid = PositionKey(
+        venue="bitget",
+        instrument_id="BTC-USDT-SWAP",
+        strategy_id="carry-v2",
+        execution_id="exec-001",
+        portfolio_id=UUID(int=42),
+    )
+    serialized = str(valid)
+    assert PositionKey.parse(serialized) == valid
+
+    # --- 게이트 적색 재현: 한 부분을 제거한 문자열은 거부 ---
+    parts = serialized.split(":")
+    assert len(parts) == 5
+    for drop_index in range(5):
+        corrupted = ":".join(parts[:drop_index] + parts[drop_index + 1 :])
+        with pytest.raises(InvalidPositionKeyError):
+            PositionKey.parse(corrupted)
 
 
 def test_parse_rejects_non_uuid_portfolio_id() -> None:
