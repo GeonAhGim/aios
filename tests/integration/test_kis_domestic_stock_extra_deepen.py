@@ -109,6 +109,12 @@ async def test_get_financial_ratio_latency_under_budget():
         )
     )
 
+    # warmup: 첫 호출은 토큰 발급·트랜포트 생성·rate limiter 초기화
+    # 오버헤드가 포함되므로 측정 전에 2회 호출해 모든 캐시를 채운다.
+    # 이후 루프는 순수 CPU 시간만 측정.
+    await adapter.get_financial_ratio("005930")
+    await adapter.get_financial_ratio("005930")
+
     cpu_times: list[float] = []
     for _ in range(100):
         t0 = time.process_time()
