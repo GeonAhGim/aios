@@ -90,11 +90,65 @@ def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatc
         )
 
 
-def test_verification_base_error_is_not_state_invalid_transition():
+@pytest.mark.perf
+def test_verification_base_error_is_not_state_invalid_transition(perf_budget, monkeypatch):
     """negative — VerificationError(부모)가 VerificationInvalidTransitionError
-    (자식)의 409 코드로 오매핑되면 안 된다."""
-    code, _, _ = map_exception(VerificationError("알 수 없는 결정입니다: MAYBE"))
+    (자식)의 409 코드로 오매핑되면 안 된다.
+
+    negative 2 — 같은 부모가 NotFound(자식)의 404 코드로도 오매핑되면 안 된다.
+    negative 3 — Validation(400) 코드로도 오매핑되면 안 된다(서버 클래스 간
+    contamination 방지).
+
+    perf — map_exception의 단일 호출 CPU는 Windows 양자화 tick(≈15.6ms)보다
+    훨씬 작으므로 best_of(n=5)로 최소값을 꺼내 tick 흔들림을 걷어낸다.
+    예산 1ms(인메모리 리스트 스캔 1회 기준 여유 있는 상한).
+    virtual_delayed_sync로 10ms를 주입하면 best_of 측정치가 1ms를 넘어
+    AssertionError로 적색 게이트가 확인된다."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    exc = VerificationError("알 수 없는 결정입니다: MAYBE")
+
+    # negative 1 — 부모가 자식의 409 코드로 오매핑되지 않음
+    code, _, _ = map_exception(exc)
     assert code != ErrorCode.STATE_INVALID_TRANSITION
+
+    # negative 2 — 부모가 자식의 404 코드로 오매핑되지 않음
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
+
+    # negative 3 — 부모가 AUTH 코드로 오매핑되지 않음(서버 클래스 간
+    # contamination 방지)
+    assert code != ErrorCode.AUTH_INVALID_CREDENTIALS
+
+    # perf — best_of 최소값이 예산을 지키는지 확인
+    perf_budget.assert_within(
+        lambda: map_exception(exc),
+        budget_ms=1,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="single VerificationError lookup",
+    )
+
+    # gate-red — 가상 지연 주입으로 같은 측정/단언이 적색으로 떨어짐
+    # map_exception은 상수 import이므로 테스트 모듈 네임스페이스에서 패치해야 함.
+    import tests.unit.api.test_exception_registry as mod
+
+    _original_map = exception_mapping_module.map_exception
+
+    def _delayed_map(e: Exception) -> tuple:
+        return virtual_delayed_sync(_original_map, 10)(e)
+
+    monkeypatch.setattr(mod, "map_exception", _delayed_map)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.map_exception(exc),
+            budget_ms=1,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="single VerificationError lookup (injected 10ms)",
+        )
 
 
 def test_wallet_topup_not_found_is_not_state_invalid_transition():
