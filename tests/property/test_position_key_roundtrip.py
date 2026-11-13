@@ -229,3 +229,43 @@ def test_str_then_parse_perf_budget_and_virtual_delay_gate_red():
         f"지연 주입 후 cpu_ms가 증가하지 않음(normal={sample_normal.cpu_ms:.3f}ms, "
         f"delayed={sample_delayed.cpu_ms:.3f}ms)"
     )
+
+
+def test_gate_red_parsed_key_component_assertion_actually_catches_corruption() -> None:
+    """게이트 적색 재현 — 단언이 실제로 잡는지 입력을 망가뜨려 확인.
+
+    정상 `PositionKey`를 만든 뒤, parsed 결과의 `venue`를 다른 값으로
+    교체하면 `parsed.venue == venue` 단언이 반드시 실패한다. 이 실패가
+    없다면 단언이 no-op이므로 게이트가 무의미해진다.
+    """
+    venue, instrument_id, strategy_id, execution_id, portfolio_id = (
+        "bitget",
+        "BTC-USDT-SWAP",
+        "carry-v2",
+        "exec-001",
+        UUID(int=42),
+    )
+    key = _build((venue, instrument_id, strategy_id, execution_id, portfolio_id))
+    parsed = PositionKey.parse(str(key))
+
+    # --- gate-red 1: venue를 망가뜨리면 단언이 잡는다 ---
+    # __eq__가 dataclass 자동 생성이므로 venue만 다른 객체는 반드시 !=.
+    fake_key = PositionKey(
+        venue="corrupted_venue",
+        instrument_id=instrument_id,
+        strategy_id=strategy_id,
+        execution_id=execution_id,
+        portfolio_id=portfolio_id,
+    )
+    # 단언 1: fake_key == key 는 False여야 함 (dataclass __eq__ 검증)
+    assert fake_key != key, (
+        "gate-red 실패: venue가 'corrupted_venue'인 key가 원본 key와 같음 — dataclass __eq__가 깨짐"
+    )
+    # 단언 2: parsed.venue == venue 는 참이어야 함 (정상 왕복)
+    assert parsed.venue == venue, (
+        f"gate-red 실패: parsed.venue({parsed.venue!r}) != 원본({venue!r}) — 정상 파싱이 실패함"
+    )
+    # 단언 3: parsed.portfolio_id == portfolio_id 도 참
+    assert parsed.portfolio_id == portfolio_id, (
+        f"gate-red 실패: parsed.portfolio_id({parsed.portfolio_id!r}) != 원본({portfolio_id!r})"
+    )
