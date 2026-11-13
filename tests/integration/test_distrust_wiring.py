@@ -203,7 +203,7 @@ async def test_corrupted_level_in_db_raises_on_restore(pool):
     symbol = f"DIST-{uuid.uuid4().hex[:8]}/USDT"
     # enum에 없는 값을 직접 삽입 시도 — CHECK 제약이 CheckViolationError를 던져야 함
     async with pool.acquire() as conn:
-        with pytest.raises(Exception, match=".*"):  # CheckViolationError (CHECK 제약 위반)
+        with pytest.raises(asyncpg.CheckViolationError):  # CHECK 제약 위반
             await conn.execute(
                 "INSERT INTO data_distrust_state "
                 "(exchange, symbol, level, since, sources_available, updated_at) "
