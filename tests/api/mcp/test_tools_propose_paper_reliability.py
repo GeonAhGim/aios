@@ -156,6 +156,65 @@ async def test_preview_promotion_failure_injection_ticket_issue_raises(
     assert "synthetic ticket table deadlock" not in response.text.lower()
 
 
+# --- 적대적(test_confirm_promotion_failure_injection_proposal_lookup_raises)
+# I-11: confirm ticket은 1회성 서버측 토큰 — 티켓 재사용/미사용 모두 거부 ---
+
+
+async def test_confirm_promotion_replay_ticket_is_409(
+    pool: Any,
+    client: Any,
+    mandate_repo: Any,
+    trust_repo: Any,
+    coverage_repo: Any,
+    instrument_repo: Any,
+    experiment_repo: Any,
+    token_repo: PostgresAgentTokenRepository,
+) -> None:
+    """Adversarial (I-11): replaying the exact same confirm body with the
+    same already-consumed ticket_id must return 409 (conflict), not 200.
+    The confirm ticket is a one-time server-side token that links preview
+    to execution; replaying it must be rejected."""
+    tenant_id, instrument_id = await _proposal_ready_tenant(
+        pool, mandate_repo, trust_repo, coverage_repo, instrument_repo
+    )
+    issued = await issue(
+        token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.PROPOSE, Scope.PAPER})
+    )
+    proposal = await _submit_proposal(client, issued.secret, instrument_id)
+    experiment = _accepted_experiment(tenant_id)
+    await experiment_repo.append(experiment)
+
+    params = _promotion_params(
+        proposal_id=proposal["proposal_id"],
+        experiment_id=experiment.experiment_id,
+        idempotency_key="adv-replay-ticket",
+    )
+    preview = await client.post(
+        "/mcp/tools/preview_promotion",
+        json=params,
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert preview.status_code == 200, preview.text
+    ticket_id = preview.json()["ticket_id"]
+
+    confirm_body = {**params, "ticket_id": ticket_id}
+    # 첫 번째 confirm — 성공
+    first = await client.post(
+        "/mcp/tools/confirm_promotion",
+        json=confirm_body,
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert first.status_code == 200, first.text
+
+    # 적대적: 동일한 티켓 재사용 — 409 Conflict
+    second = await client.post(
+        "/mcp/tools/confirm_promotion",
+        json=confirm_body,
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert second.status_code == 409, second.text
+
+
 # --- 음성(negative) #2: 유효하지 않은 UUID -> 422 validation error ---
 
 
