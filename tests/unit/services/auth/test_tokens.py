@@ -46,7 +46,9 @@ def _verifier() -> TokenVerifier:
     return TokenVerifier.from_env(env=_env("v1"))
 
 
-def test_issue_access_roundtrip_returns_matching_claims() -> None:
+def test_issue_access_roundtrip_returns_matching_claims(
+    perf_budget: PerfBudget,
+) -> None:
     issuer = _issuer("v1")
     verifier = _verifier()
     user_id, tenant_id, session_id = uuid4(), uuid4(), uuid4()
@@ -62,6 +64,11 @@ def test_issue_access_roundtrip_returns_matching_claims() -> None:
     assert claims.auth_level == "PASSWORD"
     assert claims.schema_version == "v1"
     assert claims.exp - claims.iat == 15 * 60
+
+    # D2 성능 단언: issue+verify 1회 CPU 시간이 예산 내로 들어온다.
+    # _ROUNDTRIP_BUDGET_MS(1000ms)는 실측 ~0.2 ms/call의 >=30x 여유(ADR-2026-09-09-C).
+    cpu_ms = _roundtrip_cpu_ms(perf_budget, _roundtrip_fn())
+    assert cpu_ms < _ROUNDTRIP_BUDGET_MS, f"budget exceeded: {cpu_ms} ms"
 
 
 # cpu_ms per batch of 100 issue+verify roundtrips. Local best-of-10 reading is ~0-20 ms
