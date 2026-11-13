@@ -123,6 +123,73 @@ def test_context_rejects_missing_required_field() -> None:
         CheckContext(**kwargs)
 
 
+def test_context_rejects_missing_trace_id() -> None:
+    """Negative: CheckContext must reject construction when trace_id is absent."""
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["trace_id"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_missing_seed() -> None:
+    """Negative: CheckContext must reject construction when seed is absent."""
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["seed"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_missing_required_field_goes_red_with_corrupted_input() -> None:
+    """Gate-red reproduction: pass an unknown keyword argument,
+    then verify that CheckContext construction raises TypeError (fail-closed).
+    This proves the signature-enforcement assertion actually catches bad input.
+    """
+    kwargs = _ctx().__dict__.copy()
+    kwargs["bogus_field"] = 42
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+@pytest.mark.perf
+def test_context_rejects_missing_required_field_perf_budget(perf_budget) -> None:
+    """Performance: constructing CheckContext with a missing required field
+    must raise TypeError quickly. Budget: best-of-5 < 5 ms.
+    Local measurement: ~0.001 ms (Windows 15.6 ms tick floor); 5 ms = 3000x headroom.
+    """
+
+    def fn() -> None:
+        kwargs = _ctx().__dict__.copy()
+        del kwargs["prior_results"]
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    sample = perf_budget.best_of(fn, n=5, warmup=1, batch=200)
+    assert sample.cpu_ms < 5.0, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_rejects_missing_required_field_goes_red_with_10x_delay(perf_budget) -> None:
+    """Gate-red reproduction with 10x virtual delay: the TypeError should still
+    be raised but the measured cpu_ms must exceed the budget, proving the
+    performance budget assertion is real and not a false positive.
+    """
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    budget_ms = 5.0
+
+    def fn() -> None:
+        kwargs = _ctx().__dict__.copy()
+        del kwargs["prior_results"]
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    slow = virtual_delayed_sync(fn, budget_ms * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < budget_ms
+
+
 def test_context_rejects_unknown_field() -> None:
     kwargs = _ctx().__dict__.copy()
     kwargs["unknown_field"] = "nope"
