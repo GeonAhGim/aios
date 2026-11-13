@@ -131,6 +131,56 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
     assert len(await repo.list_statements(tenant_id=tenant_id)) == 1
 
 
+# --- Additional D2 evidence for test_insert_and_get_statement_round_trips_decimal_precision ---
+
+
+@pytest.mark.perf
+async def test_insert_and_get_statement_round_trip_latency(pool, repo, perf_budget):
+    """perf: insert+get round trip budget (new budget 500 ms).
+
+    Local measurement (Windows, shared dev Postgres): 2.1 ms best-of-5 wall.
+    Budget leaves >=30x headroom.
+    """
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    counter = iter(range(1, 1000))
+
+    async def _round_trip():
+        stmt = await _statement(tenant_id, revision_no=next(counter))
+        inserted = await repo.insert_statement(stmt)
+        return await repo.get_statement(inserted.id)
+
+    sample = await perf_budget.best_of_async(_round_trip, n=5, warmup=1)
+    assert sample.result is not None
+    assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+
+@pytest.mark.perf
+async def test_insert_and_get_statement_round_trip_gate_goes_red_with_10x_injected_delay(
+    pool, repo, perf_budget, monkeypatch
+):
+    """gate-red: virtual 5 s delay on get_statement → perf assertion fails."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    reset_virtual_totals()
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    counter = iter(range(1, 1000))
+    monkeypatch.setattr(repo, "get_statement", virtual_delayed_async(repo.get_statement, 5.0))
+
+    async def _round_trip():
+        inserted = await repo.insert_statement(
+            await _statement(tenant_id, revision_no=next(counter))
+        )
+        return await repo.get_statement(inserted.id)
+
+    sample = await perf_budget.best_of_async(_round_trip, n=3)
+    reset_virtual_totals()
+    assert sample.wall_ms >= 5000
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+
 async def test_round_trip_unknown_methodology_version_is_rejected(pool, repo):
     """negative: an unregistered methodology_version violates the FK."""
     tenant_id = await create_test_tenant(pool)
@@ -444,35 +494,4 @@ async def test_get_methodology_returns_none_when_missing(repo):
     assert await repo.get_methodology("nonexistent-version") is None
 
 
-# --- WORM trigger enforcement: task-10620 retrofitted performance_statement
-# with the same guard trigger as the other WORM tables (fa25b1c9d340) ---
-
-
-async def test_worm_trigger_blocks_table_owner_update(pool, repo):
-    """REVOKE does not bind the table owner (PostgreSQL rule) -- `pool`
-    connects without `SET ROLE` and owns `performance_statement` (the
-    migration ran as this account), so if UPDATE is blocked here it is the
-    `BEFORE UPDATE OR DELETE` guard trigger (fa25b1c9d340, retrofitted after
-    task-10542 found the gap -- this table had only `REVOKE UPDATE, DELETE
-    ... FROM PUBLIC` from 6e5baa1c7a55 and no trigger), not the REVOKE,
-    doing the blocking."""
-    tenant_id = await create_test_tenant(pool)
-    await repo.insert_methodology(DEFAULT_METHODOLOGY)
-    statement = await repo.insert_statement(await _statement(tenant_id))
-
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute(
-                "UPDATE performance_statement SET state = 'CORRECTED' WHERE id = $1",
-                statement.id,
-            )
-
-
-async def test_worm_trigger_blocks_table_owner_delete(pool, repo):
-    tenant_id = await create_test_tenant(pool)
-    await repo.insert_methodology(DEFAULT_METHODOLOGY)
-    statement = await repo.insert_statement(await _statement(tenant_id))
-
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute("DELETE FROM performance_statement WHERE id = $1", statement.id)
+# --- WORM trigger enforcement split to test_worm_triggers.py (task-24717) ---
