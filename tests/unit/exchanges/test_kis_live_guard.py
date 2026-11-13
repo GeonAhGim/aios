@@ -21,7 +21,7 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis.adapter import KISAdapter
 from tests.support.perf_budget import PerfBudget
-from tests.support.perf_inject import reset_virtual_totals
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 
 def _make_live_adapter() -> KISAdapter:
@@ -67,11 +67,21 @@ def _overseas_futureoption_order() -> Order:
     )
 
 
+@pytest.mark.perf(reason="task-24697: place_order 가드 wall 실측 0.0035ms, 예산 0.5ms(100배+)")
 async def test_place_order_rejects_live_adapter():
     live_adapter = _make_live_adapter()
-
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_order(_order())
+
+    async def guard() -> None:
+        with pytest.raises(FrozenZonePaperAdapterBlockedError):
+            await live_adapter.place_order(_order())
+
+    perf = PerfBudget()
+    assert (await perf.best_of_async(guard, n=5, warmup=1, batch=50)).wall_ms < 0.5
+    reset_virtual_totals()  # gate-red: 가상 지연 5ms 주입 -> 예산 초과
+    slow = virtual_delayed_async(guard, 0.005)
+    assert (await perf.best_of_async(slow, n=3)).wall_ms >= 0.5
 
 
 async def test_cancel_order_rejects_live_adapter():
