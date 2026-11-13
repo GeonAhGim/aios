@@ -100,6 +100,43 @@ async def test_two_select_round_trips(pool, monkeypatch):
     assert select_count == 2, queries
 
 
+async def _assemble_wrapped(pool, monkeypatch, tag, *, extra=False, fail=False):
+    queries: list[str] = []
+
+    def wrap(orig):
+        async def inner(self, query, *args, **kwargs):
+            queries.append(query)
+            if fail:
+                raise asyncpg.PostgresConnectionError("injected")
+            queries.extend(["SELECT 1"] * extra)
+            return await orig(self, query, *args, **kwargs)
+
+        return inner
+
+    for name in ("fetchrow", "fetch"):
+        monkeypatch.setattr(asyncpg.Connection, name, wrap(getattr(asyncpg.Connection, name)))
+    exec_id = await create_execution(pool, user_id := await create_test_user(pool))
+    rc, d, sym, day = caches(), Decimal("1000"), "BTC/USDT", date(2026, 1, 1)
+    rc.equity_tracker.seed(exec_id, day_start_date=day, day_start_equity=d, peak_equity=d)
+    await assemble_risk_inputs(
+        pool, rc, execution_id=exec_id, user_id=user_id, intent=intent(sym, tag),
+        balances=[AccountBalance(exchange="bitget", asset="USDT", total=d, available=d)],
+        candles=candles(sym, "bitget", 3), policy=POLICY, now=NOW,
+    )  # fmt: skip
+    return sum(1 for q in queries if q.strip().upper().startswith(("SELECT", "WITH")))
+
+
+async def test_two_select_round_trips_counter_detects_extra_query(pool, monkeypatch):
+    """Negative/red repro — an injected extra SELECT breaks the `== 2` budget."""
+    assert await _assemble_wrapped(pool, monkeypatch, "rt-red", extra=True) > 2
+
+
+async def test_two_select_round_trips_db_failure_propagates(pool, monkeypatch):
+    """Failure injection — a DB error propagates (fail-closed)."""
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await _assemble_wrapped(pool, monkeypatch, "rt-fail", fail=True)
+
+
 async def test_fields_filled_or_none_not_defaulted(pool):
     """DoD (2) — 계산 가능한 필드는 실제 값을, 이 리프의 2왕복 예산 안에서
     관측할 수 없는 필드는 0/False로 뭉개지 않고 명시적 None을 반환한다."""
