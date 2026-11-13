@@ -222,3 +222,81 @@ async def test_fetch_whitelist_exception_propagates(pool):
                 CorroborationSignal(source="onchain_reserve_monitor", risk_confirmed=True),
             ],
         )
+
+
+# --- task-24700 DEEPEN: 추가 negative / 실패주입 ---
+
+
+async def test_one_denying_signal_among_three_falls_back(pool):
+    """신호가 3개여도 하나라도 risk_confirmed=False면 fast_path 금지 (all-agree 요건)."""
+    generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
+
+    result = await generator.generate(
+        user_id=await create_test_user(pool),
+        exchange="bitget",
+        corroboration=[
+            CorroborationSignal(source="exchange_status_page", risk_confirmed=True),
+            CorroborationSignal(source="onchain_reserve_monitor", risk_confirmed=True),
+            CorroborationSignal(source="third_party_feed", risk_confirmed=False),
+        ],
+    )
+
+    assert result.fast_path_activated is False
+    assert result.destinations == []
+    assert result.fallback_approval_request_id is not None
+
+
+async def test_uncorroborated_path_never_consults_whitelist(pool):
+    """fallback 경로에서는 whitelist 조회 자체가 일어나지 않아야 한다 (fail-closed:
+    미검증 상황에서 목적지 목록이 노출되지 않음)."""
+    calls: list[tuple] = []
+
+    async def _spy_whitelist(user_id, exchange):
+        calls.append((user_id, exchange))
+        return await _fetch_whitelist(user_id, exchange)
+
+    generator = PanicPromptGenerator(pool, fetch_whitelist=_spy_whitelist)
+
+    result = await generator.generate(
+        user_id=await create_test_user(pool),
+        exchange="bitget",
+        corroboration=[CorroborationSignal(source="exchange_status_page", risk_confirmed=True)],
+    )
+
+    assert result.fast_path_activated is False
+    assert calls == []
+
+
+async def test_risk_denied_by_all_sources_does_not_fast_path(pool):
+    """모든 신호가 risk_confirmed=False인 경우(동의 없음) — 2개 이상이어도 fast_path 금지."""
+    generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
+
+    result = await generator.generate(
+        user_id=await create_test_user(pool),
+        exchange="bitget",
+        corroboration=[
+            CorroborationSignal(source="exchange_status_page", risk_confirmed=False),
+            CorroborationSignal(source="onchain_reserve_monitor", risk_confirmed=False),
+        ],
+    )
+
+    assert result.fast_path_activated is False
+    assert result.fallback_approval_request_id is not None
+
+
+async def test_fallback_approval_creation_failure_propagates(pool, monkeypatch):
+    """실패주입: fallback approval 생성이 DB 오류로 실패하면 예외가 전파되고
+    fast_path 결과가 반환되지 않는다 (fail-closed)."""
+
+    async def _create_request_raises(*args, **kwargs):  # noqa: ARG001
+        raise asyncpg.PostgresConnectionError("approval 생성 실패 (주입)")
+
+    monkeypatch.setattr(approval, "create_request", _create_request_raises)
+    generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
+
+    with pytest.raises(asyncpg.PostgresConnectionError, match="approval 생성 실패"):
+        await generator.generate(
+            user_id=await create_test_user(pool),
+            exchange="bitget",
+            corroboration=[CorroborationSignal(source="exchange_status_page", risk_confirmed=True)],
+        )
