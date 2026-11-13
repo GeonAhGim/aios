@@ -494,35 +494,4 @@ async def test_get_methodology_returns_none_when_missing(repo):
     assert await repo.get_methodology("nonexistent-version") is None
 
 
-# --- WORM trigger enforcement: task-10620 retrofitted performance_statement
-# with the same guard trigger as the other WORM tables (fa25b1c9d340) ---
-
-
-async def test_worm_trigger_blocks_table_owner_update(pool, repo):
-    """REVOKE does not bind the table owner (PostgreSQL rule) -- `pool`
-    connects without `SET ROLE` and owns `performance_statement` (the
-    migration ran as this account), so if UPDATE is blocked here it is the
-    `BEFORE UPDATE OR DELETE` guard trigger (fa25b1c9d340, retrofitted after
-    task-10542 found the gap -- this table had only `REVOKE UPDATE, DELETE
-    ... FROM PUBLIC` from 6e5baa1c7a55 and no trigger), not the REVOKE,
-    doing the blocking."""
-    tenant_id = await create_test_tenant(pool)
-    await repo.insert_methodology(DEFAULT_METHODOLOGY)
-    statement = await repo.insert_statement(await _statement(tenant_id))
-
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute(
-                "UPDATE performance_statement SET state = 'CORRECTED' WHERE id = $1",
-                statement.id,
-            )
-
-
-async def test_worm_trigger_blocks_table_owner_delete(pool, repo):
-    tenant_id = await create_test_tenant(pool)
-    await repo.insert_methodology(DEFAULT_METHODOLOGY)
-    statement = await repo.insert_statement(await _statement(tenant_id))
-
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute("DELETE FROM performance_statement WHERE id = $1", statement.id)
+# --- WORM trigger enforcement split to test_worm_triggers.py (task-24717) ---
