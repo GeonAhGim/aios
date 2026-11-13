@@ -12,6 +12,8 @@ from decimal import Decimal
 import asyncpg
 import pytest
 
+from src.core.risk.decision import RiskOutcome
+from src.core.risk.rules import safety_state
 from src.data.models.trading import AccountBalance
 from src.services.execution_loop.risk_inputs_assembler import assemble_risk_inputs
 from tests.integration.conftest import create_test_user
@@ -119,3 +121,26 @@ async def test_unobservable_safety_fields_never_become_false_or_empty(pool):
         assert value != False  # noqa: E712 - guards bool/0 coercion of None
     assert inputs.equity.account_daily_pnl_pct is None
     assert inputs.equity.account_drawdown_pct is None
+
+
+async def test_missing_distrust_level_denies_even_for_reduce_only(pool):
+    """negative 4 — an unobserved distrust level (None) must DENY with the
+    missing-input reason even for a reduce-only intent; reduce_only may only
+    waive a known distrust level, never an unknown one."""
+    symbol = f"NEG4-{uuid.uuid4().hex[:8]}/USDT"
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+    _, inputs = await _assemble(pool, symbol, "strat-neg4", balances)
+    assert inputs.safety.data_distrust_level is None
+    isolated = inputs.model_copy(
+        update={
+            "safety": inputs.safety.model_copy(update={"active_control_scopes": ()}),
+            "intent": inputs.intent.model_copy(update={"reduce_only": True}),
+        }
+    )
+    result = safety_state.safety_state(isolated, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_INPUT_MISSING:safety.data_distrust_level"
