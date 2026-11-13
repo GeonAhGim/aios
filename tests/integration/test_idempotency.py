@@ -185,3 +185,35 @@ async def test_compute_exception_releases_claim(pool):
     assert body == {"id": 42}
     # failing_compute는 1회, success_compute는 1회 = 총 2회 호출
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# 성능 단언 — 캐시 적중(replay) 경로가 예산 안에서 끝나는지 검증
+# ---------------------------------------------------------------------------
+
+# 예산 _REPLAY_BUDGET_MS는 DB 왕복 1회(SELECT)만 포함하는 replay 경로의 여유 예산이다.
+_REPLAY_BUDGET_MS = 200.0
+
+
+@pytest.mark.perf
+async def test_cached_replay_within_latency_budget(perf_budget, pool):
+    """성능 단언 — 동일 key 재호출(캐시 적중)의 wall 지연이 예산 미만이고,
+    compute()는 재실행되지 않는다."""
+    key = f"test-perf-{uuid.uuid4().hex}"
+    calls = []
+
+    async def compute():
+        calls.append(1)
+        return 201, {"id": 1}
+
+    await with_idempotency(pool, key, compute)
+
+    async def _replay():
+        return await with_idempotency(pool, key, compute)
+
+    sample = await perf_budget.best_of_async(_replay, n=5, warmup=1)
+
+    assert sample.wall_ms < _REPLAY_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_REPLAY_BUDGET_MS
+    )
+    assert len(calls) == 1
