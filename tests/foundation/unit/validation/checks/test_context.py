@@ -315,3 +315,91 @@ def test_field_order_assertion_detects_reordered_fields() -> None:
     names = _field_names()
     names[0], names[1] = names[1], names[0]
     assert names != _field_names()
+
+
+# --- D2 deepening for test_context_construction_propagates_dependency_failure ---
+
+# cpu_ms for one CheckContext construction (full dependency bundle).
+# Local best-of-10 (batch=200) reads ~0.05 ms.
+# 5 ms budget = >=100x headroom over sub-millisecond real measurement.
+_CTX_CONSTRUCTION_BUDGET_MS = 5.0
+
+
+@pytest.mark.perf
+def test_context_construction_propagates_dependency_failure_perf_budget(
+    perf_budget,
+) -> None:
+    """Performance: constructing CheckContext with all dependencies must
+    complete within budget. Local best-of-10 measurement: ~0.05 ms.
+    Budget: 5 ms = 100x headroom.
+    """
+
+    def fn() -> CheckContext:
+        return _ctx()
+
+    sample = perf_budget.best_of(fn, n=10, warmup=1, batch=200)
+    assert sample.cpu_ms < _CTX_CONSTRUCTION_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_construction_propagates_dependency_failure_goes_red_with_10x_delay(
+    perf_budget,
+) -> None:
+    """Gate-red reproduction with 10x virtual delay: the construction must
+    still succeed but the measured cpu_ms must exceed the budget, proving
+    the performance budget assertion is real and not a false positive.
+    """
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    def fn() -> CheckContext:
+        return _ctx()
+
+    slow = virtual_delayed_sync(fn, _CTX_CONSTRUCTION_BUDGET_MS * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _CTX_CONSTRUCTION_BUDGET_MS
+
+
+def test_context_rejects_missing_artifact() -> None:
+    """Negative: CheckContext must reject construction when artifact is absent."""
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["artifact"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_missing_policy() -> None:
+    """Negative: CheckContext must reject construction when policy is absent."""
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["policy"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_missing_bars() -> None:
+    """Negative: CheckContext must reject construction when bars is absent."""
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["bars"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_construction_propagates_artifact_build_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adversarial (I-01 fail-closed): if build_artifact raises during
+    context assembly, the exception must propagate — CheckContext must not
+    construct a partially-valid context. This cross-checks INVARIANTS.md
+    I-01 (all writes default fail-closed).
+    """
+    import tests.foundation.unit.validation.checks.test_context as test_mod
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("artifact store unavailable")
+
+    monkeypatch.setattr(test_mod, "build_artifact", _boom)
+
+    with pytest.raises(RuntimeError, match="artifact store unavailable"):
+        _ctx()
