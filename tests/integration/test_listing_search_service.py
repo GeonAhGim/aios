@@ -167,7 +167,7 @@ async def test_pagination_limits_and_offsets(service, pool):
 
 
 async def test_search_rejects_invalid_max_price_below_zero(service, pool):
-    """max_price가 음수일 때 ValueError를.raise 한다."""
+    """max_price가 음수일 때 ValueError를 raise 한다."""
     seller = await create_test_user(pool)
     await _listed_listing(pool, seller, price=Decimal("10.00"))
 
@@ -176,7 +176,7 @@ async def test_search_rejects_invalid_max_price_below_zero(service, pool):
 
 
 async def test_search_rejects_invalid_page_size_below_one(service, pool):
-    """page_size가 1 미만일 때 ValueError를.raise 한다."""
+    """page_size가 1 미만일 때 ValueError를 raise 한다."""
     seller = await create_test_user(pool)
     await _listed_listing(pool, seller)
 
@@ -185,7 +185,7 @@ async def test_search_rejects_invalid_page_size_below_one(service, pool):
 
 
 async def test_search_rejects_invalid_sort_by_value(service, pool):
-    """sort_by가 허용된 값(RECOMMENDED, SHARPE_RATIO) 외일 때 ValueError를.raise 한다."""
+    """sort_by가 허용된 값(RECOMMENDED, SHARPE_RATIO) 외일 때 ValueError를 raise 한다."""
     seller = await create_test_user(pool)
     await _listed_listing(pool, seller)
 
@@ -215,3 +215,22 @@ async def test_search_handles_pool_acquire_exception(service, monkeypatch):
 
     with pytest.raises(asyncpg.ConnectionDoesNotExistError):
         await service.search()
+
+
+# --- performance assertion (D2) ---
+
+
+@pytest.mark.perf
+async def test_search_p95_latency_within_budget(service, pool, perf_budget):
+    """성능 단언(D2) — 리스팅 검색은 ADR-2026-09-09-C 예산표에 전용 행이 없어
+    읽기 쿼리 기준인 조회 p95 200ms를 회귀 감지용 상한으로 건다(로컬 DB 왕복 포함)."""
+    seller = await create_test_user(pool)
+    for _ in range(3):
+        await _listed_listing(pool, seller)
+
+    samples = sorted(
+        await perf_budget.samples_async(lambda: service.search(page_size=20), n=10),
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms  # n=10 최대값을 p95 근사치로 사용
+    assert p95 <= 200.0, f"search p95 {p95:.1f}ms exceeds 200ms budget"
