@@ -359,6 +359,47 @@ def test_adversarial_corrupted_map_cannot_force_internal_error(monkeypatch):
     assert code2 == ErrorCode.INTERNAL_ERROR
 
 
+def test_state_concurrency_conflict_is_not_resource_not_found():
+    """negative — STATE_CONCURRENCY_CONFLICT(409)가 RESOURCE_NOT_FOUND(404)로
+    뭉개지면 안 된다(동시 처리 충돌이 '존재하지 않음'으로 오인되면 안 됨)."""
+    from src.api.contracts.exception_mapping import map_exception as _real_map
+
+    class _ConcurrencyConflictError(Exception):
+        """EXCEPTION_MAP에 없는 동시성 예외 — 기본 경로가 CONFLICT 코드로 새지 않음."""
+
+    code, _, _ = _real_map(_ConcurrencyConflictError("동시 수정 충돌"))
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
+    assert code != ErrorCode.VALIDATION_INVALID_FIELD
+
+
+def test_adversarial_mro_chain_does_not_leak_child_code_to_grandparent(monkeypatch):
+    """적대적 테스트/I-10 — VerificationInvalidTransitionError는
+    VerificationNotFoundError의 서브클래스가 아니라 VerificationError의
+    서브클래스임을 검증한다. EXCEPTION_MAP에서 VerificationInvalidTransitionError
+    를 제거하면 VerificationError의 isinstance 체크에 걸려
+    VALIDATION_INVALID_FIELD가 반환됨을 확인한다.
+
+    이 테스트는 예외 상속 계층이 spec에서 정의한 대로 올바르게 구성되었음을
+    검증한다 — VerificationInvalidTransitionError는 '찾을 수 없음'이 아니라
+    '잘못된 상태 전이'이므로, NotFoundError의 서브클래스가 되어선 안 된다.
+    """
+    import src.api.contracts.exception_mapping as em_mod
+    import tests.unit.api.test_exception_registry as mod
+
+    # VerificationInvalidTransitionError만 제거하고 나머지는 모두 유지한다.
+    filtered = [t for t in em_mod.EXCEPTION_MAP if t[0] is not VerificationInvalidTransitionError]
+    monkeypatch.setattr(em_mod, "EXCEPTION_MAP", filtered)
+
+    # VerificationInvalidTransitionError는 VerificationNotFoundError의
+    # 서브클래스가 아니므로 isinstance 체크에 걸리지 않고
+    # VerificationError의 isinstance 체크에 걸려 VALIDATION_INVALID_FIELD
+    # 가 반환된다.
+    code, _, _ = mod.map_exception(
+        VerificationInvalidTransitionError("PENDING_VERIFICATION 상태에서만...")
+    )
+    assert code == ErrorCode.VALIDATION_INVALID_FIELD
+
+
 def test_subclasses_are_registered_before_their_parent():
     """매핑 우선순위 고정 — 이 순서가 뒤바뀌면(부모가 먼저 오면) 위 개별
     테스트들이 실제로는 통과해도(현재 파이썬 등록 상태에서만) 회귀를 못
