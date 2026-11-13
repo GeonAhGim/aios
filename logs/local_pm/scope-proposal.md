@@ -1,45 +1,40 @@
-# 파일 범위 분할 제안: task-23992 (CI guards — timeout 300s)
+# 파일 범위 분할 제안: task-24630
 
 ## 현황
 
-- task-23992는 `files: ["src/"]`로 전소스 1583개 .py 파일을 단일 QA 범위로 포함
-- 현재 상태: **done** (noop — guards 이미 green, 회귀 없음)
-- 문제: `src/` 단일 파일로 `local_leaf_oversize_reasons: ["path_scope=src/"]` 표시됨
+- task-24630: `[health:ci_red] CI pytest_perf_parallel_2 정정`
+- files: `["src/"]` — **과다 지정**. 전소스 스캔이 아니라 단일 테스트 파일 수정임.
+- 이전 시도: task-24669 → task-24681 → task-24695 (현재), 모두 턴 한도 초과로 실패
+- 원인: `files: ["src/"]`로 지정되어 있어 관련 파일 수백 개를 조사하려 함 → 턴 소모
 
-## 실제 변경 파일 분석 (origin/main..HEAD)
+## 실제 변경 파일 분석
 
-- 현재 HEAD(d3f422aa2)는 origin/main과 동일 → 변경 파일 0건
-- guards 스테이지는 diff 기반 검사이므로, 실제 작업은 변경된 파일에 한정
+### 수정된 파일 (2 commit)
 
-## guards 스테이지 구조 분석
+| commit | 파일 | 내용 |
+|--------|------|------|
+| ce240bfa4 | `tests/foundation/unit/ml/test_local_trainer.py` | `delayed_sync`(busy-wait) → `virtual_delayed_sync`(ledger) 전환 |
+| 91af43d07 | `tests/foundation/unit/ml/test_local_trainer.py` | Mock wraps 추가, 호출 검증 보강 |
 
-`run_guards.py`는 두 하위 가드를 호출:
-1. **architecture_guard.py** — P1 frozen, P5 contract, P6 line length, migration chain, P7 unconditional update
-2. **security_guard.py** — P2 live guard, P3 WORM, P4 secret
+### 참조만 된 파일 (수정 안 함)
 
-각 가드가 검사하는 경로가 분리되어 있으므로 분할 가능.
+- `src/foundation/ml/adapters/local_trainer.py` — `lgb.train` 호출 패턴 확인용
+- `tests/support/perf_inject.py` — `virtual_delayed_sync` 정의 (수정 안 함)
+- `tests/support/perf_budget.py` — `PerfBudget.sample` 측정 방식 (수정 안 함)
 
 ## 분할안
 
-task-23992의 실제 QA 범위는 변경된 파일에 따라 동적이지만, **향후 재발 방지를 위해** 아래처럼 분할:
+### split-1: [test] test_local_trainer.py perf-gate-red 정정 (권장)
+- **범위**: `tests/foundation/unit/ml/test_local_trainer.py`
+- **파일 수**: 1개 (284줄)
+- **검증**: `pytest tests/foundation/unit/ml/test_local_trainer.py` (14 passed)
+- **예상 턴**: 5-10턴
 
-### split-1: [guards] architecture_guard.py 관련
-- **범위**: `src/core/`, `src/foundation/`, `src/services/` (FROZEN_PAPER_ONLY + 계약/이주 경로)
-- **검증 항목**: P1 frozen, P5 contract, P6 line length, migration chain
-- **예상 파일 수**: ~200개 (core/ ~150, foundation 계약/이주 ~50)
-
-### split-2: [guards] security_guard.py 관련
-- **범위**: `src/exchanges/`, `src/db/migrations/versions/`, `src/core/executor/executor.py`
-- **검증 항목**: P2 live guard, P3 WORM, P4 secret
-- **예상 파일 수**: ~250개 (exchanges ~100, migrations ~134, 기타 ~20)
-
-### split-3: [guards] 공통 유틸 + lint
-- **범위**: `src/api/`, `src/foundation/` 나머지, `src/services/` 나머지
-- **검증 항목**: P7 unconditional update, 한글 주석, Decimal 사용
-- **예상 파일 수**: ~1100개
+### split-2: [source] local_trainer.py 리뷰 (선택, 별도 task)
+- **범위**: `src/foundation/ml/adapters/local_trainer.py`
+- **내용**: virtual_delayed_sync 전환이 lgb.train 호출 패턴과 호환되는지 정적 분석
+- **검증**: mypy, ruff check
 
 ## 권장
 
-- 현재 task-23992는 **noop으로 종료**되었으므로 분할 불필요
-- 향후 유사 CI red 발생 시, 위 3개로 분할 queued
-- 분할 시 spec은 각 split의 검증 항목을 명시, files는 위 범위 제한
+task-24630은 **split-1만으로도 충분**. `files`를 `["tests/foundation/unit/ml/test_local_trainer.py"]`로 좁히면 턴 한도 문제를 피할 수 있음. split-2는 별도 QA task로 생성 가능.
