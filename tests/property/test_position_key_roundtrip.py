@@ -107,3 +107,125 @@ def test_construction_rejects_empty_field() -> None:
             execution_id="exec-1",
             portfolio_id=UUID(int=0),
         )
+
+
+def test_parse_rejects_extra_delimiters() -> None:
+    """음성 테스트 — 구분자가 너무 많으면 6부분 파싱으로 InvalidPositionKeyError."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("v:i:s:e:p:extra")
+
+
+def test_parse_rejects_leading_delimiter() -> None:
+    """음성 테스트 — 선행 구분자는 빈 첫 부분(venue='')으로 이어져 거부된다."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse(":instrument:strategy:execution:port")
+
+
+def test_parse_rejects_trailing_delimiter() -> None:
+    """음성 테스트 — 후행 구분자는 빈 마지막 부분(portfolio_id='')으로 이어져 거부된다."""
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:")
+
+
+# ── gate-red reproduction: 단언이 실제로 잡는지 입력을 망가뜨려 확인 ──
+
+
+def test_gate_red_empty_venue_breaks_parse() -> None:
+    """게이트 적색 재현 — venue를 빈 문자열로 망가뜨리면 parse가 InvalidPositionKeyError를 던진다.
+
+    `parse()`는 `__post_init__`에서 각 문자열 필드가 비어있는지 검사하므로,
+    빈 venue는 반드시 적색(예외)으로 이어져야 한다.
+    """
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse(":instrument:strategy:execution:port")
+
+
+def test_gate_red_colon_in_venue_breaks_roundtrip() -> None:
+    """게이트 적색 재현 — venue에 ':'를 섞으면 PositionKey 생성 자체가 거부된다.
+
+    `__post_init__`가 `_DELIMITER in value`를 검사하므로, 구분자가 포함된
+    필드는 직렬화 단계 이전에 fail-closed되어야 한다.
+    """
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey(
+            venue="venue:poison",
+            instrument_id="BTC",
+            strategy_id="strat",
+            execution_id="exec",
+            portfolio_id=UUID(int=42),
+        )
+
+
+def test_gate_red_malformed_uuid_portfolio_breaks_parse() -> None:
+    """게이트 적색 재현 — portfolio_id에 유효하지 않은 UUID 문자열을 넣으면 parse가 잡는다.
+
+    `parse()`가 `UUID(portfolio_id_raw)`를 호출할 때 ValueError를 일으키고,
+    그것을 `InvalidPositionKeyError`로 감싸서 던진다.
+    """
+    with pytest.raises(InvalidPositionKeyError):
+        PositionKey.parse("venue:instrument:strategy:execution:not-uuid-at-all")
+
+
+def test_gate_red_duplicate_portfolio_id_does_not_cause_false_positive() -> None:
+    """게이트 적색 재현 — 중복 UUID는 유효한 UUID이므로 parse가 성공해야 한다.
+
+    이 테스트는 gate-red가 false positive를 일으키지 않는지 확인한다.
+    유효한 UUID 문자열이면 parse가 정상적으로 PositionKey를 반환한다.
+    """
+    key = PositionKey.parse("v:i:s:e:00000000-0000-0000-0000-000000000000")
+    assert key.venue == "v"
+    assert key.portfolio_id == UUID(int=0)
+
+
+# ── performance: perf_budget + virtual delay injection ──
+
+
+@pytest.mark.perf(reason="task-24727: round-trip 측정 — CPU budget 게이트용")
+def test_str_then_parse_perf_budget_and_virtual_delay_gate_red():
+    """D2 perf + gate-red: perf_budget로 실측 후 virtual_delayed_sync 10배 주입으로 적색 재현.
+
+    1. 먼저 `perf_budget.sample()`으로 정상 round-trip CPU 시간을 측정한다.
+    2. `virtual_delayed_sync`로 `PositionKey.__str__`에 0.001ms 가상 지연을 주입한 뒤
+       `perf_budget.sample()`을 다시 호출한다. 주입된 지연이 ledger에 쌓여
+       측정값이 증가해야 한다(gate-red: 지연이 측정 시스템에 반영되는지 확인).
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+        virtual_totals,
+    )
+
+    reset_virtual_totals()
+    perf = PerfBudget()
+    venue, instrument_id, strategy_id, execution_id, portfolio_id = (
+        "test_venue",
+        "BTC/USDT",
+        "momentum-v1",
+        "exec-abc-123",
+        UUID(int=9999),
+    )
+    key = PositionKey(
+        venue=venue,
+        instrument_id=instrument_id,
+        strategy_id=strategy_id,
+        execution_id=execution_id,
+        portfolio_id=portfolio_id,
+    )
+
+    # 1) 정상 측정
+    sample_normal = perf.sample(lambda: str(key))
+    # 2) virtual_delayed_sync으로 __str__에 0.001ms 주입
+    reset_virtual_totals()
+    delayed_str = virtual_delayed_sync(str, 0.001)
+    sample_delayed = perf.sample(lambda: delayed_str(key))
+    # 3) 가상 지연이 ledger에 쌓였는지 gate-red 확인
+    virtual_cpu_s, _ = virtual_totals()
+    assert virtual_cpu_s >= 0.0009, (
+        f"가상 지연 0.001ms가 ledger에 쌓이지 않음(cpu={virtual_cpu_s:.9f}s) — 지연 주입 실패"
+    )
+    # 4) 지연 주입 측정이 정상 측정보다 느려야 함(gate-red: 지연이 실제 측정값에 반영)
+    assert sample_delayed.cpu_ms > sample_normal.cpu_ms, (
+        f"지연 주입 후 cpu_ms가 증가하지 않음(normal={sample_normal.cpu_ms:.3f}ms, "
+        f"delayed={sample_delayed.cpu_ms:.3f}ms)"
+    )
