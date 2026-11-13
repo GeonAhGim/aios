@@ -104,6 +104,22 @@ def test_wallet_topup_not_found_is_not_state_invalid_transition():
     assert code != ErrorCode.STATE_INVALID_TRANSITION
 
 
+def test_user_admin_not_found_is_not_validation_invalid_field():
+    """negative — NotFound(404)가 Validation(400)로 뭉개지면 안 된다.
+    원래 버그의 핵심: 자식 NotFound가 부모 앞에 등록돼도 등록 순서가
+    뒤바뀌면 404가 400으로 붕괴한다. 이 테스트는 정상 순서에서도
+    NotFound가 Validation 코드로 오매핑되지 않음을 명시적으로 고정한다."""
+    code, _, _ = map_exception(UserAdminNotFoundError("존재하지 않는 사용자입니다."))
+    assert code != ErrorCode.VALIDATION_INVALID_FIELD
+
+
+def test_verification_not_found_is_not_validation_invalid_field():
+    """negative — Verification NotFound(404)가 Validation(400)로 뭉개지면
+    안 된다(서버 클래스 간 contamination 방지)."""
+    code, _, _ = map_exception(VerificationNotFoundError("존재하지 않는 리스팅입니다."))
+    assert code != ErrorCode.VALIDATION_INVALID_FIELD
+
+
 def test_corrupted_registration_order_collapses_notfound_into_parent_code(monkeypatch):
     """실패주입/gate-red 재현 — EXCEPTION_MAP 등록 순서가 손상되어 부모
     (UserAdminError)가 자식(UserAdminNotFoundError)보다 먼저 오면, 이 파일이
