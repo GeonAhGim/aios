@@ -262,13 +262,45 @@ def test_main_decrease_with_update_ratchets_down(tmp_path: Path, perf_budget) ->
 
 
 def test_main_malformed_baseline_fails(tmp_path: Path) -> None:
-    baseline_path = tmp_path / "consistency-baseline.json"
-    baseline_path.write_text("not json", encoding="utf-8")
+    """negative 1: baseline JSON이 완전히 무효하면 exit 1로 중단한다."""
+    bp = tmp_path / "consistency-baseline.json"
+    bp.write_text("not json", encoding="utf-8")
     _write(tmp_path, "src/foo.py", "x = 1\n")
+    assert cc.main(["--root", str(tmp_path), "--baseline", str(bp)]) == 1
 
-    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
 
-    assert exit_code == 1
+def test_main_malformed_baseline_fails_partial_json(tmp_path: Path) -> None:
+    """negative 2: baseline이 부분적 JSON(중괄호만 열림)이면 exit 1로 중단한다."""
+    bp = tmp_path / "consistency-baseline.json"
+    bp.write_text('{"naive_datetime":', encoding="utf-8")
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    assert cc.main(["--root", str(tmp_path), "--baseline", str(bp)]) == 1
+
+
+def test_main_malformed_baseline_fails_empty_file(tmp_path: Path) -> None:
+    """negative 3: baseline이 빈 파일이면 exit 1로 중단한다."""
+    bp = tmp_path / "consistency-baseline.json"
+    bp.write_text("", encoding="utf-8")
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    assert cc.main(["--root", str(tmp_path), "--baseline", str(bp)]) == 1
+
+
+@pytest.mark.perf
+def test_main_malformed_baseline_fails_perf(tmp_path: Path, perf_budget) -> None:
+    """perf: malformed baseline 처리는 O(1) 읽기이므로 매우 빠르다.
+
+    best_of(5)로 여러 번 측정하고 budget 100ms 이내를 단언한다.
+    """
+    bp = tmp_path / "consistency-baseline.json"
+    bp.write_text("not json", encoding="utf-8")
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    sample = perf_budget.assert_within(
+        lambda: cc.main(["--root", str(tmp_path), "--baseline", str(bp)]),
+        budget_ms=100.0,
+        n=5,
+        label="test_main_malformed_baseline_fails perf (task-24327)",
+    )
+    print(f"[check_consistency malformed perf] {perf_budget.describe(sample, budget_ms=100.0)}")
 
 
 def test_main_baseline_missing_metric_key_fails(tmp_path: Path) -> None:
