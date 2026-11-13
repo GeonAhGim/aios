@@ -156,6 +156,68 @@ async def test_in_process_bus_audit_sink_failure_does_not_rescue_lost_events():
     assert received == []  # 실패한 audit_sink도 소실된 이벤트를 되살리지 못한다
 
 
+async def test_in_process_bus_publish_before_start_loses_events():
+    """negative — start()를 호출하지 않은 상태에서는 워커가 없으므로
+    publish한 이벤트가 모두 사라진다. "start()를 깜빡했다"는 실수도 구조적으로
+    데이터를 보존하지 못한다."""
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    for i in range(10):
+        await bus.publish("topic", {"seq": i})
+    # start()를 부르지 않은 채 바로 stop + del
+    await bus.stop()
+    del bus
+    assert received == []  # 워커가 한 번도 안 떠서 이벤트가 처리되지 않았다
+
+
+async def test_in_process_bus_publish_after_stop_loses_events():
+    """negative — stop() 이후 publish는 큐에 담기지 않고 바로 거부된다.
+    "재시작 없이 계속 돌린다"는 가정도 데이터를 보존하지 못한다."""
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    await bus.publish("topic", {"seq": 0})
+    await asyncio.sleep(0.05)  # 워커가 seq=0을 처리할 시간
+    await bus.stop()
+    # stop() 이후 publish — 큐가 닫혀 있으므로 이벤트가 사라진다
+    await bus.publish("topic", {"seq": 1})
+    await asyncio.sleep(0.05)
+    assert received == [0]  # stop 이후의 이벤트는 손실된다
+
+
+async def test_in_process_bus_concurrent_publishers_all_lose_events_on_crash():
+    """negative — 여러 publish가 동시에 들어와도, 크래시 전에는
+    in-memory 큐에 쌓인 채이므로 재시작 시 모두 사라진다.
+    단일 토픽이 아니라도 동일하다."""
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    # 여러 이벤트를 동시에 publish (비동기 병렬 호출)
+    tasks = [bus.publish("topic", {"seq": i}) for i in range(20)]
+    await asyncio.gather(*tasks)
+    del bus  # "크래시"
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == []  # 병렬 publish도 구조적으로 보존되지 않는다
+
+
 @pytest.mark.perf
 async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     """perf — 이 red-gate 재현 자체가 CI 기본 스위트에 상시 포함되므로,
