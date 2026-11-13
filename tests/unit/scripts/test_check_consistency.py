@@ -235,14 +235,20 @@ def test_main_increase_fails_red_adversarial_baseline_garbage_metric(
     assert exit_code == 0
 
 
-def test_main_decrease_without_update_keeps_baseline(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_main_decrease_without_update_keeps_baseline(tmp_path: Path, perf_budget) -> None:
+    """perf: best_of(5) < 500ms (실측 <=15ms CPU, 30배 여유); 10x 가상 지연 주입은 적색."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
     _write(tmp_path, "src/foo.py", "x = 1\n")
     baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
-
-    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
-
-    assert exit_code == 0
+    argv = ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    assert cc.main(argv) == 0
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 3
+    assert perf_budget.best_of(lambda: cc.main(argv)).cpu_ms < 500.0
+    slow = perf_budget.best_of(lambda: virtual_delayed_sync(cc.main, 5.0)(argv), n=2)
+    assert slow.cpu_ms >= 500.0  # gate-red: injected 10x delay must trip the budget
 
 
 def test_main_decrease_with_update_ratchets_down(tmp_path: Path) -> None:
