@@ -117,6 +117,19 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
     assert fetched.risk["sharpe"] is None
     assert fetched.evidence_refs == ("audit:1",)
 
+    # negative 1: an unknown id yields None, never a fabricated statement
+    assert await repo.get_statement(uuid4()) is None
+    # negative 2: re-inserting the same statement key violates the unique constraint
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await repo.insert_statement(await _statement(tenant_id))
+    # negative 3: an unregistered methodology version violates the FK
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await repo.insert_statement(
+            await _statement(tenant_id, revision_no=2, methodology_version="nonexistent-version")
+        )
+    # the rejected writes left exactly the one original row
+    assert len(await repo.list_statements(tenant_id=tenant_id)) == 1
+
 
 async def test_round_trip_unknown_methodology_version_is_rejected(pool, repo):
     """negative: an unregistered methodology_version violates the FK."""
