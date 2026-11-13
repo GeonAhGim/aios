@@ -111,15 +111,18 @@ async def test_get_financial_ratio_latency_under_budget():
 
     # warmup: 첫 호출은 토큰 발급·트랜포트 생성·rate limiter 초기화
     # 오버헤드가 포함되므로 측정 전에 2회 호출해 모든 캐시를 채운다.
-    # 이후 루프는 순수 CPU 시간만 측정.
+    # 이후 루프는 순수 CPU 시간만 측정. process_time()은 프로세스 내 모든
+    # 스레드(DB 풀·백그라운드 스레드)의 CPU를 합산해 rate limiter 대기 중
+    # 타 스레드 작업이 섞여 간헐 적색이 되므로 thread_time()으로 이벤트 루프
+    # 스레드만 측정한다.
     await adapter.get_financial_ratio("005930")
     await adapter.get_financial_ratio("005930")
 
     cpu_times: list[float] = []
     for _ in range(100):
-        t0 = time.process_time()
+        t0 = time.thread_time()
         await adapter.get_financial_ratio("005930")
-        cpu_times.append(time.process_time() - t0)
+        cpu_times.append(time.thread_time() - t0)
 
     avg_ms = (sum(cpu_times) / len(cpu_times)) * 1000
     assert avg_ms < 1.0, (
