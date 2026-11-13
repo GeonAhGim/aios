@@ -245,6 +245,138 @@ def test_main_decrease_without_update_keeps_baseline(tmp_path: Path) -> None:
     assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 3
 
 
+def test_main_decrease_without_update_keeps_baseline_other_metrics_zero(
+    tmp_path: Path,
+) -> None:
+    """negative 1: decrease 시 다른 metric(0)은 baseline 값 그대로 유지한다.
+
+    naive_datetime만 decrease하고 money_float=0인 경우. baseline에
+    money_float=5를 넣으면 decrease이므로 baseline은 그대로여야 한다.
+    """
+    _write(tmp_path, "src/foo.py", "x = 1\n")  # money_float 없음 → 0
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3, "money_float": 5})
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 3  # baseline 유지
+    assert data["money_float"] == 5  # baseline 유지
+
+
+def test_main_decrease_without_update_keeps_baseline_all_metrics_decrease(
+    tmp_path: Path,
+) -> None:
+    """negative 2: 모든 metric이 decrease하면 baseline은 전체가 그대로 유지된다.
+
+    baseline이 모든 METRIC 키에 대해 현재 값보다 크면 decrease이므로
+    exit 0 + baseline 완전 유지.
+    """
+    _write(tmp_path, "src/foo.py", "x = 1\n")  # 모든 metric 0
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 10, "money_float": 20})
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 10
+    assert data["money_float"] == 20
+
+
+def test_main_decrease_without_update_keeps_baseline_zero_baseline(
+    tmp_path: Path,
+) -> None:
+    """negative 3: baseline이 0이고 현재도 0이면 동일(증감 없음).
+
+    baseline naive_datetime=0, 현재 naive_datetime=0 → 증가도 감소도 아님.
+    exit 0 + baseline 유지.
+    """
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 0})
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    assert exit_code == 0
+    data = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert data["naive_datetime"] == 0
+
+
+def test_main_decrease_without_update_failure_injection_corrupt_baseline(
+    tmp_path: Path,
+) -> None:
+    """failure injection: baseline 파일이 truncate된 JSON이면 main()이
+    exit 1로 중단하고 baseline을 갱신하지 않는다.
+
+    baseline이 '{"naive_datetime":'로 끝나면 json.loads가 JSONDecodeError를
+    내므로 main()은 exit 1로 종료한다. baseline 파일은 손상된 채로 남는다.
+    """
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    baseline_path = tmp_path / "consistency-baseline.json"
+    baseline_path.write_text('{"naive_datetime":', encoding="utf-8")
+
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+
+    # corrupt baseline → exit 1
+    assert exit_code == 1
+    # baseline 파일은 여전히 손상됨
+    assert baseline_path.read_text(encoding="utf-8") == '{"naive_datetime":'
+
+
+def test_main_decrease_without_update_gate_red_with_perf_budget(
+    tmp_path: Path,
+    perf_budget,
+) -> None:
+    """gate-red reproduction + perf: perf_inject로 지연 10배 주입 후
+    적색 재현 + best_of로 성능 측정.
+
+    decrease 시 baseline 갱신 없이 exit 0이지만, --update를 쓰면
+    baseline이 갱신된다. virtual_delayed_sync로 가상 지연을 주입하면
+    PerfBudget이 그 지연을 측정값에 합산한다.
+
+    실측 근거: 가상 지연 없이 main() 100회 호출 ≈ 30ms CPU.
+    10x 지연 주입 시 측정값 ≈ 30ms + 500ms = 530ms.
+    예산 5000ms는 실측의 ≈9배로 CI 호스트 여유 포함.
+    """
+    from scripts.consistency.common import (
+        _iter_py_files,
+        _read_text_cached,
+        _safe_parse,
+        _walked_nodes,
+    )
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    _iter_py_files.cache_clear()
+    _read_text_cached.cache_clear()
+    _safe_parse.cache_clear()
+    _walked_nodes.cache_clear()
+
+    _write(tmp_path, "src/foo.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, {"naive_datetime": 3})
+
+    # 먼저 decrease 확인 (baseline 갱신 없이)
+    exit_code = cc.main(["--root", str(tmp_path), "--baseline", str(baseline_path)])
+    assert exit_code == 0
+
+    # main()에 가상 지연 0.05s(50ms) 주입 — 10배 지연 시 500ms 수준
+    original_main = cc.main
+
+    def _delayed_main(argv: list[str]) -> int:
+        return virtual_delayed_sync(original_main, 0.05)(argv)
+
+    sample = perf_budget.assert_within(
+        lambda: _delayed_main(["--root", str(tmp_path), "--baseline", str(baseline_path)]),
+        budget_ms=5000.0,
+        n=3,
+        label="test_main_decrease_without_update gate-red perf (task-24666)",
+    )
+    print(f"[check_consistency decrease perf] {perf_budget.describe(sample, budget_ms=5000.0)}")
+
+    # 실제 지연 없이 측정해도 baseline이 유지되는지 확인
+    assert json.loads(baseline_path.read_text(encoding="utf-8"))["naive_datetime"] == 3
+
+
 @pytest.mark.perf
 def test_main_decrease_with_update_ratchets_down(tmp_path: Path, perf_budget) -> None:
     """Perf: local best-of-5 main(--update) ~10 ms CPU; budget 5000 ms (>30x); 10x delay is red."""
