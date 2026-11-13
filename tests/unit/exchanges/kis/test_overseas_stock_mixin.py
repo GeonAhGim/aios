@@ -77,7 +77,10 @@ def _market_order(exchange: str) -> Order:
 @pytest.mark.parametrize("exchange", sorted(_EXCHANGES))
 async def test_round_trip_per_exchange_uses_distinct_codes(exchange: str):
     """DoD: 거래소별 왕복(시세조회 → 주문 → 취소 → 잔고)이 모의투자에서
-    통과하고, 시세코드(3자리)와 주문코드(4자리)가 섞이지 않는다."""
+    통과하고, 시세코드(3자리)와 주문코드(4자리)가 섞이지 않는다.
+
+    D2 보강 (task-24674): 성능 단언 + 게이트 적색 재현 추가.
+    """
     codes = _exchange_codes(exchange)
     captured: list[httpx.Request] = []
     adapter = _make_paper_adapter(captured)
@@ -111,6 +114,57 @@ async def test_round_trip_per_exchange_uses_distinct_codes(exchange: str):
 
     # 시세코드(3자리)는 주문코드(4자리)와 절대 같은 문자열이 아니다.
     assert codes.quote_excd != codes.order_excg_cd
+
+
+# ── 왕복 테스트용 성능 예산 (실측 기반, task-24674) ──────────────────────
+# 로컬 실측(2026-11-13, Windows, 모의 transport 왕복 4호출 best-of-5): CPU 0~15.6ms
+# (process_time 양자화 한 틱 이하; wall ~2s는 rate limiter 대기라 CPU 예산 대상이 아님).
+# 예산 500ms는 한 틱(15.6ms)의 30배 이상 — 공유 CI 편차 흡수용.
+_ROUND_TRIP_BUDGET_MS = 500.0
+
+
+async def _round_trip_once_for(exchange: str, adapter: KISAdapter) -> None:
+    """단일 거래소 왕복(시세→주문→취소→잔고)을 한 번 실행하는 헬퍼."""
+    await adapter.get_overseas_ticker("AAPL", exchange)
+    await adapter.place_overseas_order(_market_order(exchange), exchange)
+    await adapter.cancel_overseas_order("ORG:1", "AAPL", exchange, original_quantity=Decimal("1"))
+    await adapter.get_overseas_balance(exchange)
+
+
+@pytest.mark.parametrize("exchange", sorted(_EXCHANGES))
+@pytest.mark.perf
+async def test_round_trip_per_exchange_under_budget(exchange: str, perf_budget: PerfBudget):
+    """성능 — 거래소별 왕복 1회 CPU 시간이 예산 안에 든다 (D2 보강, task-24674)."""
+    adapter = _make_paper_adapter([])
+    sample = await perf_budget.best_of_async(
+        lambda ex=exchange: _round_trip_once_for(ex, adapter), n=3, warmup=1
+    )
+    assert sample.cpu_ms < _ROUND_TRIP_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_ROUND_TRIP_BUDGET_MS
+    )
+
+
+@pytest.mark.parametrize("exchange", sorted(_EXCHANGES))
+async def test_round_trip_gate_red_when_order_code_collapses_to_quote_code(
+    exchange: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """게이트 적색 재현 — 주문코드를 시세코드로 망가뜨리면 왕복 단언이
+    실제로 적색이 된다 (D2 보강, task-24674)."""
+    codes = _exchange_codes(exchange)
+    broken = codes._replace(order_excg_cd=codes.quote_excd)
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+    monkeypatch.setitem(overseas_stock_mixin._EXCHANGES, exchange, broken)
+
+    await adapter.place_overseas_order(_market_order(exchange), exchange)
+    body = json.loads(captured[-1].content)
+
+    assert body["OVRS_EXCG_CD"] == codes.quote_excd
+    with pytest.raises(AssertionError):
+        assert body["OVRS_EXCG_CD"] == codes.order_excg_cd
+    with pytest.raises(AssertionError):
+        assert broken.quote_excd != broken.order_excg_cd
 
 
 @pytest.mark.perf
@@ -274,27 +328,6 @@ async def test_round_trip_failure_injection_cancel_rejected_fails_closed():
         await adapter.cancel_overseas_order("ORG:1", "AAPL", "NASD", original_quantity=Decimal("1"))
 
     assert captured
-
-
-async def test_round_trip_gate_red_when_order_code_collapses_to_quote_code(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """게이트 적색 재현 — 주문코드를 시세코드로 망가뜨리면 왕복 단언
-    (`OVRS_EXCG_CD == codes.order_excg_cd`)이 실제로 적색이 된다."""
-    codes = _exchange_codes("NYSE")
-    broken = codes._replace(order_excg_cd=codes.quote_excd)
-    captured: list[httpx.Request] = []
-    adapter = _make_paper_adapter(captured)
-    monkeypatch.setitem(overseas_stock_mixin._EXCHANGES, "NYSE", broken)
-
-    await adapter.place_overseas_order(_market_order("NYSE"), "NYSE")
-    body = json.loads(captured[-1].content)
-
-    assert body["OVRS_EXCG_CD"] == codes.quote_excd
-    with pytest.raises(AssertionError):
-        assert body["OVRS_EXCG_CD"] == codes.order_excg_cd
-    with pytest.raises(AssertionError):
-        assert broken.quote_excd != broken.order_excg_cd
 
 
 # 로컬 실측(2026-11-13, Windows, 모의 transport 왕복 4호출 best-of-5): CPU 0~15.6ms
