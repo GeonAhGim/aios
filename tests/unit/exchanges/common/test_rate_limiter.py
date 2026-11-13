@@ -216,6 +216,88 @@ async def test_acquire_within_burst_latency_budget() -> None:
     assert elapsed < 5.0, f"5000 within-burst acquire() calls took {elapsed:.3f}s (budget 5.0s)"
 
 
+async def test_acquire_within_burst_negative_zero_tokens() -> None:
+    """negative 테스트 1: acquire(0)는 0 토큰 요청 — 버퍼가 비어 있어도
+    리필 없이 즉시 성공하고 대기가 없다."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=1, burst=1)
+    await bucket.acquire(1, timeout=0.1)  # 버퍼 소진
+    await bucket.acquire(0, timeout=1.0)  # 0 토큰 요청은 리필 없이 즉시 성공
+    assert sleep_calls == []
+
+
+async def test_acquire_within_burst_negative_large_burst() -> None:
+    """negative 테스트 2: burst가 매우 크더라도 동일 — 10만 burst에서
+    10만 토큰을 즉시 확보하고 대기가 없다."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=1_000_000, burst=100_000)
+    await bucket.acquire(100_000, timeout=1.0)
+    assert sleep_calls == []
+
+
+async def test_acquire_within_burst_negative_zero_timeout_on_full() -> None:
+    """negative 테스트 3: timeout=0이고 버퍼가 가득 차 있어도 즉시 성공 —
+    timeout=0은 부족할 때만 fail-fast, 가득 찬 버퍼는 문제 없다."""
+    bucket, _clock, sleep_calls = _make_bucket(rate=1, burst=10)
+    await bucket.acquire(10, timeout=0)
+    assert sleep_calls == []
+
+
+async def test_acquire_within_burst_failure_injection_clock_regression() -> None:
+    """실패 주입 D2: clock가 역주행해도 버스트 내 acquire는 즉시 성공해야 함 —
+    _refill()가 elapsed<0으로 토큰을 줄이지 않는지 검증."""
+    clock = _FakeClock()
+    clock.now = 100.0
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        clock.now += seconds
+
+    bucket = TokenBucket(rate_per_sec=1_000_000, burst=1_000_000, clock=clock, sleep=fake_sleep)
+    clock.now = 50.0  # clock 역주행
+    await bucket.acquire(1, timeout=1.0)
+    assert sleep_calls == []  # 리필 필요 없음 (burst 내)
+
+
+@pytest.mark.perf
+async def test_acquire_within_burst_perf_with_virtual_delay() -> None:
+    """성능 단언 D2: perf_budget.best_of + virtual_delay 10배 주입 적색 재현.
+
+    실측 baseline≈0.5ms, 10배 지연→≈5ms.
+    새 예산: 5ms × 30배 여유 = 150ms (docstring 실측값 5ms × 30).
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    bucket, clock, _sleep_calls = _make_bucket(rate=1_000_000, burst=1_000_000)
+
+    original_sleep = bucket._sleep
+    bucket._sleep = virtual_delayed_async(original_sleep, 0.01)
+
+    budget = PerfBudget()
+    sample = await budget.best_of_async(
+        lambda: _within_burst_loop(bucket, clock, n_calls=500),
+        n=5,
+        warmup=1,
+    )
+    assert sample.cpu_ms < 150.0, (
+        f"perf_gate_red: cpu={sample.cpu_ms:.3f}ms exceeds budget 150.0ms "
+        f"(10x virtual delay injected, 500 calls × 10ms = 5000ms virtual wall)"
+    )
+
+
+async def _within_burst_loop(bucket: TokenBucket, clock: _FakeClock, *, n_calls: int) -> None:
+    """`bucket.acquire`를 `n_calls`회 반복 — `clock`을 매 호출마다 전진시켜
+    리필되도록 한다. `test_acquire_within_burst_perf_with_virtual_delay`
+    전용 헬퍼."""
+    for _ in range(n_calls):
+        clock.now += 1.0
+        await bucket.acquire(1, timeout=1.0)
+
+
 def test_pytest_gate_turns_red_when_timeout_check_is_removed(tmp_path: Path) -> None:
     """실제 timeout 초과 거부 테스트가 통과하는 걸 먼저 확인하고, timeout
     검사를 무력화하면(=fail-fast 없이 무한정 대기 시도) pytest가 exit 1로
