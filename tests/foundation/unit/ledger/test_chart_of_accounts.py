@@ -260,6 +260,40 @@ def test_gate_red_default_scope_budget_actually_fails_past_budget(perf_budget: A
 # --- 실패 주입 (task-23424 D2 보강) ---
 
 
+def test_default_scope_failure_injection_corrupted_parsed_account(monkeypatch: Any) -> None:
+    """task-24651 D2 보강 — 파싱 결과가 USER이면서 user_id=None인 경우
+    default_scope가 fail-closed로 AssertionError를 발생시킨다.
+    monkeypatch로 parse_account_code의 반환값을 인위적으로 망가뜨려
+    내부 assert anchor is not None를 트리거한다."""
+    from src.foundation.ledger.domain.chart_of_accounts import ParsedAccountCode
+
+    def fake_parse(code: str) -> ParsedAccountCode:
+        return ParsedAccountCode(kind="USER", user_id=None, sub=None, name=None)
+
+    monkeypatch.setattr(coa, "parse_account_code", fake_parse)
+
+    code = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+
+    with pytest.raises(AssertionError):
+        coa.default_scope(code)
+
+
+def test_account_type_failure_injection_parse_returns_none_sub(monkeypatch: Any) -> None:
+    """task-24651 D2 보강 — parse_account_code가 USER 타입에 sub=None을
+    반환하면 account_type의 내부 assert가 AssertionError로 잡는다."""
+    from src.foundation.ledger.domain.chart_of_accounts import ParsedAccountCode
+
+    def fake_parse(code: str) -> ParsedAccountCode:
+        return ParsedAccountCode(kind="USER", user_id=_USER_ID, sub=None, name=None)
+
+    monkeypatch.setattr(coa, "parse_account_code", fake_parse)
+
+    code = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+
+    with pytest.raises(AssertionError):
+        coa.account_type(code)
+
+
 @pytest.mark.perf
 def test_default_scope_failure_injection_10x_delay_turns_budget_red(
     perf_budget: Any, monkeypatch: Any
