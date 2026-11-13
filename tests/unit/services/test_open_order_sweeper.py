@@ -1,4 +1,4 @@
-# loc-allow: R-39 DEEPEN-DEPTH D1->D3 보강 — tenant scope test에 negative 3종·실패주입·gate-red·perf best-of 추가 (task-24642)
+# loc-allow: R-39 D1->D3 tenant scope test 보강 — negative 3종·실패주입·gate-red·perf (task-24642)
 """open_order_sweeper 통합테스트 — SafetyScope 매핑 및 scope_ref 검증.
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §3.8, §5(105번), §9(R-39).
