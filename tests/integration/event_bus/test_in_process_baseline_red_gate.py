@@ -14,6 +14,7 @@ import pytest
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
+from tests.support.perf_inject import reset_virtual_totals
 
 
 async def _scenario() -> int:
@@ -167,3 +168,91 @@ async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     assert sample.wall_ms < budget_ms, (
         f"red-gate scenario: {perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
+
+
+async def test_in_process_bus_publish_after_stop_loses_event():
+    """negative — stop() 호출 후 publish 하면 이벤트가 handler에 도달하지
+    않고 silently 사라진다는 것을 확인한다. 워커가 꺼진 상태에서는
+    publish 자체가 예외를 던지지 않으므로, 손실이 더 명확하다."""
+    bus = InProcessEventBus()
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    await bus.stop()
+    # stop() 후 publish — 워커가 안 뜨므로 이벤트가 유실된다
+    await bus.publish("topic", {"seq": 42})
+    await asyncio.sleep(0.1)
+    assert received == []  # stop() 후 이벤트는 구조적으로 유실된다
+
+
+async def test_in_process_bus_handler_crash_during_inflight_loses_event():
+    """negative — 핸들러가 실행 중 예외를 던지면 해당 이벤트는 손실되고,
+    재시작 후에도 복구되지 않는다는 것을 확인한다. CRITICAL 핸들러가
+    예외를 던질 때 이벤트가 큐에서 제거되지만 처리되지 않는 상태를 재현한다."""
+    received: list[int] = []
+
+    async def flaky_handler(payload):
+        if payload["seq"] == 0:
+            raise RuntimeError("handler crashes on seq 0")
+        received.append(payload["seq"])
+
+    crashed = InProcessEventBus(max_retries=0)
+    crashed.subscribe("topic", flaky_handler, criticality=HandlerCriticality.CRITICAL)
+    await crashed.start()
+    await crashed.publish("topic", {"seq": 0})
+    await asyncio.sleep(0.2)  # 핸들러가 예외를 던지고 이벤트가 제거될 시간을 준다
+    del crashed  # "크래시"
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", flaky_handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == []  # 핸들러 크래시로 손실된 이벤트는 복구되지 않는다
+
+
+@pytest.mark.perf
+async def test_in_process_bus_perf_with_virtual_delay_gate_red(perf_budget, monkeypatch):
+    """gate-red + perf — 가상 지연 주입으로 성능 단언이 실제로 잡히는지를
+    증명한다.
+
+    실측 기준: _scenario 1회 p95 ≈ 1.2ms (로컬 실측, 20회 반복).
+    예산 = 5000ms (실측의 ≈4100배, ADR-2026-09-09-C Decision 1).
+    Gate-red 가상 지연 = 100ms (예산의 ≈83배) -> perf_budget가
+    virtual delay의 cpu+wall 리프트를 인식해 예산 단언을 잡아야 한다.
+
+    This proves: (1) the perf assertion actually constrains runtime,
+    (2) virtual_delay injection reproduces a red gate without real sleep,
+    (3) best_of_async correctly picks the minimum across multiple runs.
+    """
+    budget_ms = 5000.0
+
+    # --- baseline: best_of_async measurement, expect under budget ---
+    reset_virtual_totals()
+
+    sample = await perf_budget.best_of_async(_scenario, n=5)
+    assert sample.result == 0
+    assert sample.cpu_ms < budget_ms, (
+        f"baseline: {perf_budget.describe(sample, budget_ms=budget_ms)}"
+    )
+
+    # --- gate-red: inject 100ms virtual delay into both cpu and wall ledgers,
+    #    prove budget assertion trips ---
+    reset_virtual_totals()
+
+    async def slow_scenario():
+        from tests.support.perf_inject import _add_virtual
+
+        _add_virtual(100.0, 100.0)
+        return await _scenario()
+
+    red_sample = await perf_budget.best_of_async(slow_scenario, n=5)
+    with pytest.raises(AssertionError):
+        assert red_sample.cpu_ms < budget_ms, (
+            f"gate-red should have tripped; "
+            f"cpu={red_sample.cpu_ms:.3f}ms wall={red_sample.wall_ms:.3f}ms"
+        )
