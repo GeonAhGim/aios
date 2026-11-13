@@ -186,6 +186,68 @@ async def test_multiple_executions_each_get_own_verdict_not_mixed() -> None:
     assert cards[3].last_risk_verdict is None
 
 
+def _mixed_rows(*, swap: bool) -> list[dict[str, Any]]:
+    allow = {"risk_outcome": "ALLOW", "risk_reason_codes": [], "risk_evaluated_at": _EVALUATED_AT}
+    deny = {
+        "risk_outcome": "DENY",
+        "risk_reason_codes": ["DRAWDOWN_LIMIT_EXCEEDED"],
+        "risk_evaluated_at": _EVALUATED_AT,
+    }
+    first, second = (deny, allow) if swap else (allow, deny)
+    return [
+        _base_row(execution_id=1, **first),
+        _base_row(execution_id=2, **second),
+        _base_row(execution_id=3),
+    ]
+
+
+async def _assert_verdicts_not_mixed(rows: list[dict[str, Any]]) -> None:
+    cards = {c.execution_id: c for c in await _service(rows).list_for_user(uuid4())}
+    verdict_1, verdict_2 = cards[1].last_risk_verdict, cards[2].last_risk_verdict
+    assert verdict_1 is not None and verdict_1.outcome == "ALLOW"
+    assert verdict_1.reason_codes == []
+    assert verdict_2 is not None and verdict_2.outcome == "DENY"
+    assert verdict_2.reason_codes == ["DRAWDOWN_LIMIT_EXCEEDED"]
+    assert cards[3].last_risk_verdict is None
+
+
+async def test_mixed_verdict_check_green_on_correct_join() -> None:
+    """gate-green control — the not-mixed assertions pass on the correct join."""
+    await _assert_verdicts_not_mixed(_mixed_rows(swap=False))
+
+
+async def test_mixed_verdict_check_red_when_join_swaps_verdicts() -> None:
+    """gate-red reproduction — a join that swaps verdicts between executions
+    must turn the not-mixed assertions red (proves they actually catch it)."""
+    with pytest.raises(AssertionError):
+        await _assert_verdicts_not_mixed(_mixed_rows(swap=True))
+
+
+async def test_mixed_verdict_check_red_when_reason_codes_leak() -> None:
+    """negative — reason codes leaking onto an ALLOW verdict are caught."""
+    rows = _mixed_rows(swap=False)
+    rows[0]["risk_reason_codes"] = ["KILL_SWITCH_ACTIVE"]
+    with pytest.raises(AssertionError):
+        await _assert_verdicts_not_mixed(rows)
+
+
+async def test_mixed_verdict_check_red_when_verdict_leaks_to_clean_execution() -> None:
+    """negative — a verdict attached to the verdict-less execution is caught."""
+    rows = _mixed_rows(swap=False)
+    rows[2].update(risk_outcome="ALLOW", risk_reason_codes=[], risk_evaluated_at=_EVALUATED_AT)
+    with pytest.raises(AssertionError):
+        await _assert_verdicts_not_mixed(rows)
+
+
+async def test_mixed_verdict_failure_injection_partial_row_propagates() -> None:
+    """failure injection — a row missing the risk columns fails loudly (KeyError)
+    instead of silently yielding a verdict-less card."""
+    rows = _mixed_rows(swap=False)
+    del rows[1]["risk_outcome"]
+    with pytest.raises(KeyError):
+        await _service(rows).list_for_user(uuid4())
+
+
 async def test_pool_acquire_failure_propagates_fail_closed() -> None:
     """실패 주입 — DB 인프라 결함은 조용히 삼켜지지 않고 그대로 전파돼야
     한다(fail-closed 기본 원칙, CLAUDE.md §3)."""
