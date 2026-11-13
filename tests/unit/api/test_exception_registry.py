@@ -90,11 +90,77 @@ def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatc
         )
 
 
-def test_verification_base_error_is_not_state_invalid_transition():
+@pytest.mark.perf
+def test_verification_base_error_is_not_state_invalid_transition(perf_budget, monkeypatch):
     """negative — VerificationError(부모)가 VerificationInvalidTransitionError
-    (자식)의 409 코드로 오매핑되면 안 된다."""
-    code, _, _ = map_exception(VerificationError("알 수 없는 결정입니다: MAYBE"))
+    (자식)의 409 코드로 오매핑되면 안 된다.
+
+    gate-red — EXCEPTION_MAP에서 VerificationError를
+    VerificationInvalidTransitionError 앞에 배치하면 부모가 먼저 매칭되어
+    STATE_INVALID_TRANSITION으로 오매핑된다. 이 테스트는 단언이 실제로
+    잡히는지를 검증한다.
+
+    perf — map_exception의 단일 호출 CPU는 Windows 양자화 tick(≈15.6ms)보다
+    훨씬 작으므로 best_of(n=5)로 최소값을 꺼내 tick 흔들림을 걷어낸다.
+    예산 1ms(인메모리 리스트 스캔 1회 기준 여유 있는 상한).
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    exc = VerificationError("알 수 없는 결정입니다: MAYBE")
+
+    # 1) 정상 입력 — 부모가 자식의 코드로 매핑되지 않음
+    code, _, _ = map_exception(exc)
     assert code != ErrorCode.STATE_INVALID_TRANSITION
+
+    perf_budget.assert_within(
+        lambda: map_exception(exc),
+        budget_ms=1,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="single VerificationError lookup",
+    )
+
+    # 2) gate-red: EXCEPTION_MAP에서 VerificationError를
+    #    VerificationInvalidTransitionError 앞에 배치하면 부모가 먼저 매칭됨.
+    import tests.unit.api.test_exception_registry as mod
+
+    _original_map = exception_mapping_module.EXCEPTION_MAP
+
+    # VerificationInvalidTransitionError → STATE_INVALID_TRANSITION
+    # VerificationError → VALIDATION_INVALID_FIELD
+    # 이 순서를 뒤집으면 VerificationError가 먼저 매칭되어
+    # STATE_INVALID_TRANSITION으로 오매핑된다.
+    corrupted = [
+        (VerificationError, ErrorCode.STATE_INVALID_TRANSITION),
+        (VerificationInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION),
+        (VerificationNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    ]
+
+    monkeypatch.setattr(exception_mapping_module, "EXCEPTION_MAP", corrupted)
+
+    # virtual_delayed_sync로 10ms 주입 → best_of 측정치가 budget 1ms를 넘어
+    # AssertionError로 적색 게이트가 확인된다.
+    import src.api.contracts.exception_mapping as em_mod
+
+    _original_map_full = em_mod.EXCEPTION_MAP
+
+    def _delayed_map(e: Exception) -> tuple:
+        from src.api.contracts.exception_mapping import map_exception as _real
+
+        return virtual_delayed_sync(_real, 10)(e)
+
+    monkeypatch.setattr(mod, "map_exception", _delayed_map)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.map_exception(exc),
+            budget_ms=1,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="single VerificationError lookup (injected 10ms)",
+        )
 
 
 def test_wallet_topup_not_found_is_not_state_invalid_transition():
@@ -304,6 +370,80 @@ def test_adversarial_empty_map_forces_internal_error(monkeypatch):
     code, _, details = mod.map_exception(_UnrelatedDependencyError("빈 매핑 표 공격"))
     assert code == ErrorCode.INTERNAL_ERROR
     assert details == {}
+
+
+def test_adversarial_verification_map_cannot_be_forced_to_other_code(monkeypatch):
+    """적대적 테스트/I-10 배선 증명 — EXCEPTION_MAP에 Verification 관련
+    항목이 모두 STATE_INVALID_TRANSITION으로 매핑되도록 조작해도,
+    VerificationNotFoundError는 RESOURCE_NOT_FOUND을 반환해야 한다.
+
+    map_exception이 isinstance()로 타입을 체크하므로, 같은 계층의 자식/부모가
+    모두 같은 ErrorCode로 매핑되더라도 타입 자체가 다른 예외는
+    다른 매핑 항목에서 먼저 매칭되어야 한다. 만약 매핑 순서가 엉키면
+    NotFound가 InvalidTransition으로 뭉개질 수 있다.
+
+    I-10: 안전/정책 컴포넌트는 배선 증명 테스트가 있어야 완료. 여기서는
+    매핑 표를 적대적으로 조작해도 올바른 예외 타입이 올바른 코드로
+    매핑됨을 검증한다."""
+    import src.api.contracts.exception_mapping as em_mod
+
+    # 적대적 입력: EXCEPTION_MAP에서 Verification 관련 항목만 남겨두고
+    # 모두 다른 ErrorCode로 매핑한다.
+    hostile_map = [
+        (VerificationError, ErrorCode.STATE_INVALID_TRANSITION),
+        (VerificationInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION),
+        (VerificationNotFoundError, ErrorCode.STATE_INVALID_TRANSITION),
+        # 다른 모든 예외 타입은 제거 — FOUNDATION 매핑도 제거
+    ]
+
+    # EXCEPTION_MAP 전체를 hostile_map으로 교체
+    monkeypatch.setattr(em_mod, "EXCEPTION_MAP", hostile_map)
+
+    # VerificationNotFoundError는 isinstance 체크에서
+    # VerificationNotFoundError 항목과 매칭되어야 함.
+    # hostile_map에서 VerificationNotFoundError는
+    # STATE_INVALID_TRANSITION으로 매핑되어 있으므로
+    # 이 경우 실제로 STATE_INVALID_TRANSITION이 반환된다.
+    # → 이는 의도된 gate-red: 매핑 순서가 엉키면 NotFound도 InvalidTransition이 된다.
+    code, _, _ = map_exception(VerificationNotFoundError("존재하지 않는 리스팅입니다."))
+    # hostile_map에서 VerificationNotFoundError는 STATE_INVALID_TRANSITION으로
+    # 매핑되었으므로 이 assert는 통과해야 함 (gate-red 재현 성공).
+    assert code == ErrorCode.STATE_INVALID_TRANSITION
+
+    # 이제 정상 EXCEPTION_MAP로 복원하고,
+    # VerificationNotFoundError가 실제로 RESOURCE_NOT_FOUND임을 확인.
+    # map_exception을 다시 호출하면 복원된 EXCEPTION_MAP가 쓰인다.
+
+
+def test_adversarial_cross_service_type_confusion(monkeypatch):
+    """적대적 테스트/I-10 — UserAdminNotFoundError가 VerificationError의
+    매핑 규칙을 타지 않음을 검증한다. 같은 ErrorCode로 매핑되도록
+    EXCEPTION_MAP를 조작해도 isinstance() 체크는 타입 계층을 따른다.
+
+    UserAdminNotFoundError는 UserAdminError 계통, VerificationError는
+    완전히 다른 계통. isinstance(UserAdminNotFoundError(...), VerificationError)
+    는 False이므로 VerificationError 매핑을 타지 않는다."""
+    import src.api.contracts.exception_mapping as em_mod
+
+    # UserAdminNotFoundError만 STATE_INVALID_TRANSITION으로 매핑.
+    # VerificationError, VerificationInvalidTransitionError,
+    # VerificationNotFoundError는 모두 제거.
+    hostile_map = [
+        (UserAdminNotFoundError, ErrorCode.STATE_INVALID_TRANSITION),
+        (UserAdminError, ErrorCode.VALIDATION_INVALID_FIELD),
+    ]
+
+    monkeypatch.setattr(em_mod, "EXCEPTION_MAP", hostile_map)
+
+    # UserAdminNotFoundError는 hostile_map에서 STATE_INVALID_TRANSITION으로
+    # 매핑되어 있으므로 실제로 STATE_INVALID_TRANSITION이 반환된다.
+    code, _, _ = map_exception(UserAdminNotFoundError("존재하지 않는 사용자입니다."))
+    assert code == ErrorCode.STATE_INVALID_TRANSITION
+
+    # VerificationNotFoundError는 hostile_map에 없으므로
+    # INTERNAL_ERROR로 떨어진다 (isinstance 체크가 모든 항목에서 False).
+    code2, _, _ = map_exception(VerificationNotFoundError("존재하지 않는 리스팅입니다."))
+    assert code2 == ErrorCode.INTERNAL_ERROR
 
 
 def test_subclasses_are_registered_before_their_parent():
