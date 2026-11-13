@@ -3938,3 +3938,13 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 직전 커밋 c6f4737b9(test_redaction perf 마커), d751d9133(ledger FA-12 테스트 추가)은 OMS/eventstore/replay_verify 경로를 건드리지 않는다.
 - 로컬 재현(aios_test_backend_2): `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/test_replay_verify_order_chain.py` **46 passed**; `test_redaction.py` **48 passed**; `test_ibor_abor_close_persisted.py` **1 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**.
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+## task-24841 — pytest 24h 4회 반복 systemic 묶음 (task-23503/23773/23884/23907), 설계 결함 재조사 (2026-11-14)
+- 대상 반복 리프 4건의 원인은 서로 다르며 모두 이미 HEAD에 수정·기록돼 있다. `scripts/check_pytest.py`는 여전히 없다(#28/#34/#40/#48/#77/#91/#23806과 같은 결론) — `pytest`는 `pm/ci_recheck.py`의 전체 스위트 단계를 가리키는 컨테이너 이름이며 공통 검사 규칙·기준선이 없다.
+- task-23503: 부하 시 calibration 150ms 초과로 perf 적색 검출 실패. 측정기 설계 결함이며 수정 `2ee2458a0`(경량 calibration)이 HEAD에 포함됨. #task-23313 항목과 동일 원인.
+- task-23773: `pytest` 2건 `from_status=SUBMITTED != folded status so far (CREATED)` — pre-cutover 주문 이력의 설계된 replay skip 진단 계열(#task-23884/21877/23608과 동형). 재시도 수정 `0fc9e7b07`이 HEAD에 포함됨.
+- task-23884: 동일 replay 계열 비회귀 재확인. 코드 변경 없음(기존 #23884 항목 인용).
+- task-23907: 실제 실패는 replay가 아니라 `test_check_format` — sandbox 테스트 클래스 앞 빈 줄 누락(`1b15ecd01`). 수정 `f62defc11`이 HEAD에 포함됨. 반복 유입의 공통 원인은 워커가 커밋 전 `ruff format --check`를 돌리지 않은 것이다(같은 계열: `6551de18c` 포맷 드리프트 정정). 게이트 설계 결함은 아니고 편집 후 포맷 확인 누락이 유입 원인이다.
+- 판정: 저장소 측 공통 설계 결함 신규 없음 → 검사 규칙·임계값·기준선 변경 없음(DECISION_GUIDELINES B-2). 코드 변경 없음(noop, 본 로그 append만).
+- 재발 시 확인 순서: (1) 실패 nodeid가 `RelativeBudget`/`PerfBudget.sample`을 쓰는 perf 테스트인지, (2) `ruff format --check` 실패 여부, (3) replay 계열이면 `skipped -- pre-cutover order` 진단인지 먼저 본다.
+- D2: N/A(조사·기록 리프, 실행 코드 변경 없음).
