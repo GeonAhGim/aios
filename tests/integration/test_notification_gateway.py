@@ -169,3 +169,25 @@ async def test_record_db_failure_injection_propagates_unchanged(pool, monkeypatc
 
     assert await _history(pool, user_id) == []
     await bus.stop()
+
+
+@pytest.mark.perf
+async def test_handle_event_p95_within_budget(pool, perf_budget):
+    """성능 단언(D2) — 2채널 발송+기록 1회의 p95를 DB 왕복 포함 200ms 회귀 상한으로 건다
+    (읽기 쿼리 예산과 동일 기준; 알림 전용 예산 행은 ADR-2026-09-09-C 표에 없다)."""
+    user_id = await create_test_user(pool)
+
+    async def ok_sender(uid, event_type, payload):
+        return True
+
+    gateway = NotificationGateway(
+        pool, senders={NotificationChannel.EMAIL: ok_sender, NotificationChannel.PUSH: ok_sender}
+    )
+    payload = {"event_type": "approval.request.created", "user_id": str(user_id)}
+
+    samples = sorted(
+        await perf_budget.samples_async(lambda: gateway.handle_event(payload), n=10),
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms  # n=10 최대값을 p95 근사치로 사용
+    assert p95 <= 200.0, f"handle_event p95 {p95:.1f}ms exceeds 200ms budget"
