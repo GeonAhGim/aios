@@ -1,4 +1,8 @@
-"""scripts/check_collection_determinism.py -- 해시 시드에 따라 수집 순서가 달라지는 파일 적발."""
+"""scripts/check_collection_determinism.py -- 해시 시드에 따라 수집 순서가 달라지는 파일 적발.
+
+실제 tests/ 트리에는 아무것도 쓰지 않는다(병렬 실행과 간섭하고 __pycache__가 남는다):
+모든 임시 파일은 tmp_path 아래에 만들고 그 경로를 root로 넘긴다.
+"""
 
 from __future__ import annotations
 
@@ -41,25 +45,19 @@ def _load():
     return module
 
 
-def _make(name: str, text: str) -> str:
-    folder = ROOT / "tests" / "_tmp_determinism"
+def _make(root: Path, name: str, text: str) -> str:
+    folder = root / "tests"
     folder.mkdir(exist_ok=True)
-    path = folder / name
-    path.write_text(text, encoding="utf-8")
-    return str(path.relative_to(ROOT)).replace(chr(92), "/")
+    (folder / name).write_text(text, encoding="utf-8")
+    return "tests/" + name
 
 
-def test_frozenset_parametrize_is_flagged_and_sorted_list_is_not() -> None:
+def test_frozenset_parametrize_is_flagged_and_sorted_list_is_not(tmp_path: Path) -> None:
     module = _load()
-    stable = _make("test_stable_tmp.py", STABLE)
-    unstable = _make("test_unstable_tmp.py", UNSTABLE)
-    try:
-        assert module.unstable_files([stable]) == []
-        assert module.unstable_files([unstable]) == [unstable]
-    finally:
-        for rel in (stable, unstable):
-            (ROOT / rel).unlink(missing_ok=True)
-        (ROOT / "tests" / "_tmp_determinism").rmdir()
+    stable = _make(tmp_path, "test_stable_tmp.py", STABLE)
+    unstable = _make(tmp_path, "test_unstable_tmp.py", UNSTABLE)
+    assert module.unstable_files([stable], tmp_path) == []
+    assert module.unstable_files([unstable], tmp_path) == [unstable]
 
 
 def test_no_changed_test_files_passes() -> None:

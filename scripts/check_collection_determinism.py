@@ -46,9 +46,9 @@ def changed_test_files(base: str) -> list[str]:
     ]
 
 
-def collected_ids(files: list[str], seed: str) -> list[str] | None:
+def collected_ids(files: list[str], seed: str, root: Path = ROOT) -> list[str] | None:
     """수집된 nodeid를 순서대로. 수집 자체가 실패하면 None(이 게이트의 대상이 아니다)."""
-    env = {**os.environ, "PYTHONHASHSEED": seed}
+    env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONDONTWRITEBYTECODE": "1"}
     try:
         result = subprocess.run(
             [
@@ -64,7 +64,7 @@ def collected_ids(files: list[str], seed: str) -> list[str] | None:
                 "addopts=",
                 *files,
             ],
-            cwd=ROOT,
+            cwd=root,
             env=env,
             capture_output=True,
             text=True,
@@ -78,8 +78,8 @@ def collected_ids(files: list[str], seed: str) -> list[str] | None:
     return [line.strip() for line in result.stdout.splitlines() if "::" in line]
 
 
-def unstable_files(files: list[str]) -> list[str]:
-    first, second = (collected_ids(files, seed) for seed in SEEDS)
+def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
+    first, second = (collected_ids(files, seed, root) for seed in SEEDS)
     if first is None or second is None or first == second:
         return []
     by_file: dict[str, tuple[list[str], list[str]]] = {f: ([], []) for f in files}
