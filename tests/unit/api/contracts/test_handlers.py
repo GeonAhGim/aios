@@ -3,12 +3,17 @@
 건드리지 않음 — 실제 등록은 이미 main.py에 완료돼 있고, 여기선 이
 함수 자체의 동작만 확인)."""
 
+import pytest
 from fastapi import FastAPI, HTTPException, status
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from src.api.contracts.handlers import install_exception_handlers
+from src.api.contracts import handlers as handlers_module
+from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.handlers import _error_response, install_exception_handlers
 from src.services.auth_service import AuthError
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 class _Body(BaseModel):
@@ -159,9 +164,9 @@ async def test_http_exception_with_string_detail_falls_back_to_status_default():
 
 
 async def test_http_exception_with_non_dict_non_string_detail():
-    """HTTP exception detail 이 dict/문자열 외 타입일 때 —
-    handlers.py 의 _extract_error_code 가 ValueError 를 raise 하면
-    INTERNAL_ERROR 로 폴백되어야 한다."""
+    """HTTP exception detail 이 dict/문자열 외 타입(list)일 때 —
+    `"error_code" in detail` 분기를 타지 않아 상태코드 기본 표를 보고,
+    422 는 표에 없으므로 INTERNAL_ERROR 로 폴백되어야 한다."""
     app = _make_app()
 
     @app.get("/http-list-detail")
@@ -177,33 +182,107 @@ async def test_http_exception_with_non_dict_non_string_detail():
 
     assert response.status_code == 422
     body = response.json()
-    # detail 이 list 면 _extract_error_code 가 ValueError 를 내므로 INTERNAL_ERROR
     assert body["error_code"] == "INTERNAL_ERROR"
 
 
-# --- failure injection test ---
+async def test_structured_detail_with_unknown_error_code_is_not_silently_accepted():
+    """detail dict 의 error_code 가 ErrorCode 에 없는 문자열이면 — 핸들러는
+    `ErrorCode(...)` 변환에서 ValueError 를 내고, 봉투가 아닌 raw 500 이 된다.
+    클라이언트가 임의 코드를 그대로 통과시키지 못해야 한다(봉투 계약 위반 방지)."""
+    app = _make_app()
+
+    @app.get("/structured-unknown-code")
+    async def structured_unknown_code() -> None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {"error_code": "NOT_A_REAL_CODE", "message": "임의 코드"},
+        )
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/structured-unknown-code")
+
+    assert response.status_code == 500
+    assert "NOT_A_REAL_CODE" not in response.text
 
 
-async def test_domain_exception_with_malformed_error_code_attribute():
-    """도메인 예외가 error_code 속성에 ErrorCode 가 아닌 int 를 담고 있을 때 —
-    map_exception 이 isinstance(EXCEPTION_MAP_SERVICES) 에서 걸리지 않고
-    error_code 속성을 읽으려 하면 TypeError 가 발생하고,
-    이 경우 INTERNAL_ERROR 로 폴백되어야 한다.
+# --- failure injection tests ---
 
-    실패주입: exception_registry 의 EXCEPTION_MAP_SERVICES 에 없는
-    커스텀 예외에 error_code=int 를 담고 map_exception 이 crash 하지 않는지 검증."""
+
+async def test_domain_exception_with_non_errorcode_attribute_is_ignored_and_maps_internal():
+    """도메인 예외가 임의의 `error_code` 속성(int)을 들고 있어도 map_exception 은
+    그 속성을 읽지 않는다 — EXCEPTION_MAP 에 없는 타입은 INTERNAL_ERROR 로 떨어지고
+    원문 메시지/details 는 그대로 map_exception 의 반환값으로만 나간다."""
     from src.api.contracts.exception_mapping import map_exception
 
     class CustomDomainError(Exception):
         error_code = 999  # noqa: ERA001 — 의도적으로 ErrorCode 가 아닌 int
 
     exc = CustomDomainError("서비스 내부 오류")
-    # CustomDomainError 는 EXCEPTION_MAP_SERVICES 에 없으므로
-    # error_code 속성을 읽으려 함. int 이면 TypeError 가 발생할 것 같지만
-    # 실제로는 ErrorCode(int) 로 형변환되어 매핑됨
     code, message, details = map_exception(exc)
-    # error_code=999 가 ErrorCode(999) 로 해석되어
-    # INTERNAL_ERROR(999) 로 매핑됨
     assert code.value == "INTERNAL_ERROR"
     assert message == "서비스 내부 오류"
     assert details == {}
+
+
+async def test_handler_exception_mapper_failure_yields_500_without_leaking_message(
+    monkeypatch,
+):
+    """실패주입: 핸들러가 의존하는 map_exception 자체가 예외를 던지면(매퍼 버그 가정)
+    클라이언트에는 원인 메시지가 노출되지 않는 500 이어야 한다."""
+    import src.api.contracts.handlers as handlers
+
+    def _broken_mapper(exc: Exception):
+        raise RuntimeError("매퍼 내부 실패 hunter2")
+
+    monkeypatch.setattr(handlers, "map_exception", _broken_mapper)
+    app = _make_app()
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/unmapped-exception")
+
+    assert response.status_code == 500
+    assert "hunter2" not in response.text
+
+
+# --- performance assertion (D2) ---
+
+
+@pytest.mark.perf
+def test_perf_error_response_within_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언(D2) — _error_response 는 봉투 모델 생성 + JSONResponse 구성만 하는
+    동기 경량 함수다. perf_budget 픽스처(CPU 시간, best-of-5)로 예산을 확인한다."""
+
+    def _build_once() -> object:
+        return _error_response(ErrorCode.RESOURCE_NOT_FOUND, "없음")
+
+    sample = perf_budget.best_of(_build_once, n=5, warmup=1, batch=1)
+
+    budget_ms = 0.5
+    assert sample.cpu_ms < budget_ms, (
+        f"perf_budget exceeded: cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_perf_error_response_goes_red_with_100ms_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): _error_response 에 100ms 가상 지연을 주입하면
+    perf_budget.assert_within 가 AssertionError 로 적색이 되어야 한다 — 단언이
+    실제로 위반을 포착하는지 역으로 증명한다(실제 sleep 없음)."""
+    reset_virtual_totals()
+    delayed = virtual_delayed_sync(_error_response, 0.1)
+    monkeypatch.setattr(handlers_module, "_error_response", delayed)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: handlers_module._error_response(ErrorCode.RESOURCE_NOT_FOUND, "없음"),
+            budget_ms=0.5,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="error_response_100ms_injected",
+        )
