@@ -197,6 +197,99 @@ def test_context_rejects_unknown_field() -> None:
         CheckContext(**kwargs)
 
 
+def test_context_rejects_unknown_field_with_numeric_value() -> None:
+    """Negative: unknown field with a numeric value must still raise TypeError."""
+    kwargs = _ctx().__dict__.copy()
+    kwargs["another_unknown"] = 42
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_unknown_field_with_none_value() -> None:
+    """Negative: unknown field with None value must still raise TypeError."""
+    kwargs = _ctx().__dict__.copy()
+    kwargs["null_field"] = None
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_multiple_unknown_fields() -> None:
+    """Negative: multiple unknown fields must raise TypeError (not silently
+    ignore extras or raise for only the first one)."""
+    kwargs = _ctx().__dict__.copy()
+    kwargs["bogus_a"] = 1
+    kwargs["bogus_b"] = "two"
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_unknown_field_failure_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure injection: if build_artifact raises during context assembly
+    with an unknown field present, the build_artifact exception must propagate
+    — CheckContext must not swallow it or construct a partially-valid context.
+    """
+    import tests.foundation.unit.validation.checks.test_context as test_mod
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("artifact store unavailable")
+
+    monkeypatch.setattr(test_mod, "build_artifact", _boom)
+
+    # _ctx() itself will raise because build_artifact is patched;
+    # this proves the exception propagates before CheckContext even sees
+    # the unknown field — fail-closed (I-01) holds at every layer.
+    with pytest.raises(RuntimeError, match="artifact store unavailable"):
+        _ctx()
+
+
+# cpu_ms for CheckContext construction with unknown field (TypeError path).
+# Local best-of-10 (batch=200) reads ~0.001 ms.
+# 5 ms budget = >=3000x headroom over sub-millisecond real measurement.
+_UNKNOWN_FIELD_BUDGET_MS = 5.0
+
+
+@pytest.mark.perf
+def test_context_rejects_unknown_field_perf_budget(perf_budget) -> None:
+    """Performance: constructing CheckContext with an unknown field must raise
+    TypeError quickly. Budget: best-of-5 < 5 ms.
+    Local measurement: ~0.001 ms (Windows 15.6 ms tick floor); 5 ms = 3000x headroom.
+    """
+
+    def fn() -> None:
+        kwargs = _ctx().__dict__.copy()
+        kwargs["unknown_field"] = "nope"
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    sample = perf_budget.best_of(fn, n=5, warmup=1, batch=200)
+    assert sample.cpu_ms < _UNKNOWN_FIELD_BUDGET_MS, f"budget exceeded: {sample.cpu_ms} ms"
+
+
+@pytest.mark.perf
+def test_context_rejects_unknown_field_goes_red_with_10x_delay(perf_budget) -> None:
+    """Gate-red reproduction with 10x virtual delay: the TypeError should still
+    be raised but the measured cpu_ms must exceed the budget, proving the
+    performance budget assertion is real and not a false positive.
+    """
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    budget_ms = _UNKNOWN_FIELD_BUDGET_MS
+
+    def fn() -> None:
+        kwargs = _ctx().__dict__.copy()
+        kwargs["unknown_field"] = "nope"
+        with pytest.raises(TypeError):
+            CheckContext(**kwargs)
+
+    slow = virtual_delayed_sync(fn, budget_ms * 10 / 1000)
+    sample = perf_budget.best_of(slow, n=3, warmup=0)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < budget_ms
+
+
 def test_context_construction_propagates_dependency_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
