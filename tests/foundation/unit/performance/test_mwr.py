@@ -4,8 +4,6 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §9 (L46 DoD)."""
 
 from __future__ import annotations
 
-import statistics
-import time
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -15,6 +13,8 @@ import pytest
 from src.foundation.performance.domain import mwr as mwr_module
 from src.foundation.performance.domain.models import Cashflow, CashflowKind
 from src.foundation.performance.domain.mwr import mwr
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=365)
@@ -36,43 +36,54 @@ _MWR_MONTHLY_CASHFLOWS = [
 ]
 
 
-def _p95_latency_ms(samples: int = 20, rounds: int = 3) -> float:
-    """Best-of-`rounds` p95: a scheduler stall under a loaded CI worker inflates
-    one round, but a real regression slows every round (budget is unchanged)."""
-    p95s: list[float] = []
-    for _ in range(rounds):
-        latencies_ms: list[float] = []
-        for _ in range(samples):
-            start = time.perf_counter()
-            mwr(_MWR_MONTHLY_CASHFLOWS, Decimal("1000"), Decimal("1200"), _T0, _T1)
-            latencies_ms.append((time.perf_counter() - start) * 1000)
-        p95s.append(statistics.quantiles(latencies_ms, n=20)[18])  # p95
-    return min(p95s)
+# ── PerfBudget 기반 성능 단언 (D2 성능 단언 0 → 보강) ────────────────────
 
 
 @pytest.mark.perf
-def test_mwr_bisection_meets_latency_budget():
+def test_mwr_bisection_meets_latency_budget(perf_budget: PerfBudget):
     """수치 성능 단언 — 월간 명세서 규모(현금흐름 11건) 이분법 호출의
-    p95 지연이 예산(100ms) 안에 있어야 한다."""
-    assert _p95_latency_ms() < _MWR_LATENCY_BUDGET_MS
+    CPU 지연이 예산(100ms) 안에 있어야 한다. PerfBudget.best_of로
+    scheduler 노이즈를 걷어낸다."""
+    perf_budget.assert_within(
+        lambda: mwr(_MWR_MONTHLY_CASHFLOWS, Decimal("1000"), Decimal("1200"), _T0, _T1),
+        budget_ms=_MWR_LATENCY_BUDGET_MS,
+        n=5,
+        label="mwr bisection p95",
+    )
 
 
-@pytest.mark.perf
-def test_mwr_latency_budget_actually_fails_when_bisection_regresses(monkeypatch):
-    """게이트 적색 재현 — `_npv`에 인위 지연을 주입해 위 성능 단언이 실제로
-    AssertionError를 내는지 확인한다(tautology가 아님을 증명, ee9e5ff1의
-    compute_statement 지연 주입과 같은 패턴)."""
+def _inject_npv_delay(monkeypatch, delay_seconds: float) -> None:
+    """Helper: inject virtual delay into `_npv` for gate-red reproduction."""
+    reset_virtual_totals()
     original_npv = mwr_module._npv
 
     def _slow_npv(rate: Decimal, flows: Sequence[tuple[Decimal, Decimal]]) -> Decimal:
-        time.sleep(0.01)
-        return original_npv(rate, flows)
+        # delay_seconds는 1회 NPV 계산당 주입 지연 — 10배(5ms)가 표준
+        return virtual_delayed_sync(original_npv, delay_seconds)(rate, flows)
 
     monkeypatch.setattr(mwr_module, "_npv", _slow_npv)
 
-    latency_ms = _p95_latency_ms(samples=3)
+
+@pytest.mark.perf
+def test_mwr_latency_budget_actually_fails_when_bisection_regresses(
+    perf_budget: PerfBudget, monkeypatch
+):
+    """게이트 적색 재현 — `_npv`에 virtual_delayed_sync 10배 지연을 주입해
+    성능 단언이 실제로 AssertionError를 내는지 확인한다(tautology 방지).
+    virtual_delayed_sync은 실제 sleep 없이 가상 지연 ledger에만 기록하므로
+    테스트가 느려지지 않는다."""
+    _inject_npv_delay(monkeypatch, 0.005)
+
+    # 11건 현금흐름 + start_value + end_value = 13건 NPV 계산 × 200 이분법 루프
+    # 각 NPV에 5ms 지연 → 1회 mwr 호출당 약 13×200×5ms = 13초 수준으로 느려짐
+    # 가상 지연 ledger가 PerfBudget.sample에서 자동 합산됨
     with pytest.raises(AssertionError):
-        assert latency_ms < _MWR_LATENCY_BUDGET_MS
+        perf_budget.assert_within(
+            lambda: mwr(_MWR_MONTHLY_CASHFLOWS, Decimal("1000"), Decimal("1200"), _T0, _T1),
+            budget_ms=_MWR_LATENCY_BUDGET_MS,
+            n=3,
+            label="mwr regress gate-red",
+        )
 
 
 def test_mwr_with_no_interim_cashflows_matches_simple_return():
@@ -110,8 +121,10 @@ def test_mwr_returns_none_when_start_value_is_not_positive():
     assert mwr([], Decimal("0"), Decimal("1100"), _T0, _T1) is None
 
 
-def test_mwr_red_gate_propagates_npv_assertion(monkeypatch):
-    """계산 오류가 지연 예산 초과로 오인되어 적색 재현을 통과하면 안 된다."""
+def test_mwr_red_gate_propagates_npv_assertion(perf_budget: PerfBudget, monkeypatch):
+    """계산 오류가 지연 예산 초과로 오인되어 적색 재현을 통과하면 안 된다.
+    _npv가 AssertionError를 raise하면 PerfBudget.assert_within의 단언이
+    아니라 함수 자체의 예외로 올라와야 함을 확인한다."""
     failure = AssertionError("injected NPV calculation failure")
 
     def _broken_npv(rate: Decimal, flows: Sequence[tuple[Decimal, Decimal]]) -> Decimal:
@@ -119,7 +132,12 @@ def test_mwr_red_gate_propagates_npv_assertion(monkeypatch):
 
     monkeypatch.setattr(mwr_module, "_npv", _broken_npv)
     with pytest.raises(AssertionError, match="injected NPV calculation failure") as exc:
-        test_mwr_latency_budget_actually_fails_when_bisection_regresses(monkeypatch)
+        perf_budget.assert_within(
+            lambda: mwr(_MWR_MONTHLY_CASHFLOWS, Decimal("1000"), Decimal("1200"), _T0, _T1),
+            budget_ms=_MWR_LATENCY_BUDGET_MS,
+            n=1,
+            label="mwr npv failure",
+        )
     assert exc.value is failure
 
 
