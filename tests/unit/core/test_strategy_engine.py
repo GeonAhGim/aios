@@ -258,3 +258,22 @@ def test_evaluator_raises_indicator_data_missing_error_continues_evaluation():
 
     assert signal is not None
     assert signal.direction == OrderSide.SELL
+
+
+# ---------------------------------------------------------------------------
+# Numeric performance assertion — evaluate() is on the per-tick hot path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_evaluate_hot_path_performance(perf_budget):
+    """IDLE 진입 평가는 I/O 없는 순수 계산이어야 한다. 200회 평가 배치가
+    500ms 예산 안에 끝나야 한다 (perf_budget 경유 측정)."""
+    engine = StrategyEngine()
+    config = _compile_config()
+
+    def _batch():
+        for i in range(200):
+            engine.evaluate(config, {"RSI": 25.0}, execution_id=i, fsm_state=FSMState.IDLE)
+
+    perf_budget.assert_within(_batch, budget_ms=500.0, n=5, label="evaluate 200 calls")
