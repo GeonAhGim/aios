@@ -201,6 +201,20 @@ def test_user_admin_not_found_maps_to_resource_not_found_before_base():
     assert code == ErrorCode.RESOURCE_NOT_FOUND
 
 
+def test_user_admin_not_found_is_not_auth_required():
+    """negative — UserAdminNotFoundError(404)가 AUTH_REQUIRED(401)로
+    뭉개지면 안 된다(찾을 수 없음이 미인증으로 오인되면 안 됨)."""
+    code, _, _ = map_exception(UserAdminNotFoundError("존재하지 않는 사용자입니다."))
+    assert code != ErrorCode.AUTH_REQUIRED
+
+
+def test_user_admin_not_found_is_not_internal_error():
+    """negative — UserAdminNotFoundError(404)가 INTERNAL_ERROR(500)로
+    뭉개지면 안 된다(클라이언트 오류가 서버 오류로 오인되면 안 됨)."""
+    code, _, _ = map_exception(UserAdminNotFoundError("존재하지 않는 사용자입니다."))
+    assert code != ErrorCode.INTERNAL_ERROR
+
+
 def test_user_admin_base_error_still_maps_to_validation_invalid_field():
     code, _, _ = map_exception(UserAdminError("운영자는 ACTIVE/SUSPENDED로만..."))
     assert code == ErrorCode.VALIDATION_INVALID_FIELD
