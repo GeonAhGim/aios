@@ -90,6 +90,15 @@ async def test_verdict_absent_when_no_risk_decision_row() -> None:
 
     assert cards[0].last_risk_verdict is None
 
+    # 게이트 적색 재현 — 판정 행을 붙여 입력을 망가뜨렸을 때 위 단언이
+    # 실제로 실패하는지 확인한다(단언이 동작한다는 증거).
+    with pytest.raises(AssertionError):
+        service_broken = _service(
+            [_base_row(risk_outcome="ALLOW", risk_reason_codes=[], risk_evaluated_at=_EVALUATED_AT)]
+        )
+        cards_broken = await service_broken.list_for_user(uuid4())
+        assert cards_broken[0].last_risk_verdict is None
+
 
 async def test_verdict_present_with_allow_outcome() -> None:
     """정상 ALLOW 판정 조인 — DoD 케이스 2 (판정 있음)."""
