@@ -9,8 +9,6 @@ DoD: task-9994 (task-6704 고아 산출물 회수 5828 qa-2).
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 from src.core.script.import_.pine.lexer import PineSyntaxError
@@ -68,16 +66,21 @@ def test_transpile_and_verify_propagates_parse_error() -> None:
         transpile_and_verify("this is not valid pine script &&&& invalid")
 
 
-def test_transpile_and_verify_monkeypatch_lexer_raises() -> None:
-    """tokenize 함수를 monkeypatch해 예외를 유발하면 전파된다."""
-    from src.core.script.import_.pine import parser as parser_module
+def test_transpile_and_verify_propagates_lexer_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """lexer.tokenize()를 monkeypatch해 예외를 유발하면 전파된다.
 
-    def _mock_tokenize(_source: str) -> list[str]:
+    parser.py가 `from ...lexer import tokenize`하므로 tokenize는 parser
+    네임스페이스에 바인딩된다. transpile.py가 parser.parse()를 호출하므로
+    parser.tokenize를 패치해야 실제 호출 지점을 건딜 수 있다.
+    """
+    import src.core.script.import_.pine.parser as parser_module
+
+    def _mock_tokenize(_source: str) -> list:
         raise PineSyntaxError("mock lexer failure", 1, 0)
 
-    with patch.object(parser_module, "tokenize", _mock_tokenize):
-        with pytest.raises(PineSyntaxError, match="mock lexer failure"):
-            transpile_and_verify("x = 1")
+    monkeypatch.setattr(parser_module, "tokenize", _mock_tokenize)
+    with pytest.raises(PineSyntaxError, match="mock lexer failure"):
+        transpile_and_verify("x = 1")
 
 
 # ---- 성능 단언: perf_budget 경유 (ADR-2026-09-09-C Decision 1, DSL 컴파일 예산 300ms) ----
@@ -93,7 +96,7 @@ def test_transpile_and_verify_within_dsl_compile_budget(perf_budget: PerfBudget)
         transpile_and_verify(source)
 
     perf_budget.assert_within(
-        _run_once, budget_ms=300.0, label="transpile_and_verify 200-line source"
+        _run_once, budget_ms=300.0, label="transpile_and_verify 60-line source"
     )
 
 
@@ -101,31 +104,46 @@ def test_transpile_and_verify_within_dsl_compile_budget(perf_budget: PerfBudget)
 
 
 def test_transpile_and_verify_passes_simple_arithmetic() -> None:
-    """정상적인 산술식 변환이 검증 단계를 통과한다."""
+    """정상적인 산술식 변환이 검증 단계를 통과하고 IR에 store 명령이 들어간다."""
     result = transpile_and_verify("x = 1 + 2")
-    assert result is not None
-    assert result.program is not None
-    assert result.ir is not None
-    assert len(result.ir_bytes) > 0
+    assert len(result.program.decls) == 1
+    decl = result.program.decls[0]
+    assert decl.kind == "let"
+    assert decl.name == "x"
+    assert len(result.ir.instrs) > 0
+    # 같은 입력에 대해 두 번 변환하면 ir_bytes가 동일해야 한다 (결정론).
+    result2 = transpile_and_verify("x = 1 + 2")
+    assert result.ir_bytes == result2.ir_bytes
 
 
 def test_transpile_and_verify_passes_ta_call() -> None:
-    """ta.sma(...) 변환이 검증 단계를 통과한다."""
+    """ta.sma(...) 변환이 검증 단계를 통과하고 IR에 ta.sma 호출이 들어간다."""
     result = transpile_and_verify("sma = ta.sma(close, 20)")
-    assert result is not None
-    assert result.program is not None
-    assert result.ir is not None
+    assert len(result.program.decls) == 2  # close OHLCV auto-inject + let
+    let_decl = result.program.decls[-1]
+    assert let_decl.kind == "let"
+    assert let_decl.name == "sma"
+    assert len(result.ir.instrs) > 0
 
 
 def test_transpile_and_verify_passes_strategy_entry() -> None:
-    """strategy.entry(...) 변환이 검증 단계를 통과한다."""
+    """strategy.entry(...) 변환이 검증 단계를 통과하고 OrderDecl이 들어간다."""
     result = transpile_and_verify('strategy.entry("Long", 1, qty=2)')
-    assert result is not None
-    assert result.program is not None
+    assert len(result.program.decls) == 1
+    decl = result.program.decls[0]
+    assert decl.kind == "order"
+    assert len(result.ir.instrs) > 0
 
 
 def test_transpile_and_verify_passes_plot() -> None:
-    """plot(...) 문장이 검증 단계를 통과한다."""
+    """plot(...) 문장이 검증 단계를 통과하고 PlotDecl이 들어간다.
+
+    close는 OHLCV 미선언 자동 inject 대상이므로 InputDecl + PlotDecl의 2건이다.
+    """
     result = transpile_and_verify("plot(close)")
-    assert result is not None
-    assert result.program is not None
+    assert len(result.program.decls) == 2
+    input_decl, plot_decl = result.program.decls
+    assert input_decl.kind == "input"
+    assert input_decl.name == "close"
+    assert plot_decl.kind == "plot"
+    assert len(result.ir.instrs) > 0
