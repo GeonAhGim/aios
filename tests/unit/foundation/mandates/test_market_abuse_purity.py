@@ -69,3 +69,73 @@ def test_detect_repeated_calls_perf_budget(perf_budget):
     ]
     window = _window(fills=fills)
     perf_budget.assert_within(lambda: detect(window, {}), budget_ms=500, label="detect(100 fills)")
+
+
+# ---------------------------------------------------------------------------
+# Negative tests (D2): invalid/corrupted inputs must not produce false negatives
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.negative
+def test_detect_fills_none_fails_closed_with_data_missing():
+    """CM-10 I-02: fills가 None이면 각 패턴별 DATA_MISSING 히트 3개를 반환한다.
+    detect()는 None을 iterable로 취급해 crash하지 않고 fail-closed해야 한다."""
+    window = _window(fills=None)
+    hits = detect(window, {})
+    assert len(hits) == 3
+    assert all(h.reason_code == REASON_DATA_MISSING for h in hits)
+
+
+@pytest.mark.negative
+def test_detect_fill_missing_executed_at_returns_data_missing_hit():
+    """CM-10 I-02: fill dict에 executed_at이 없으면 ArithmeticError/KeyError가
+    _safe()로 포착되어 DATA_MISSING 히트로Surface된다. silent gap이 아니다."""
+    fills: list[dict[str, object]] = [_fill(fill_id="f1")]
+    # Remove executed_at to simulate corrupted data
+    fills[0].pop("executed_at", None)
+    hits = detect(_window(fills=fills), {})
+    assert any(h.reason_code == REASON_DATA_MISSING for h in hits)
+
+
+@pytest.mark.negative
+def test_detect_different_tenants_no_false_wash_trade():
+    """CM-10 Pattern 1 negative: 서로 다른 tenant의 fill은 같은 owner라도
+    wash trade로 오인되지 않는다. false positive는 금지."""
+    fills = [
+        _fill(fill_id="f1", side="BUY", owner_id="owner-1", tenant_id="tenant-a"),
+        _fill(fill_id="f2", side="SELL", owner_id="owner-1", tenant_id="tenant-b"),
+    ]
+    hits = detect(_window(fills=fills), {})
+    assert all(h.pattern_id != PATTERN_WASH_TRADE for h in hits)
+
+
+@pytest.mark.negative
+def test_detect_different_instruments_no_false_wash_trade():
+    """CM-10 Pattern 1 negative: 서로 다른 instrument의 fill은 wash trade가
+    아니다. false positive를 적발한다."""
+    fills = [
+        _fill(fill_id="f1", side="BUY", instrument_id="005930"),
+        _fill(fill_id="f2", side="SELL", instrument_id="105560"),
+    ]
+    hits = detect(_window(fills=fills), {})
+    assert all(h.pattern_id != PATTERN_WASH_TRADE for h in hits)
+
+
+@pytest.mark.negative
+def test_detect_same_side_no_false_wash_trade():
+    """CM-10 Pattern 1 negative: 같은 방향(BUY/BUY 또는 SELL/SELL) fill은
+    wash trade 패턴에 매칭되지 않는다."""
+    fills = [
+        _fill(fill_id="f1", side="BUY"),
+        _fill(fill_id="f2", side="BUY"),
+    ]
+    hits = detect(_window(fills=fills), {})
+    assert all(h.pattern_id != PATTERN_WASH_TRADE for h in hits)
+
+
+@pytest.mark.negative
+def test_detect_empty_fills_list_returns_no_hits():
+    """CM-10: fills가 빈 리스트이면 DATA_MISSING이 아니라 빈 결과([])를
+    반환한다. 빈 리스트는 '데이터 없음'이 아니라 '검찰 대상 없음'이다."""
+    hits = detect(_window(fills=[]), {})
+    assert hits == []
