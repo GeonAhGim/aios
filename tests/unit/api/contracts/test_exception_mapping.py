@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 
 from src.api.contracts.error_codes import ErrorCode
@@ -124,21 +126,16 @@ def test_non_exception_string_falls_through_to_internal_error():
 
 
 def test_exception_with_broken_str_raises_type_error():
-    """부정: 예외의 __str__이 문자열 외 값을 반환하면 INTERNAL_ERROR로
-    격리되지 않고 TypeError가 전파된다 — 이는 map_exception의 한계."""
+    """부정: 예외의 __str__이 문자열 외 값을 반환하면 str(exc)가 TypeError를
+    던지고 map_exception은 이를 INTERNAL_ERROR로 격리하지 않고 그대로 전파한다
+    — 이는 map_exception의 한계(격리는 호출 측 미들웨어 몫)."""
 
-    # Built-in TypeError를 직접 사용하여 __str__이 깨진 예외를 시뮬레이션.
-    # Built-in TypeError.__str__은 항상 문자열을 반환하므로 직접 예외를
-    # 일으키는 대신, raise TypeError()를 통해 __str__이 깨진 상황을 테스트한다.
-    try:
-        raise TypeError("broken str") from None
-    except TypeError as exc:
-        # TypeError는 Exception의 서브클래스이므로 EXCEPTION_MAP에 없으면
-        # INTERNAL_ERROR로 떨어진다 — 이 테스트는 __str__이 정상인 경우의
-        # 기본 동작 확인. broken __str__은 Built-in만 일으키므로 별도 테스트 불가.
-        code, message, _ = map_exception(exc)
-        assert code == ErrorCode.INTERNAL_ERROR
-        assert message == "broken str"
+    class BrokenStr(AuthError):
+        def __str__(self) -> str:
+            return cast(str, 42)
+
+    with pytest.raises(TypeError):
+        map_exception(BrokenStr("ignored"))
 
 
 def test_exception_with_empty_message_preserves_empty_in_message():
