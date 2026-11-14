@@ -113,6 +113,56 @@ def test_actual_manifest_and_codebase_pass_self_regression() -> None:
 # ── Negative tests (D2: ≥3) ─────────────────────────────────────────────────
 
 
+def test_negative_missing_all_five_but_one_layer(tmp_path: Path) -> None:
+    """Negative: exactly one layer missing → missing_layers returns that single name."""
+    ctx_dir = _make_context(tmp_path, "widget", ("domain", "application", "adapters", "contracts"))
+    assert check_zone_manifest.missing_layers(ctx_dir) == ["ports"]
+
+
+def test_negative_missing_layers_returns_only_actual_absent(tmp_path: Path) -> None:
+    """Negative: present layers must never appear in the missing list — ensures
+    the check does not false-positive on directories that exist."""
+    ctx_dir = _make_context(tmp_path, "widget", ("domain", "ports"))
+    missing = check_zone_manifest.missing_layers(ctx_dir)
+    assert "domain" not in missing
+    assert "ports" not in missing
+    assert "application" in missing
+    assert "adapters" in missing
+    assert "contracts" in missing
+
+
+def test_negative_scaffold_reasons_non_dict_reason_value_fails(tmp_path: Path) -> None:
+    """Negative: scaffold_reasons[ctx] is an integer (not str or list) — must
+    still be treated as a gap, not silently passed."""
+    _make_context(tmp_path, "widget", ("domain", "application"))
+    manifest: dict[str, object] = {"scaffold_reasons": {"widget": 42}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    assert len(problems) == 1
+    assert "widget" in problems[0]
+
+
+def test_negative_missing_layers_partial_overlap_with_reason(tmp_path: Path) -> None:
+    """Negative: a context has a scaffold_reasons entry but still missing layers —
+    the reason must be checked, and if blank/missing, it must still fail."""
+    _make_context(tmp_path, "widget", ("domain",))
+    manifest: dict[str, object] = {"scaffold_reasons": {"widget": ""}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    assert len(problems) == 1
+    assert "widget" in problems[0]
+    assert "application" in problems[0]
+
+
+def test_negative_foundation_context_dirs_filters_pycache(tmp_path: Path) -> None:
+    """Negative: __pycache__ under src/foundation/ must be filtered out by
+    foundation_context_dirs — it is not a bounded context."""
+    (tmp_path / "src" / "foundation" / "__pycache__").mkdir(parents=True, exist_ok=True)
+    _make_context(tmp_path, "widget", ("domain", "application", "ports", "adapters", "contracts"))
+    dirs = check_zone_manifest.foundation_context_dirs(tmp_path)
+    names = [d.name for d in dirs]
+    assert "__pycache__" not in names
+    assert "widget" in names
+
+
 def test_missing_layers_empty_list_when_all_present(tmp_path: Path) -> None:
     """Negative: all five layers present → missing_layers returns []."""
     ctx_dir = _make_context(
