@@ -18,6 +18,7 @@ from src.core.script.import_.pine.transpile import (
     PineTranspileError,
     transpile_and_verify,
 )
+from tests.conftest import PerfBudget
 
 # ---- negative test: 불변식 위반 입력 거부 ----
 
@@ -77,6 +78,23 @@ def test_transpile_and_verify_monkeypatch_lexer_raises() -> None:
     with patch.object(parser_module, "tokenize", _mock_tokenize):
         with pytest.raises(PineSyntaxError, match="mock lexer failure"):
             transpile_and_verify("x = 1")
+
+
+# ---- 성능 단언: perf_budget 경유 (ADR-2026-09-09-C Decision 1, DSL 컴파일 예산 300ms) ----
+
+
+@pytest.mark.perf
+def test_transpile_and_verify_within_dsl_compile_budget(perf_budget: PerfBudget) -> None:
+    """단일 문장 변환+검증이 DSL 컴파일 예산 300ms 안에 드는지 확인한다."""
+    # series 상한(max_series=64) 안에 머물도록 60줄 산술식만 쓴다.
+    source = "\n".join(f"v_{i} = close + {i}" for i in range(60))
+
+    def _run_once() -> None:
+        transpile_and_verify(source)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=300.0, label="transpile_and_verify 200-line source"
+    )
 
 
 # ---- 긍정 테스트: 정상 변환 + 검증 통과 ----
