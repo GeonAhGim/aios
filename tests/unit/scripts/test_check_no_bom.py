@@ -184,7 +184,7 @@ def test_find_bom_files_skips_files_that_raise_OSError(tmp_path, monkeypatch, ca
 def test_gate_red_reproduction_bom_in_python_file(tmp_path, capsys):
     """BOM이 심어진 .py 파일을 --repo에 두고 main()이 FAIL + 파일명을 출력하는지
     망가진 입력으로 직접 재현한다. --repo=tmp_path/src/a.py (BOM 파일)를
-    스캔하면 rc=1, 출력에 'a.py'와 'FAIL'이 함께Must 나온다.
+    스캔하면 rc=1, 출력에 'a.py'와 'FAIL'이 함께 나온다.
     """
     target = _write_bytes(tmp_path / "src" / "a.py", BOM + b"x = 1\n")
     assert target.read_bytes()[: len(BOM)] == BOM
@@ -218,7 +218,7 @@ def test_gate_red_reproduction_bom_in_tsx_file(tmp_path, capsys):
 
 def test_gate_red_reproduction_multiple_bom_files_report_count(tmp_path, capsys):
     """여러 BOM 파일이 있을 때 main()이 위반 수를 정확히 세어 출력하는지
-    망가진 입력으로 직접 재현한다. 3개 파일에 BOM을 심으면 '3건'이Must 나온다.
+    망가진 입력으로 직접 재현한다. 3개 파일에 BOM을 심으면 '3건'이 나온다.
     """
     _write_bytes(tmp_path / "src" / "a.py", BOM + b"1\n")
     _write_bytes(tmp_path / "tests" / "b.py", BOM + b"2\n")
