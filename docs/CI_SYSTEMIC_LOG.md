@@ -3955,3 +3955,8 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - `git log -- scripts/replay_verify.py src/core/eventstore src/services/oms` 최근 변경은 스타일/번역/StrEnum 전환뿐이고 최근 커밋(ledger 테스트·format)은 이 경로를 건드리지 않는다.
 - 로컬 재현(aios_test_backend_2): `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/test_replay_verify{,_order_chain}.py` **58 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**.
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인; 58 passed 수치로 대체).
+
+## task-25004 — format 24h 4회 반복 systemic 묶음 (task-24853/24995/24998/24999), 설계 결함 재조사 (2026-11-14)
+- 같은 단계의 이전 조사 task-24841(#task-23907 항목)과 결론이 같다: `scripts/check_format.py`는 `ruff format --check tests src scripts`(생성기 출력 `src/exchanges/kis/generated` 제외)를 그대로 호출하는 얇은 래퍼이고 임계값·기준선이 없다 — 회귀 판정 로직 결함 불가. 현재 HEAD에서 `check_format.py` exit 0(3609 files already formatted). 제외 없이 직접 `ruff format --check`를 돌리면 36개가 뜨는데 전부 의도적으로 제외된 generated 디렉터리다.
+- 반복 유입 원인: 워커가 테스트 파일(예: `tests/unit/skills/test_skill_refs_depth1.py`, `5e47fe1c5`)을 편집한 뒤 커밋 전 `ruff format --check`를 돌리지 않음. 게이트 설계 결함 아님.
+- 판정: 검사 규칙·임계값·기준선 변경 없음(DECISION_GUIDELINES B-2). 코드 변경 없음(로그 append만). D2: N/A(조사·기록 리프).
