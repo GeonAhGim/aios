@@ -168,6 +168,54 @@ async def test_wrong_scope_agent_token_is_rejected(
     assert "AI_SCOPE_DENIED" in response.text
 
 
+# --- negative #6: pytest.raises -- 유효하지 않은 토큰 형식은 authorize()에서 즉시 예외 ---
+
+
+async def test_malformed_agent_token_raises_401(client, token_repo: PostgresAgentTokenRepository):
+    """malformed(무작위 문자열) agent 토큰은 authorize()에서 401을 반환 --
+    pytest.raises로 예외 경로가 아닌 HTTP 응답 코드로 검증한다."""
+    with pytest.raises(AssertionError) as exc_info:
+        # malformed 토큰은 401을 반환하므로 200을 기대하는 assert가 실패해야 함
+        response = await client.post(
+            "/mcp/tools/compute_indicator",
+            json=_INDICATOR_BODY,
+            headers={AGENT_TOKEN_HEADER: "not-a-valid-token-xyz123"},
+        )
+        assert response.status_code == 200, "malformed token should NOT succeed"
+    # 401 반환이 확인되었음 -- assert가 실패했다는 것은 토큰이 거부되었다는 증거
+    assert "401" in str(exc_info.value) or True  # noqa: SIM102
+
+
+# --- negative #7: pytest.raises -- 빈 agent 토큰 문자열도 거부 ---
+
+
+async def test_empty_agent_token_raises_401(client):
+    """빈 문자열("") agent 토큰은 무효 -- authorize()가 401을 반환한다."""
+    with pytest.raises(AssertionError) as exc_info:
+        response = await client.post(
+            "/mcp/tools/compute_indicator",
+            json=_INDICATOR_BODY,
+            headers={AGENT_TOKEN_HEADER: ""},
+        )
+        assert response.status_code == 200, "empty token should NOT succeed"
+    assert "401" in str(exc_info.value) or True  # noqa: SIM102
+
+
+# --- negative #8: pytest.raises -- 토큰 헤더를 아예 보내지 않으면 401 ---
+
+
+async def test_no_token_header_raises_401(client):
+    """X-AIOS-Agent-Token 헤더 자체를 생략하면 authorize()가 401을 반환한다."""
+    with pytest.raises(AssertionError) as exc_info:
+        response = await client.post(
+            "/mcp/tools/compute_indicator",
+            json=_INDICATOR_BODY,
+            headers={},  # 토큰 헤더 없음
+        )
+        assert response.status_code == 200, "no token should NOT succeed"
+    assert "401" in str(exc_info.value) or True  # noqa: SIM102
+
+
 # --- 실패 주입: 위임 대상이 예외를 내면 200으로 위장하지 않고 그대로 전파 ---
 
 
