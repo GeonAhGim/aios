@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.support import perf_inject
+from tests.support.perf_budget import PerfBudget
 from tests.unit.skills import test_skill_refs as m
 
 
@@ -190,3 +192,70 @@ class TestGateRedReproduction:
                 assert tier_val in m.VALID_TIERS, (
                     f"{skill_path.parent.name}: tier={tier_val} 유효하지 않음"
                 )
+
+
+@pytest.mark.parametrize("damage", ["tier", "citation", "reference"])
+def test_gate_red_corrupted_skill(tmp_path: Path, damage: str) -> None:
+    """Run the actual gate before and after corrupting one valid skill input."""
+    skill = tmp_path / "review-ops" / "SKILL.md"
+    skill.parent.mkdir()
+    valid = (
+        "---\npaths: [scripts/**]\ntier: [S]\naxis: ops\n---\n"
+        "## 체크리스트\n1. 확인 [근거: I-01] "
+        "[검사: tests/unit/skills/test_skill_refs.py]\n"
+    )
+    skill.write_text(valid, encoding="utf-8")
+    m.test_frontmatter_loadable_by_review_plan(skill)
+    m.test_checklist_items_have_resolvable_citations(skill)
+    if damage == "tier":
+        broken = valid.replace("tier: [S]\n", "")
+        gate = m.test_frontmatter_loadable_by_review_plan
+        message = "tier는"
+    elif damage == "citation":
+        broken = valid.replace("[근거: I-01]", "근거 없음")
+        gate = m.test_checklist_items_have_resolvable_citations
+        message = "태그가 없다"
+    else:
+        broken = valid.replace("I-01", "I-99")
+        gate = m.test_checklist_items_have_resolvable_citations
+        message = "해석 불가"
+    skill.write_text(broken, encoding="utf-8")
+    with pytest.raises(AssertionError, match=message):
+        gate(skill)
+
+
+@pytest.mark.perf
+def test_resolve_check_best_of_and_virtual_10x_gate_red(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reuse the unchanged 500ms/300-check budget above; inject 10x that budget.
+
+    best_of measures the same workload for both green and red runs. The delay
+    is 5000ms per workload, divided across its 300 real resolver calls.
+    """
+    checks = [
+        "scripts/check_zone_manifest.py",
+        "tests/unit/skills/test_skill_refs.py",
+        "tests/unit/skills/test_restored_deepen.py",
+    ]
+
+    def workload() -> None:
+        for _ in range(100):
+            for check in checks:
+                assert m._resolve_check(check)
+
+    def gate() -> None:
+        sample = perf_budget.best_of(workload, n=3, warmup=1)
+        assert sample.cpu_ms < 500, perf_budget.describe(sample, budget_ms=500)
+
+    perf_inject.reset_virtual_totals()
+    try:
+        gate()
+        monkeypatch.setattr(
+            m, "_resolve_check",
+            perf_inject.virtual_delayed_sync(m._resolve_check, 5.0 / 300),
+        )
+        with pytest.raises(AssertionError, match="budget<500"):
+            gate()
+    finally:
+        perf_inject.reset_virtual_totals()
