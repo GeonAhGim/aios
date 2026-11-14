@@ -114,7 +114,12 @@ def test_slice_count_over_500_cap_is_rejected() -> None:
         plan_vwap_schedule(parent, volume_profile=_flat_profile(501))
 
 
-@pytest.mark.parametrize("status", TERMINAL_ORDER_STATUSES, ids=str)
+# frozenset은 프로세스마다 순회 순서가 달라(해시 무작위화) xdist 워커 간 수집 순서가 어긋나 전 워커가
+# "Different tests were collected"로 죽는다 -- 정렬해 결정적으로 만든다.
+_TERMINAL_SORTED = sorted(TERMINAL_ORDER_STATUSES, key=str)
+
+
+@pytest.mark.parametrize("status", _TERMINAL_SORTED, ids=str)
 def test_terminal_parent_status_is_rejected(status: OrderStatus) -> None:
     """Every terminal status must cause plan_vwap_schedule to raise ParentTerminalError."""
     parent = _parent(status=status)
