@@ -85,6 +85,42 @@ def test_to_candle_records_rejects_mismatched_column_lengths() -> None:
         to_candle_records(short_close, _key())
 
 
+def test_to_candle_records_rejects_ts_longer_than_open_column() -> None:
+    """negative test: ts가 open보다 길면(행 수 기준 ts) 짝이 없는 행을
+    거부한다 — 길이 검사가 ts 쪽 불일치도 잡는지 확인한다."""
+    columns = _columns(3)
+    long_ts = CandleColumns(
+        ts=[*columns.ts, columns.ts[-1] + timedelta(minutes=1)],
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
+    )
+
+    with pytest.raises(MismatchedColumnLengthError):
+        to_candle_records(long_ts, _key())
+
+
+def test_to_candle_records_rejects_quote_volume_length_mismatch() -> None:
+    """negative test: quote_volume만 길이가 어긋나도 전체 변환을 거부한다.
+    선택 컬럼(None 허용)이라도 길이 불일치는 행을 어긋나게 만든다."""
+    columns = _columns(3)
+    extra_quote = CandleColumns(
+        ts=columns.ts,
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=[None, None, None, None],
+    )
+
+    with pytest.raises(MismatchedColumnLengthError):
+        to_candle_records(extra_quote, _key())
+
+
 def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
     """negative test: model_construct는 검증.skip하므로 None이 Decimal
     필드에混入되어도 즉시 예외를 던지지 않는다. downstream consumer가
