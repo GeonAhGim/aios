@@ -12,6 +12,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from src.data.models.base import AssetClass, Currency, Money
 
@@ -20,7 +21,7 @@ from src.data.models.base import AssetClass, Currency, Money
 
 def test_money_string_currency_rejected() -> None:
     """Money must reject string currency codes — only Currency enum allowed."""
-    with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
+    with pytest.raises(ValidationError):
         Money.model_validate({"amount": Decimal("100"), "currency": "USD"})
 
 
