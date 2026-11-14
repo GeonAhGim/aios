@@ -66,92 +66,63 @@ def test_candle_columns_len_matches_ts_length() -> None:
 
 # ── negative tests ───────────────────────────────────────────────────────────
 
+# 삭제된 테스트 (리뷰 25095):
+# - test_to_candle_records_rejects_negative_prices: 이름과 달리 수용을 단언.
+#   음수 가격 거부는 ohlc_sanity.check_candle(쓰기 시점) 책임. candle_columns은
+#   model_construct로 값 검증을 건너뛰도록 설계됨(candle_columns.py:71-74).
+# - test_to_candle_records_rejects_zero_volume: 같은 이유로 삭제.
+#   volume=0 수용을 "거부"라는 이름으로 두면 안 됨.
+# - test_to_candle_records_passes_none_to_model_construct_unchanged:
+#   fail-open 동작을 고정하는 테스트. None 전달 테스트는 ohlc_sanity 책임.
+
 
 def test_to_candle_records_rejects_mismatched_column_lengths() -> None:
     """negative test: 배열 길이가 다르면 조용히 어긋난 행을 짝짓지 않고
     거부한다(fail-closed)."""
     columns = _columns(3)
-    short_close = CandleColumns(
-        ts=columns.ts,
-        open=columns.open,
-        high=columns.high,
-        low=columns.low,
-        close=columns.close[:-1],
-        volume=columns.volume,
-        quote_volume=columns.quote_volume,
+
+    # 각 필드별로 1개 짧게 만든 배열을 테스트한다.
+    @pytest.mark.parametrize(
+        "field,shorten",
+        [
+            ("open", lambda c: c.open[:-1]),
+            ("high", lambda c: c.high[:-1]),
+            ("low", lambda c: c.low[:-1]),
+            ("close", lambda c: c.close[:-1]),
+            ("volume", lambda c: c.volume[:-1]),
+            ("quote_volume", lambda c: c.quote_volume[:-1]),
+        ],
     )
+    def _short_field(columns: CandleColumns, field: str, shorten) -> CandleColumns:
+        return CandleColumns(
+            ts=columns.ts,
+            open=shorten(columns) if field != "open" else columns.open,
+            high=shorten(columns) if field != "high" else columns.high,
+            low=shorten(columns) if field != "low" else columns.low,
+            close=shorten(columns) if field != "close" else columns.close,
+            volume=shorten(columns) if field != "volume" else columns.volume,
+            quote_volume=shorten(columns) if field != "quote_volume" else columns.quote_volume,
+        )
 
-    with pytest.raises(MismatchedColumnLengthError):
-        to_candle_records(short_close, _key())
-
-
-def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
-    """negative test: model_construct는 검증.skip하므로 None이 Decimal
-    필드에混入되어도 즉시 예외를 던지지 않는다. downstream consumer가
-    이를 검증해야 함 — candle_columns 자체는 pure data holder이므로
-    값 검증을 하지 않는다. 이 테스트는 그 동작을 명시적으로 확인한다."""
-    columns = _columns(3)
-    corrupted = CandleColumns(
-        ts=columns.ts,
-        open=[None, None, None],  # type: ignore[list-item]
-        high=columns.high,
-        low=columns.low,
-        close=columns.close,
-        volume=columns.volume,
-        quote_volume=columns.quote_volume,
-    )
-
-    records = to_candle_records(corrupted, _key())
-    assert len(records) == 3
-    # None이 그대로 전달됨 — downstream이 검증해야 함
-    assert records[0].open is None
-
-
-def test_to_candle_records_rejects_negative_prices() -> None:
-    """negative test: 고가 < 저가 또는 고가 < 오픈 등 OHLC 불변식
-    위반을 기록하는 경우 — candle_columns 자체는 값 범위를 검증하지
-    않지만, 호출 측(ohlc_sanity)을 우회한 음수/불일치 가격이
-    model_construct를 거칠 때 어떤 행동을 하는지 명시적으로 확인한다.
-
-    candle_columns은 pure data holder이므로 값 검증을 하지 않고
-    records를 반환한다 — 이 테스트는 그 동작을 명시적으로 검증한다.
-    """
-    key = _key()
-    columns = CandleColumns(
-        ts=[datetime(2026, 1, 1, tzinfo=UTC)],
-        open=[Decimal(100)],
-        high=[Decimal(90)],  # high < open — 이상하지만 candle_columns은 검증 안 함
-        low=[Decimal(80)],
-        close=[Decimal(95)],
-        volume=[Decimal(10)],
-        quote_volume=[None],
-    )
-
-    # candle_columns은 값 검증 없이 records를 반환 — 명시적 기대
-    records = to_candle_records(columns, key)
-    assert len(records) == 1
-    assert records[0].open == Decimal(100)
-    assert records[0].high == Decimal(90)
-
-
-def test_to_candle_records_rejects_zero_volume() -> None:
-    """negative test: volume=0은 기술적으로 유효한 Decimal이므로
-    candle_columns은 이를 거부하지 않는다. 호출 측에서 검증해야 함.
-    이 테스트는 candle_columns의 검증 범위를 명시한다."""
-    key = _key()
-    columns = CandleColumns(
-        ts=[datetime(2026, 1, 1, tzinfo=UTC)],
-        open=[Decimal(100)],
-        high=[Decimal(110)],
-        low=[Decimal(90)],
-        close=[Decimal(105)],
-        volume=[Decimal(0)],
-        quote_volume=[None],
-    )
-
-    records = to_candle_records(columns, key)
-    assert len(records) == 1
-    assert records[0].volume == Decimal(0)
+    for field, shorten in [
+        ("open", lambda c: c.open[:-1]),
+        ("high", lambda c: c.high[:-1]),
+        ("low", lambda c: c.low[:-1]),
+        ("close", lambda c: c.close[:-1]),
+        ("volume", lambda c: c.volume[:-1]),
+        ("quote_volume", lambda c: c.quote_volume[:-1]),
+    ]:
+        short_col = CandleColumns(
+            ts=columns.ts,
+            open=shorten(columns) if field == "open" else columns.open,
+            high=shorten(columns) if field == "high" else columns.high,
+            low=shorten(columns) if field == "low" else columns.low,
+            close=shorten(columns) if field == "close" else columns.close,
+            volume=shorten(columns) if field == "volume" else columns.volume,
+            quote_volume=shorten(columns) if field == "quote_volume" else columns.quote_volume,
+        )
+        with pytest.raises(MismatchedColumnLengthError):
+            to_candle_records(short_col, _key())
 
 
 # ── failure injection tests ──────────────────────────────────────────────────
@@ -225,7 +196,11 @@ def test_to_candle_records_propagates_duration_return_type_error(
 @pytest.mark.perf
 def test_to_candle_records_performance_under_10k_rows(perf_budget: PerfBudget) -> None:
     """성능 단언: 10,000개 행을 to_candle_records로 변환하는 데
-    200ms 미만이어야 한다(컬럼 기반 접근의 성능 목표, CI 병렬 실행 안정화)."""
+    200ms 미만이어야 한다(컬럼 기반 접근의 성능 목표, CI 병렬 실행 안정화).
+
+    PerfBudget.assert_within 은 sample.cpu_ms 를 단언한다(wall-clock 아님).
+    perf marker 는 pyproject.toml addopts 에서 제외되지 않으므로 기본 실행에 포함됨.
+    """
     n = 10_000
     base = datetime(2026, 1, 1, tzinfo=UTC)
     columns = CandleColumns(
