@@ -21,8 +21,8 @@ function multiPageState() {
  * Gate-red: last-page state should disable next button.
  * Throws if next button is NOT disabled (i.e. the component is broken).
  */
-function expectNextDisabled(state: ReturnType<typeof derivePageState>) {
-  const btn = screen.getByRole("button", { name: "다음" });
+function expectNextDisabled(_state: ReturnType<typeof derivePageState>) {
+  const btn = screen.getByRole<HTMLButtonElement>("button", { name: "다음" });
   if (!btn.disabled) {
     throw new Error(
       `gate red: next button should be disabled on last page but is active`,

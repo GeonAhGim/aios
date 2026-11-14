@@ -1,6 +1,6 @@
 import "../../i18n";
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
@@ -51,7 +51,7 @@ let timelineResult: {
 
 let verifyResult: {
   mutate: (tenantId?: string) => void;
-  mutateAsync: Promise<unknown>;
+  mutateAsync: (tenantId?: string) => Promise<unknown>;
   isPending: boolean;
   isSuccess: boolean;
   isError: boolean;

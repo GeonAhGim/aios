@@ -1,8 +1,8 @@
 import "../../i18n";
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
 // Reuses the same import/mock skeleton as AppShell.test.tsx.

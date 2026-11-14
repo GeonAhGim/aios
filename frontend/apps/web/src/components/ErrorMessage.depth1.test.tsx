@@ -1,19 +1,25 @@
 import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { RetryClassification } from "@aios/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ErrorMessage } from "./ErrorMessage";
 
 // ── mock shared-types ────────────────────────────────────────────────────────
-const mockClassifyRetry = vi.hoisted(() => vi.fn(() => ({ kind: "none" as const })));
-const mockGetApiErrorMessage = vi.hoisted(() => vi.fn(() => "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요."));
+const mockClassifyRetry = vi.hoisted(() =>
+  vi.fn((_err: unknown): RetryClassification => ({ kind: "none" })),
+);
+const mockGetApiErrorMessage = vi.hoisted(() =>
+  vi.fn((_code?: string | null, _fallback?: string | null): string => "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요."),
+);
 
 vi.mock("@aios/shared-types", async () => {
   const actual = await vi.importActual("@aios/shared-types");
   return {
     ...actual,
-    classifyRetry: (...a: unknown[]) => mockClassifyRetry(...a),
-    getApiErrorMessage: (...a: unknown[]) => mockGetApiErrorMessage(...a),
+    classifyRetry: (arg: unknown) => mockClassifyRetry(arg),
+    getApiErrorMessage: (code?: string | null, fallback?: string | null) =>
+      mockGetApiErrorMessage(code, fallback),
   };
 });
 
@@ -105,12 +111,10 @@ describe("ErrorMessage depth1 — performance", () => {
     mockGetApiErrorMessage.mockReturnValue("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.");
     mockClassifyRetry.mockReturnValue({ kind: "none" as const });
 
-    // @ts-expect-error performance.now is available in browsers
     const start = typeof performance !== "undefined" ? performance.now() : 0;
 
     render(<ErrorMessage errorCode="INTERNAL_ERROR" />);
 
-    // @ts-expect-error
     const end = typeof performance !== "undefined" ? performance.now() : 0;
     const elapsed = end - start;
 
@@ -126,7 +130,6 @@ describe("ErrorMessage depth1 — performance", () => {
     mockGetApiErrorMessage.mockReturnValue("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.");
     mockClassifyRetry.mockReturnValue({ kind: "none" as const });
 
-    // @ts-expect-error
     const start = typeof performance !== "undefined" ? performance.now() : 0;
 
     for (let i = 0; i < 100; i++) {
@@ -134,7 +137,6 @@ describe("ErrorMessage depth1 — performance", () => {
       cleanup();
     }
 
-    // @ts-expect-error
     const end = typeof performance !== "undefined" ? performance.now() : 0;
     // performance가 없는 환경에서는 이 단언을 우회
     if (start > 0 && end > 0) {
