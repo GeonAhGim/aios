@@ -3,12 +3,17 @@
 건드리지 않음 — 실제 등록은 이미 main.py에 완료돼 있고, 여기선 이
 함수 자체의 동작만 확인)."""
 
+import pytest
 from fastapi import FastAPI, HTTPException, status
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from src.api.contracts.handlers import install_exception_handlers
+from src.api.contracts import handlers as handlers_module
+from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.handlers import _error_response, install_exception_handlers
 from src.services.auth_service import AuthError
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 class _Body(BaseModel):
@@ -239,3 +244,45 @@ async def test_handler_exception_mapper_failure_yields_500_without_leaking_messa
 
     assert response.status_code == 500
     assert "hunter2" not in response.text
+
+
+# --- performance assertion (D2) ---
+
+
+@pytest.mark.perf
+def test_perf_error_response_within_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언(D2) — _error_response 는 봉투 모델 생성 + JSONResponse 구성만 하는
+    동기 경량 함수다. perf_budget 픽스처(CPU 시간, best-of-5)로 예산을 확인한다."""
+
+    def _build_once() -> object:
+        return _error_response(ErrorCode.RESOURCE_NOT_FOUND, "없음")
+
+    sample = perf_budget.best_of(_build_once, n=5, warmup=1, batch=1)
+
+    budget_ms = 0.5
+    assert sample.cpu_ms < budget_ms, (
+        f"perf_budget exceeded: cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_perf_error_response_goes_red_with_100ms_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): _error_response 에 100ms 가상 지연을 주입하면
+    perf_budget.assert_within 가 AssertionError 로 적색이 되어야 한다 — 단언이
+    실제로 위반을 포착하는지 역으로 증명한다(실제 sleep 없음)."""
+    reset_virtual_totals()
+    delayed = virtual_delayed_sync(_error_response, 0.1)
+    monkeypatch.setattr(handlers_module, "_error_response", delayed)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: handlers_module._error_response(ErrorCode.RESOURCE_NOT_FOUND, "없음"),
+            budget_ms=0.5,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="error_response_100ms_injected",
+        )
