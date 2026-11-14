@@ -34,8 +34,7 @@ class _UnrelatedDependencyError(Exception):
 
 
 def test_unrelated_exception_defaults_to_internal_error_not_an_admin_code():
-    """negative — EXCEPTION_MAP에 없는 예외는 관리자 3경로의 어떤 코드로도
-    새지 않고 fail-closed 기본값(INTERNAL_ERROR)으로 떨어져야 한다."""
+    """negative — EXCEPTION_MAP에 없는 예외는 fail-closed 기본값(INTERNAL_ERROR)."""
     code, _, details = map_exception(_UnrelatedDependencyError("의존성 계약 밖의 예외"))
     assert code == ErrorCode.INTERNAL_ERROR
     assert details == {}
@@ -44,18 +43,15 @@ def test_unrelated_exception_defaults_to_internal_error_not_an_admin_code():
 @pytest.mark.perf
 def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatch):
     """negative — 부모(UserAdminError)는 자식(UserAdminNotFoundError)의
-    404 코드를 절대 받으면 안 된다(등록 순서가 맞아도 타입 자체가 다르므로).
+    404 코드를 절대 받지 않는다.
 
-    perf — map_exception의 단일 호출 CPU는 Windows 양자화 tick(≈15.6ms)보다
-    훨씬 작으므로 best_of(n=5)로 최소값을 꺼내 tick 흔들림을 걷어낸다.
-    예산 1ms(인메모리 리스트 스캔 1회 기준 여유 있는 상한).
-    virtual_delayed_sync로 10ms를 주입하면 best_of 측정치가 1ms를 넘어
-    AssertionError로 적색 게이트가 확인된다."""
+    perf — best_of(n=5) 최소값으로 Windows tick(≈15.6ms) 흔들림을 걷어낸다.
+    예산 1ms. virtual_delayed_sync로 10ms 주입 시 AssertionError 적색 확인."""
     from tests.support.perf_inject import virtual_delayed_sync
 
     exc = UserAdminError("운영자는 ACTIVE/SUSPENDED로만...")
 
-    # 1) 정상 입력 — best_of 최소값이 예산을 지키는지 확인
+    # 1) 정상 — best_of 최소값이 예산을 지키는지 확인
     code, _, _ = map_exception(exc)
     assert code != ErrorCode.RESOURCE_NOT_FOUND
 
@@ -218,6 +214,35 @@ def test_user_admin_not_found_is_not_internal_error():
 def test_user_admin_base_error_still_maps_to_validation_invalid_field():
     code, _, _ = map_exception(UserAdminError("운영자는 ACTIVE/SUSPENDED로만..."))
     assert code == ErrorCode.VALIDATION_INVALID_FIELD
+
+
+def test_user_admin_base_error_does_not_map_to_state_invalid_transition():
+    """negative — UserAdminError(부모)가 STATE_INVALID_TRANSITION(409)로
+    뭉개지면 안 된다."""
+    code, _, _ = map_exception(UserAdminError("운영자는 ACTIVE/SUSPENDED로만..."))
+    assert code != ErrorCode.STATE_INVALID_TRANSITION
+
+
+def test_user_admin_base_error_does_not_map_to_auth_required():
+    """negative — UserAdminError(부모)가 AUTH_REQUIRED(401)로
+    뭉개지면 안 된다."""
+    code, _, _ = map_exception(UserAdminError("운영자는 ACTIVE/SUSPENDED로만..."))
+    assert code != ErrorCode.AUTH_REQUIRED
+
+
+def test_adversarial_user_admin_error_mro_cannot_force_internal_error(monkeypatch):
+    """적대적/I-10 — UserAdminError의 MRO를 _UnrelatedDependencyError와
+    함께 상속받아 조작해도 VALIDATION_INVALID_FIELD 경로는 뚫리지 않는다."""
+    import tests.unit.api.test_exception_registry as mod
+
+    class _HostileMRO(_UnrelatedDependencyError, UserAdminError):
+        pass
+
+    code, _, _ = mod.map_exception(_HostileMRO("MRO 역전 공격"))
+    assert code == ErrorCode.VALIDATION_INVALID_FIELD
+
+    code2, _, _ = mod.map_exception(_UnrelatedDependencyError("순수한 적대적 입력"))
+    assert code2 == ErrorCode.INTERNAL_ERROR
 
 
 def test_verification_not_found_maps_to_resource_not_found_before_base():
