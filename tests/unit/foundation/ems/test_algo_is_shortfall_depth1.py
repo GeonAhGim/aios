@@ -193,24 +193,20 @@ def test_gate_red_negative_participation_cap_passes_without_validation(
     import src.foundation.ems.domain.algo.is_shortfall as is_module
 
     # Patch away the validation so the corrupted cap passes silently
-    original_validate = is_module._validate_participation_cap
-    is_module._validate_participation_cap = lambda cap: None  # type: ignore[assignment]
+    monkeypatch.setattr(is_module, "_validate_participation_cap", lambda cap: None)
 
-    try:
-        parent = _parent(
-            qty=Decimal("1000"),
-            algo=_algo(max_participation_pct=Decimal("10")),
-        )
-        # Corrupt the cap after construction (bypasses Pydantic)
-        object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
-        # Without validation, this should either crash or produce garbage
-        children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
-        # If we reach here, the negative cap was not caught -- check result is nonsensical
-        # A negative cap: cap_qty = 100000 * (-5) / 100 = -50000
-        # max(0, -50000) = 0, so all non-final slices get 0 and tail gets everything
-        assert children[-1].planned_qty == Decimal("1000")
-    finally:
-        is_module._validate_participation_cap = original_validate
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(max_participation_pct=Decimal("10")),
+    )
+    # Corrupt the cap after construction (bypasses Pydantic)
+    object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
+    # Without validation, this should either crash or produce garbage
+    children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
+    # If we reach here, the negative cap was not caught -- check result is nonsensical
+    # A negative cap: cap_qty = 100000 * (-5) / 100 = -50000
+    # max(0, -50000) = 0, so all non-final slices get 0 and tail gets everything
+    assert children[-1].planned_qty == Decimal("1000")
 
 
 # -- perf: local measurement at 500 slices (budget: 25ms, best-of-15) --------
