@@ -190,3 +190,74 @@ class TestGateRedReproduction:
                 assert tier_val in m.VALID_TIERS, (
                     f"{skill_path.parent.name}: tier={tier_val} 유효하지 않음"
                 )
+
+
+class TestAdversarialRefInjection:
+    """적대적 입력 주입 -- 참조 해석이 악의적으로 조작된 입력을 거부하는지 검증.
+
+    D3 adversarial: INVARIANTS.md/I-xx 형식, git SHA, spec anchor 등
+    모든 참조 경로에서 인코딩·경로·레지스트리 우회 시도를 fail-closed한다.
+    """
+
+    def test_resolve_ref_rejects_mixed_case_git_sha(self) -> None:
+        """대소문자 섞인 40자 hex 토큰은 _GIT_SHA_RE 패턴에 안 맞으므로
+        _doc_contains로 떨어져 False -- git SHA는 소문자만 허용된다."""
+        assert m._resolve_ref("DeAdBeEf0123456789012345678901234567890") is False
+
+    def test_resolve_ref_rejects_short_git_sha(self) -> None:
+        """7자 미만 SHA는 _GIT_SHA_RE 패턴에 안 맞으므로 거부된다."""
+        assert m._resolve_ref("abcde") is False
+
+    def test_resolve_ref_rejects_git_sha_with_prefix(self) -> None:
+        """git: 접두사 없이 SHA만 넣으면 _GIT_SHA_RE로 매칭되지만
+        실제 조상 관계가 아니므로 False -- git: 접두사 없이 SHA만 넣는
+        우회 시도는 실패한다."""
+        # 40자 무효 SHA — _doc_contains도 false, _GIT_SHA_RE도 false (0-9a-f만)
+        assert m._resolve_ref("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz") is False
+
+    def test_resolve_ref_rejects_zero_width_chars_in_invariant_id(self) -> None:
+        """I-01 사이에 zero-width space(U+200B)를 섞으면 I-xx 패턴에 안
+        매치되어 거부된다 -- 인코딩 우회 시도."""
+        assert m._resolve_ref("I​01") is False
+
+    def test_resolve_ref_rejects_bom_in_invariant_id(self) -> None:
+        """BOM(U+FEFF)이 앞에 붙은 I-01은 re.fullmatch에 안 매치된다."""
+        assert m._resolve_ref("﻿I-01") is False
+
+    def test_resolve_ref_rejects_newline_in_invariant_id(self) -> None:
+        """I-01 사이에 개행이 섞이면 패턴 매칭이 깨져 False."""
+        assert m._resolve_ref("I-\n01") is False
+
+    def test_resolve_ref_rejects_null_byte_in_ref(self) -> None:
+        """null 바이트가 포함된 토큰은 _doc_contains에서 b''로 매칭될
+        가능성이 있으나 INVARIANTS.md 등에 null 바이트가 없으므로 False."""
+        assert m._resolve_ref("I-01\x00") is False
+
+    def test_resolve_check_rejects_path_traversal(self) -> None:
+        """[검사:]에 ../를 섞어 ROOT 밖의 파일을 가리키려 하면
+        _strip_paren이 제거하지 않으므로 target.exists()가 False --
+        경로 탈출 우회 시도 차단."""
+        assert m._resolve_check("../../etc/passwd") is False
+
+    def test_resolve_check_rejects_path_traversal_to_src(self) -> None:
+        """../src/ 로 시작해도 ROOT 외부이므로 False."""
+        assert m._resolve_check("../src/core/strategy/__init__.py") is False
+
+    def test_resolve_check_rejects_null_byte_in_path(self) -> None:
+        """경로에 null 바이트가 있으면 target.exists()가 False."""
+        assert m._resolve_check("tests/unit/skills/\x00test_skill_refs.py") is False
+
+    def test_resolve_ref_rejects_regex_special_chars_in_doc_filename(self) -> None:
+        """REF에 .*)+ 같은 regex 특수 문자가 있으면 _DOC_FILENAME_RE가
+        매칭되지 않아 _doc_contains로 떨어지지만, docs 전체에서 해당
+        고유 토큰이 없으므로 False -- regex injection 우회 시도 차단."""
+        assert m._resolve_ref("INVARIANTS.md.*).+") is False
+
+    def test_resolve_ref_rejects_double_encoded_invariant(self) -> None:
+        """%49-01 같은 URL 인코딩된 I-01은 re.fullmatch에
+        안 매치되고 _doc_contains에서도 docs 전체에 없으므로 False."""
+        assert m._resolve_ref("%49-01") is False
+
+    def test_resolve_check_rejects_crlf_in_path(self) -> None:
+        """경로에 CRLF가 있으면 target.exists()가 False."""
+        assert m._resolve_check("tests/unit/skills/\r\ntest_skill_refs.py") is False
