@@ -121,6 +121,8 @@ class OrderBookState:
 
         bids sorted descending by price, asks ascending.
         """
+        if n < 0:
+            raise ValueError("top_n 은 0 이상이어야 한다")
         top_bids = sorted(self.bids.items(), key=lambda kv: kv[0], reverse=True)[:n]
         top_asks = sorted(self.asks.items(), key=lambda kv: kv[0])[:n]
         return top_bids, top_asks
