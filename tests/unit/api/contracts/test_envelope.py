@@ -117,26 +117,37 @@ class TestNegativeApiErrorMissingFields:
 
 
 class TestFailureInjectionGetRequestIdException:
-    """실패주입: get_current_request_id() 가 예외를 raise 할 때 ok() 는
-    예외를 전파하지 않고 fallback uuid4() 를 생성해야 한다."""
+    """실패주입: envelope 가 쓰는 get_current_request_id() 가 예외를 raise 하면
+    ok() 는 가짜 trace_id 를 만들어 숨기지 않고 예외를 전파해야 한다(fail-closed).
+    None 일 때만 uuid4() 로 떨어지고, 예외는 그 경로를 타지 않는다."""
 
-    @pytest.mark.perf
-    def test_ok_fallback_to_uuid4_when_get_current_request_id_raises(self, monkeypatch):
-        """monkeypatch get_current_request_id → RuntimeError.
-        ok() 가 fallback uuid4() 를 사용해 예외 전파 없이 반환하는지 확인."""
-        from src.core.logging import request_context
+    def test_ok_propagates_when_get_current_request_id_raises(self, monkeypatch):
+        """envelope 모듈이 import 해 쓰는 이름을 직접 패치해야 주입이 실제로 걸린다."""
+        from src.api.contracts import envelope
 
-        monkeypatch.setattr(
-            request_context,
-            "get_current_request_id",
-            lambda: (_ for _ in ()).raise_exception(RuntimeError("request_id_service_down")),
-        )
+        def _boom() -> str | None:
+            raise RuntimeError("request_id_service_down")
 
-        # ok() 가 예외 없이 반환해야 함
-        response = ok(_Payload(value=42))
-        assert response.data.value == 42
-        # trace_id 는 uuid4() fallback — 유효한 UUID 여야 함
-        assert isinstance(response.meta.trace_id, UUID)
+        monkeypatch.setattr(envelope, "get_current_request_id", _boom)
+
+        with pytest.raises(RuntimeError, match="request_id_service_down"):
+            ok(_Payload(value=42))
+
+    def test_ok_does_not_fabricate_trace_id_when_request_id_is_malformed(self, monkeypatch):
+        """미들웨어가 깨진 request_id 를 넘기면 UUID 파싱 실패가 그대로 드러나야 한다."""
+        from src.api.contracts import envelope
+
+        monkeypatch.setattr(envelope, "get_current_request_id", lambda: "not-hex-value")
+
+        with pytest.raises(ValueError):
+            ok(_Payload(value=1))
+
+
+class TestPerfOkEnvelope:
+    """성능 단언: 봉투 생성은 요청당 핫패스이므로 perf_budget 픽스처 경유로 예산을 건다."""
+
+    def test_perf_ok_envelope_within_budget(self, perf_budget):
+        perf_budget.assert_within(lambda: ok(_Payload(value=1)), budget_ms=100, label="ok() 100회")
 
 
 # ── 게이트 적색 재현 ──
