@@ -1,0 +1,33 @@
+{
+  "role": "claude-local",
+  "stage": "implement",
+  "priority": 2,
+  "tier": "M",
+  "title": "DEEPEN-DEPTH CM-18 깊이 하한 보강 D1->D3: D2 미달: 성능 단언 0",
+  "spec": "깊이 하한 보강(DEEPEN-DEPTH CM-18 원장 판정, 프런트엔드). 현재 D1, 하한 D3. 미달 사유: D2 미달: 성능 단언 0\n원장 증거: negative 11, failure_injection 2, perf 0, gate_red 1, adversarial 0.\n대상(새 vitest 보조 테스트 파일을 만든다 -- 기존 테스트 파일은 수정하지 않는다): frontend/apps/web/src/routes/compliance/ComplianceDecisionLookupPanel.depth1.test.tsx\n먼저 기존 테스트 ['frontend/apps/web/src/routes/compliance/ComplianceDecisionLookupPanel.test.tsx', 'frontend/apps/web/src/routes/compliance/ComplianceExceptionApproval.test.tsx', 'frontend/apps/web/src/routes/compliance/CompliancePage.test.tsx', 'frontend/packages/api-client/src/apiPaths.openapi.test.ts']와 그 대상 컴포넌트를 읽어 렌더 헬퍼·mock·임포트 방식을 그대로 따른다. 새 파일은 200줄 이하.\n할 일: 부족한 항목만 보강한다 -- 판정기가 세는 신호만 정확히 쓴다: negative(`toThrow`·`.rejects`·`.not.toBeInTheDocument`·`role=alert` 단언 3종 이상), 실패 주입(`mockRejectedValue`·`networkError`·`HttpResponse.error` 등으로 의존성 실패), 성능 단언(`performance.now()`로 렌더 시간을 재고 `expect(elapsed).toBeLessThan(예산ms)`; 예산은 로컬 실측의 30배 이상 여유로 주석에 실측값과 근거), 게이트 적색 재현(테스트 제목에 `gate red`를 넣고, 입력이나 지연을 망가뜨리면 같은 단언이 실제로 실패함을 단언). 적대/동시성/리플레이 중 하나를 describe/it 제목에 명시해 재현하는 테스트 1종 이상(하한 D3).\n금지: 기존 단언·테스트 삭제/완화, 예산·숫자 상향, 프로덕션 코드 수정(앱 결함이면 고치지 말고 결과에 보고만).\nDoD: 추가 테스트 이름, `cd frontend && npm run test --workspace=apps/web -- src/routes/compliance/ComplianceDecisionLookupPanel.depth1.test.tsx` 통과 출력, `npm run lint --workspace=apps/web` 통과.",
+  "files": [
+    "new:frontend/apps/web/src/routes/compliance/ComplianceDecisionLookupPanel.depth1.test.tsx"
+  ],
+  "status": "done",
+  "depends_on": [],
+  "note": "depth1 test file 신설: 성능 2 negative 4 gate-red 2 adversarial 3 = 11개 모두 통과",
+  "id": 25040,
+  "updated_at": "2026-11-14T12:05:00+00:00",
+  "created_at": "2026-11-14T12:00:43+00:00",
+  "rev": 6,
+  "worker": "claude-local-1",
+  "model": "",
+  "attempts": 1,
+  "orig_role": "frontend",
+  "processed": false,
+  "lease": {
+    "worker": "claude-local-1",
+    "attempt": 1,
+    "token": "task-25040-attempt-1-1794657669.828768",
+    "until": "2026-11-14T13:01:09+00:00"
+  },
+  "spec_hash": "624de313a959c2db",
+  "engine": "claude-local",
+  "commit": "af94ec74e",
+  "tests": "11 passed"
+}
