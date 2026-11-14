@@ -226,7 +226,8 @@ def test_gate_red_corrupted_skill(tmp_path: Path, damage: str) -> None:
 
 @pytest.mark.perf
 def test_resolve_check_best_of_and_virtual_10x_gate_red(
-    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reuse the unchanged 500ms/300-check budget above; inject 10x that budget.
 
@@ -252,7 +253,8 @@ def test_resolve_check_best_of_and_virtual_10x_gate_red(
     try:
         gate()
         monkeypatch.setattr(
-            m, "_resolve_check",
+            m,
+            "_resolve_check",
             perf_inject.virtual_delayed_sync(m._resolve_check, 5.0 / 300),
         )
         with pytest.raises(AssertionError, match="budget<500"):
