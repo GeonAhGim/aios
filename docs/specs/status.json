@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-13T17:43:07+00:00",
+ "refreshed_at": "2026-11-14T17:22:31+00:00",
  "specs": [
   {
    "below_floor": 1,
@@ -10,7 +10,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D1": 1,
     "D2": 9,
@@ -18,7 +18,7 @@
    }
   },
   {
-   "below_floor": 5,
+   "below_floor": 4,
    "file": "L4_analytics_authoring_backtest_marketplace_v1.0.md",
    "spec": "analytics_authoring_backtest_marketplace",
    "total": 107,
@@ -26,11 +26,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 17,
-   "reopened": 6,
+   "reopened": 5,
    "depth": {
-    "D1": 5,
-    "D2": 21,
-    "D3": 64
+    "D1": 4,
+    "D2": 20,
+    "D3": 66
    }
   },
   {
@@ -57,11 +57,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D1": 2,
-    "D2": 6,
-    "D3": 10
+    "D2": 5,
+    "D3": 11
    }
   },
   {
@@ -88,7 +88,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D3": 6
    }
@@ -135,7 +135,7 @@
    "depth": {}
   },
   {
-   "below_floor": 8,
+   "below_floor": 3,
    "file": "L4_platform_observability_tenancy_api_v1.0.md",
    "spec": "platform_observability_tenancy_api",
    "total": 42,
@@ -143,11 +143,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
-    "D1": 8,
-    "D2": 8,
-    "D3": 26
+    "D1": 3,
+    "D2": 10,
+    "D3": 29
    }
   },
   {
@@ -198,7 +198,7 @@
    }
   },
   {
-   "below_floor": 5,
+   "below_floor": 1,
    "file": "L4_strategy_portfolio_backtest_v1.0.md",
    "spec": "strategy_portfolio_backtest",
    "total": 46,
@@ -206,11 +206,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
-    "D1": 5,
-    "D2": 10,
-    "D3": 31
+    "D1": 1,
+    "D2": 11,
+    "D3": 34
    }
   }
  ]
