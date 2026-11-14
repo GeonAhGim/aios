@@ -163,7 +163,7 @@ async def _best_no_signal_ms(
     execution_id = await _create_execution(pool, user_id, entry_threshold=-1.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
     if inject_ms:
-        adapter.get_ohlcv = virtual_delayed_async(adapter.get_ohlcv, inject_ms / 1000)  # type: ignore[method-assign]
+        vars(adapter)["get_ohlcv"] = virtual_delayed_async(adapter.get_ohlcv, inject_ms / 1000)
     engines = _engines()
 
     async def _tick() -> None:
