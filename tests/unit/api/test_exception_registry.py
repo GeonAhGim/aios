@@ -90,11 +90,38 @@ def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatc
         )
 
 
-def test_verification_base_error_is_not_state_invalid_transition():
+@pytest.mark.perf
+def test_verification_base_error_is_not_state_invalid_transition(perf_budget, monkeypatch):
     """negative — VerificationError(부모)가 VerificationInvalidTransitionError
-    (자식)의 409 코드로 오매핑되면 안 된다."""
-    code, _, _ = map_exception(VerificationError("알 수 없는 결정입니다: MAYBE"))
+    (자식)의 409, NotFound의 404, AUTH_REQUIRED의 401 코드로 오매핑되면 안 된다.
+
+    failure-injection — 자식 항목을 EXCEPTION_MAP에서 제거해도 부모가 자식 코드를
+    빌리지 않는다. perf — best_of(n=5) 최소값 예산 1ms(인메모리 리스트 스캔 1회,
+    여유 있는 상한); virtual_delayed_sync 10ms 주입 시 AssertionError로 적색 확인."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    exc = VerificationError("알 수 없는 결정입니다: MAYBE")
+    code, _, _ = map_exception(exc)
     assert code != ErrorCode.STATE_INVALID_TRANSITION
+    assert code != ErrorCode.RESOURCE_NOT_FOUND
+    assert code != ErrorCode.AUTH_REQUIRED
+
+    kw = {"budget_ms": 1, "n": 5, "warmup": 1, "batch": 1}
+    perf_budget.assert_within(lambda: map_exception(exc), label="VerificationError lookup", **kw)
+
+    # gate-red — 가상 지연 10ms 주입 시 같은 단언이 적색이어야 한다.
+    original = map_exception
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: virtual_delayed_sync(original, 10)(exc), label="injected 10ms", **kw
+        )
+
+    # failure-injection — 자식 항목 제거 후에도 부모는 409/404로 새지 않는다.
+    children = {VerificationInvalidTransitionError, VerificationNotFoundError}
+    pruned = [(t, c) for t, c in exception_mapping_module.EXCEPTION_MAP if t not in children]
+    monkeypatch.setattr(exception_mapping_module, "EXCEPTION_MAP", pruned)
+    code, _, _ = exception_mapping_module.map_exception(exc)
+    assert code not in (ErrorCode.STATE_INVALID_TRANSITION, ErrorCode.RESOURCE_NOT_FOUND)
 
 
 def test_wallet_topup_not_found_is_not_state_invalid_transition():
