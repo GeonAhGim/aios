@@ -35,7 +35,6 @@ _ALLOWED_PREFIXES = (
 )
 
 
-@pytest.mark.perf
 def test_every_error_code_uses_an_allowed_prefix():
     """§2.3 접두 규칙 — 문서가 명시한 접두 외에는 신규 코드 추가를
     금지한다(타입 실수·임의 명명을 막는 실질적 게이트)."""
@@ -45,23 +44,19 @@ def test_every_error_code_uses_an_allowed_prefix():
         )
 
 
-@pytest.mark.perf
 def test_every_error_code_has_an_http_status():
     for code in ErrorCode:
         assert code in HTTP_STATUS, f"{code.value}에 대응하는 HTTP_STATUS가 없습니다."
 
 
-@pytest.mark.perf
 def test_retryable_is_a_subset_of_known_codes():
     assert RETRYABLE.issubset(set(ErrorCode))
 
 
-@pytest.mark.perf
 def test_account_locked_maps_to_423():
     assert HTTP_STATUS[ErrorCode.AUTH_ACCOUNT_LOCKED] == 423
 
 
-@pytest.mark.perf
 def test_resource_not_found_maps_to_404():
     assert HTTP_STATUS[ErrorCode.RESOURCE_NOT_FOUND] == 404
 
@@ -93,17 +88,17 @@ def test_http_status_values_are_valid_codes():
         )
 
 
-def test_disallowed_prefix_rejected():
-    """허용되지 않은 접두사를 가진 코드명은 ErrorCode에 존재하면 안 된다.
+def test_disallowed_prefix_is_rejected_by_the_prefix_rule():
+    """접두 규칙의 음성 케이스 — 허용되지 않은 접두사·소문자·접두 없는 코드명은
+    규칙을 통과하면 안 된다. 규칙 자체가 항상 True를 반환하는 퇴화를 잡는다."""
+    for bad in ("FOO_NOT_ALLOWED", "auth_lowercase", "NOPREFIX", "AUTHZ"):
+        assert not bad.startswith(_ALLOWED_PREFIXES), (
+            f"{bad}가 허용되지 않은 접두사인데 규칙을 통과했습니다."
+        )
 
-    이 테스트는 _ALLOWED_PREFIXES 상수 자체를 검증하지 않고,
-    ErrorCode enum의 모든 값이 허용된 접두사를 쓰는지 확인한다.
-    실제 강제력은 test_every_error_code_uses_an_allowed_prefix()가 한다.
-    """
-    # 접두사 외의 값을 가진 가짜 ErrorCode 생성 시도 방지 —
-    # ErrorCode가 str enum이므로 값이 접두사 규칙을 위반하면
-    # test_every_error_code_uses_an_allowed_prefix가 잡는다.
-    # 여기서는 ErrorCode의 값이 모두 유니크한지 확인.
+
+def test_duplicate_error_code_values_are_rejected():
+    """ErrorCode 값은 유일해야 한다 — 중복 값은 응답 코드 역매핑을 깨뜨린다."""
     values = [code.value for code in ErrorCode]
     assert len(values) == len(set(values)), "ErrorCode 값에 중복이 있습니다."
 
