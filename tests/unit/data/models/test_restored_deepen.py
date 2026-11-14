@@ -8,7 +8,6 @@ Negative tests >=3, failure injection >=1, performance assertion >=1.
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -61,23 +60,21 @@ def test_models_package_missing_submodule_raises_import_error() -> None:
 
 
 @pytest.mark.perf
-def test_money_arithmetic_performance_budget() -> None:
+def test_money_arithmetic_performance_budget(perf_budget) -> None:
     """Performance: 1000 Money additions must complete within 50ms.
 
     Budget: ADR-2026-09-09-C performance table — model-level operations
-    must be sub-millisecond for Decimal arithmetic.
+    must be sub-millisecond for Decimal arithmetic. Measured via the
+    perf_budget fixture (raw perf_counter assertions are not D2 evidence).
     """
     m1 = Money(amount=Decimal("100.50"), currency=Currency.USDT)
     m2 = Money(amount=Decimal("50.25"), currency=Currency.USDT)
 
-    start = time.perf_counter()
-    for _ in range(1000):
-        _ = m1 + m2
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    def _thousand_additions() -> None:
+        for _ in range(1000):
+            _ = m1 + m2
 
-    assert elapsed_ms < 50, (
-        f"Money arithmetic exceeded 50ms budget for 1000 ops: {elapsed_ms:.1f}ms"
-    )
+    perf_budget.assert_within(_thousand_additions, budget_ms=50, label="Money 1000 additions")
 
 
 # ── Package structure invariant ─────────────────────────────────────────
