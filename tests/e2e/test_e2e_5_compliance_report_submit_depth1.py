@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import asyncpg
@@ -89,7 +90,7 @@ async def test_negative_naive_generated_at_rejected() -> None:
 def test_negative_trade_report_rejects_invalid_numeric_or_naive_inputs(
     field: str, value: object, match: str
 ) -> None:
-    kwargs: dict[str, object] = {
+    kwargs: dict[str, Any] = {
         "order_id": uuid4(),
         "trade_id": uuid4(),
         "compliance_decision": _post_trade_compliance_decision(),
@@ -104,7 +105,7 @@ def test_negative_trade_report_rejects_invalid_numeric_or_naive_inputs(
     }
     kwargs[field] = value
     with pytest.raises(TradeReportInputError, match=match):
-        normalize_trade_report(**kwargs)  # type: ignore[arg-type]
+        normalize_trade_report(**kwargs)
 
 
 async def test_failure_injection_rejected_then_retry_succeeds_and_chain_verifies(
@@ -116,7 +117,7 @@ async def test_failure_injection_rejected_then_retry_succeeds_and_chain_verifies
     _order_id, record, store = await _generated_report()
     stored = await store.get_by_trade_id(record.trade_id)
     assert stored is not None
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "audit_repo": audit_repo,
         "stored_record": stored,
         "expected_content_hash": record.content_hash,
@@ -125,9 +126,9 @@ async def test_failure_injection_rejected_then_retry_succeeds_and_chain_verifies
     }
     rejecting = MockRegulatorySubmissionPort(outcome="reject")
     with pytest.raises(Exception, match="MARKET_CLOSED"):
-        await _submit_report_with_audit_trail(submission_port=rejecting, **kwargs)  # type: ignore[arg-type]
+        await _submit_report_with_audit_trail(submission_port=rejecting, **kwargs)
     accepting = MockRegulatorySubmissionPort(outcome="accept")
-    receipt = await _submit_report_with_audit_trail(submission_port=accepting, **kwargs)  # type: ignore[arg-type]
+    receipt = await _submit_report_with_audit_trail(submission_port=accepting, **kwargs)
     assert receipt.trade_id == record.trade_id
     async with pool.acquire() as conn:
         rows = await conn.fetch(
