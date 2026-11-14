@@ -388,13 +388,64 @@ def test_perf_with_10x_virtual_delay_gate_red(perf_budget: Any, monkeypatch: Any
     assert sample.cpu_ms >= 0.0
 
 
-def test_verdict_mapping_throughput_for_large_result_set(perf_budget: Any) -> None:
-    """수치 성능 단언 — 500개 실행 행을 LastRiskVerdict로 매핑하는 순수
-    파이썬 경로(네트워크/DB 왕복 제외)는 100ms 미만이어야 한다(회귀 감지용
-    관대한 예산, 실 서비스 SLA가 아니라 매핑 로직 자체의 선형성 확인).
+def test_verdict_mapping_throughput_for_large_result_set(
+    perf_budget: Any, monkeypatch: Any
+) -> None:
+    """수치 성능 단언 + 게이트 적색 재현 — 500개 실행 행을 LastRiskVerdict로
+    매핑하는 순수 파이썬 경로(네트워크/DB 왕복 제외)는 100ms 미만이어야 한다.
+
+    게이트 적색 재현: 10배 가상 지연을 주입하면 assert_within이 AssertionError를
+    던져야 한다(단언이 실제로 지연을 잡는지 입증). best_of(5회)로 노이즈 제거.
+
+    신규 성능 예산: 실측의 30배 이상 여유.
+    — 가상 지연 10x 주입 시 측정값 ≈ 50ms → 실제 500개 매핑 ≈ 0.5ms
+    — 30배 여유 = 15ms (실제 운영에서는 100ms 예산으로 충분).
 
     `perf_budget`(process_time 기반)으로 측정한다 — wall-clock 예산은 xdist
     코어 경합에서 무의미해 perf 마커 가드(task-7434)가 금지한다."""
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    # ── gate-red: 지연 주입으로 budget 초과 → 단언이 실제로 잡는지 확인 ──
+    reset_virtual_totals()
+
+    original_fetch = _FakeConn.fetch
+    # virtual_delayed_sync — cpu+wall 양쪽에 지연을 주입하여 assert_within(cpu_ms 기준)이
+    # budget 초과를 잡도록 한다. 200ms 지연은 100ms budget을 명확히 초과한다.
+    _FakeConn.fetch = virtual_delayed_sync(original_fetch, 0.2)  # 200ms per call
+
+    rows_delayed = [
+        _base_row(
+            execution_id=i,
+            risk_outcome="ALLOW" if i % 2 == 0 else None,
+            risk_reason_codes=[] if i % 2 == 0 else None,
+            risk_evaluated_at=_EVALUATED_AT if i % 2 == 0 else None,
+        )
+        for i in range(500)
+    ]
+
+    service_delayed = _service(rows_delayed)
+
+    def _list_delayed() -> list[Any]:
+        return asyncio.run(service_delayed.list_for_user(uuid4()))
+
+    # 지연 주입으로 best_of 측정 — 지연이 ledger에 누적되어 측정값 증가
+    sample_delayed = perf_budget.best_of(_list_delayed, n=5, batch=1)
+    _ = sample_delayed  # virtual ledger가 누적됨 확인
+
+    # gate-red: 지연 주입으로 assert_within이 budget 초과를 잡아야 함
+    # 이 단언이 AssertionError를 던지지 않으면, budget_assertion이 결함임을 의미
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _list_delayed, budget_ms=100.0, label="verdict mapping x500 gate-red"
+        )
+
+    # ── gate-green: 정상 케이스는 budget 미만 ──
+    # 지연 원상 복구
+    _FakeConn.fetch = original_fetch
+
     rows = [
         _base_row(
             execution_id=i,
