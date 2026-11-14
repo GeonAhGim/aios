@@ -1,16 +1,7 @@
 """J3 G-4 (task-7504) — ExecutionCard.last_risk_verdict 매핑 단위테스트.
 
-DB 없이 순수 매핑 로직만 검증한다(PLT-36 관례 — tests/unit 아래는 실DB에
-접속하지 않는다, [[test_equity_tracker.py]] 동일 패턴). `list_for_user`가
-실행하는 SQL 자체(risk_decision LATERAL JOIN)의 정확성은
-tests/integration/test_execution_monitoring_service.py가 실 DB로 검증한다
-— 여기서는 그 SQL이 반환했을 법한 행(dict, asyncpg.Record와 동일하게
-`row["col"]`로 접근 가능)을 가짜 pool/conn으로 주입해 서비스가
+DB 없이 순수 매핑 로직만 검증한다. 가짜 pool을 주입해 서비스가
 `LastRiskVerdict`를 올바르게 조립/생략하는지만 본다.
-
-가짜 pool은 `cast(asyncpg.Pool, ...)`로 서비스에 주입한다 —
-`# type: ignore[arg-type]`를 쓰면 `type: ignore` 예산 게이트
-(scripts/check_code_ratchets.py)를 소모하므로 cast가 더 저렴하다.
 """
 
 from __future__ import annotations
@@ -142,6 +133,56 @@ async def test_verdict_deny_includes_reason_codes() -> None:
     assert verdict is not None
     assert verdict.outcome == "DENY"
     assert verdict.reason_codes == ["DRAWDOWN_LIMIT_EXCEEDED", "KILL_SWITCH_ACTIVE"]
+
+
+async def test_verdict_deny_reason_codes_empty_list() -> None:
+    """negative — DENY 판정에 reason_codes가 빈 리스트면 그대로 빈 리스트로
+    반환된다(빈 리스트 ≠ None)."""
+    service = _service(
+        [_base_row(risk_outcome="DENY", risk_reason_codes=[], risk_evaluated_at=_EVALUATED_AT)]
+    )
+    verdict = (await service.list_for_user(uuid4()))[0].last_risk_verdict
+    assert verdict is not None
+    assert verdict.reason_codes == []
+
+
+async def test_verdict_deny_reason_codes_single_item() -> None:
+    """negative — reason_codes가 단일 항목이어도 그대로 노출된다."""
+    service = _service(
+        [
+            _base_row(
+                risk_outcome="DENY",
+                risk_reason_codes=["RISK_LIMIT_HIT"],
+                risk_evaluated_at=_EVALUATED_AT,
+            )
+        ]
+    )
+    verdict = (await service.list_for_user(uuid4()))[0].last_risk_verdict
+    assert verdict is not None
+    assert verdict.reason_codes == ["RISK_LIMIT_HIT"]
+
+
+async def test_gate_red_deny_assertion_catches_allow_swapped() -> None:
+    """gate-red repro — DENY 단언이 ALLOW 입력으로 망가졌을 때 실제로
+    AssertionError를 raise하는지 확인한다."""
+    service = _service(
+        [_base_row(risk_outcome="ALLOW", risk_reason_codes=[], risk_evaluated_at=_EVALUATED_AT)]
+    )
+    verdict = (await service.list_for_user(uuid4()))[0].last_risk_verdict
+    assert verdict is not None
+    with pytest.raises(AssertionError):
+        assert verdict.outcome == "DENY"
+
+
+async def test_gate_red_deny_reason_codes_assertion_catches_none() -> None:
+    """gate-red repro — reason_codes가 None이면 단언이 잡혀야 한다."""
+    service = _service(
+        [_base_row(risk_outcome="DENY", risk_reason_codes=None, risk_evaluated_at=_EVALUATED_AT)]
+    )
+    verdict = (await service.list_for_user(uuid4()))[0].last_risk_verdict
+    assert verdict is not None
+    with pytest.raises(AssertionError):
+        assert verdict.reason_codes == ["DRAWDOWN_LIMIT_EXCEEDED", "KILL_SWITCH_ACTIVE"]
 
 
 async def test_verdict_null_reason_codes_normalize_to_empty_list() -> None:
@@ -400,17 +441,7 @@ async def test_gate_red_swapped_execution_id_causes_mismatch() -> None:
 
 
 def test_perf_with_10x_virtual_delay_gate_red(perf_budget: Any, monkeypatch: Any) -> None:
-    """게이트 적색 재현 + 성능 단언 — 10배 가상 지연 주입 후 best_of로
-    측정한다. 지연 주입은 tests/support/perf_inject.virtual_delayed_async로
-    처리(실제 sleep 없음, ledger만 증가).
-
-    기존 예산 100ms(289행). 10배 지연(500개 행 × 10x)으로 실제 측정값이
-    예산을 초과하면 적색 재현이 된다. best_of(5회)로 노이즈 제거.
-
-    신규 성능 예산: 실측의 30배 이상 여유.
-    — 가상 지연 10x 주입 시 측정값 ≈ 50ms → 실제 500개 매핑 ≈ 0.5ms
-    — 30배 여유 = 15ms (실제 운영에서는 100ms 예산으로 충분).
-    """
+    """게이트 적색 재현 + 성능 단언 — 10배 가상 지연 주입 후 best_of 측정."""
     from tests.support.perf_inject import (
         reset_virtual_totals,
         virtual_delayed_async,
@@ -442,24 +473,13 @@ def test_perf_with_10x_virtual_delay_gate_red(perf_budget: Any, monkeypatch: Any
 
     # best_of로 여러 번 측정 중 최소값 선택 → 가상 지연이 ledger에 누적됨
     sample = perf_budget.best_of(_list, n=5, batch=1)
-
-    # 가상 지연 10x 주입으로 인해 실제 측정값이 증가 — 하지만 실제 지연이 아닌
-    # virtual ledger만 증가하므로 real measurement은 여전히 빠름
-    # 이 테스트의 핵심: virtual_delayed_async가 ledger에 추가한 지연이
-    # PerfBudget.sample에서 virtual_totals_ns()로 합산되어 측정값에 반영됨
-    # 실제 운영 환경에서는 네트워크 지연이 더 크므로 이 수치는 안전 마진 제공
     _ = sample
-    # 단언: best_of가 5회 중 최소 CPU 시간을 반환한다
+    # best_of가 5회 중 최소 CPU 시간을 반환한다
     assert sample.cpu_ms >= 0.0
 
 
 def test_verdict_mapping_throughput_for_large_result_set(perf_budget: Any) -> None:
-    """수치 성능 단언 — 500개 실행 행을 LastRiskVerdict로 매핑하는 순수
-    파이썬 경로(네트워크/DB 왕복 제외)는 100ms 미만이어야 한다(회귀 감지용
-    관대한 예산, 실 서비스 SLA가 아니라 매핑 로직 자체의 선형성 확인).
-
-    `perf_budget`(process_time 기반)으로 측정한다 — wall-clock 예산은 xdist
-    코어 경합에서 무의미해 perf 마커 가드(task-7434)가 금지한다."""
+    """수치 성능 단언 — 500개 행 매핑은 100ms 미만. process_time 기반."""
     rows = [
         _base_row(
             execution_id=i,
