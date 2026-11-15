@@ -183,4 +183,21 @@ describe("RebalancePage depth1 — D2 신호 보강", () => {
     expect(sentTargets[0]).toEqual({ symbol: "BTC-USDT", targetWeightPct: "30" });
     expect(sentTargets[0].id).toBeUndefined();
   });
+
+  // 지연을 망가뜨리면(의존성 응답 250ms 지연) 성능 테스트와 같은 단언(toBeLessThan)이 실제로 실패한다.
+  it("gate red(depth1-2): 의존성 지연 250ms 주입 시 성능 예산 단언이 실제로 적색이 된다", async () => {
+    const slow = vi.fn().mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(planResponse()), 250)),
+    );
+    renderPage({ whatIfClient: stubClient({ planRebalance: slow }) });
+
+    fillTarget(0, "BTC-USDT", "30");
+    const startedAt = performance.now();
+    run();
+    await screen.findByTestId("rebalance-trade-BTC-USDT");
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(() => expect(elapsedMs).toBeLessThan(100)).toThrow();
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
+  });
 });
