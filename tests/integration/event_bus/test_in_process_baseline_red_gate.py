@@ -14,6 +14,7 @@ import pytest
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 
 async def _scenario() -> int:
@@ -444,3 +445,37 @@ async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     assert sample.wall_ms < budget_ms, (
         f"red-gate scenario: {perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
+
+
+@pytest.mark.perf
+async def test_in_process_bus_crash_detection_perf_budget_virtual_red_gate(perf_budget):
+    """perf gate-red — 가상 지연으로 실제 배율을 측정하고 적색 재현.
+
+    virtual_delayed_async로 publish에 5.0s 가상 지연을 주입해 실제 wall이
+    예산 5000ms를 넘게 만든다. pytest.raises(AssertionError)로 적색을 재현.
+    """
+    budget_ms = 5000.0
+
+    # 가상 지연 ledger 초기화
+    reset_virtual_totals()
+
+    # publish에 5.0s 가상 지연 주입
+    original_publish = InProcessEventBus.publish
+
+    async def delayed_publish(self, topic, payload):
+        return await virtual_delayed_async(original_publish, 5.0)(self, topic, payload)
+
+    InProcessEventBus.publish = delayed_publish
+
+    try:
+        # 적색 재현: 가상 지연 5.0s → wall_ms > budget_ms
+        with pytest.raises(AssertionError):
+            sample = await perf_budget.sample_async(_scenario)
+            assert sample.result == 0
+            msg = (
+                f"virtual delay should exceed budget: "
+                f"{perf_budget.describe(sample, budget_ms=budget_ms)}"
+            )
+            assert sample.wall_ms < budget_ms, msg
+    finally:
+        InProcessEventBus.publish = original_publish
