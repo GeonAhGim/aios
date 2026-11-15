@@ -135,7 +135,7 @@ def test_to_candle_records_rejects_mismatched_column_lengths(field: str, extra: 
 
 
 def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
-    """negative test: model_construct는 검증.skip하므로 None이 Decimal
+    """negative test: model_construct는 검증 없이 건너뛰므로 None이 Decimal
     필드에 혼입되어도 즉시 예외를 던지지 않는다. downstream consumer가
     이를 검증해야 함 — candle_columns 자체는 pure data holder이므로
     값 검증을 하지 않는다. 이 테스트는 그 동작을 명시적으로 확인한다."""
