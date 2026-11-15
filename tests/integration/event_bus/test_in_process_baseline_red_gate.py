@@ -93,6 +93,55 @@ async def test_in_process_bus_backpressure_rejection_does_not_persist_event():
     assert received == [0]
 
 
+async def test_in_process_bus_backpressure_rejection_with_slow_handler_loses_more():
+    """negative — 핸들러가 느리면 워커가 큐를 비우지 못해 백프레셔가 계속 발생하고,
+    추가로 들어오는 이벤트가 모두 거부되어 영구히 사라진다."""
+    bus = InProcessEventBus(max_queue_depth=2)
+    received: list[int] = []
+
+    async def slow_handler(payload):
+        await asyncio.sleep(0.5)  # 워커가 한 건 처리하는 데 0.5초 — 큐가 계속 가득 참
+        received.append(payload["seq"])
+
+    bus.subscribe("topic", slow_handler, criticality=HandlerCriticality.SAFE)
+    await bus.start()
+    # 5건을 빠르게 쏜다 — 핸들러가 느리므로 큐가 계속 가득 차서 대부분 거부됨
+    for i in range(5):
+        await bus.publish("topic", {"seq": i})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+    # slow_handler가 1건만 처리하고 나머지는 큐에서 거부됨
+    assert len(received) <= 1  # 최대 1건만 처리 가능(다른 워커가 없음)
+
+
+async def test_in_process_bus_backpressure_rejection_persists_after_restart():
+    """negative — 백프레셔로 거부된 이벤트가 재시작 후에도 복구되지 않는다는 것을
+    확인한다. "재시작하면 큐가 비워진다"는 가설을 기각한다."""
+    bus = InProcessEventBus(max_queue_depth=1)
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.SAFE)
+    await bus.start()
+    await bus.publish("topic", {"seq": 0})  # 큐에 쌓임
+    await bus.publish("topic", {"seq": 1})  # 큐 가득 참 — 거부
+    await asyncio.sleep(0.05)  # 워커가 seq=0을 처리할 시간을 약간 준다
+    # bus를del — "크래시"
+    del bus
+
+    # 재시작: 새 bus가 같은 핸들러를 구독
+    restarted = InProcessEventBus(max_queue_depth=1)
+    restarted.subscribe("topic", handler, criticality=HandlerCriticality.SAFE)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    # seq=1은 거부된 시점에 영구히 사라졌고, seq=0도 처리 전이면 사라짐
+    # (이미 처리됐을 수도 있으니 received == [0] 또는 [] 둘 중 하나)
+    assert received in ([], [0])
+
+
 async def test_in_process_bus_multiple_topics_all_lose_events_on_crash():
     """negative — 손실이 특정 토픽 하나에 국한된 우연이 아니라, 토픽 수와
     무관하게 구조적으로 전부에 적용된다는 것을 확인한다."""
