@@ -68,33 +68,21 @@ describe("formatters depth1 — 성능 단언 (performance.now() budget assertio
 });
 
 describe("[gate red] formatters depth1 — 망가뜨린 지연이 실제 실패를 일으킴", () => {
-  // 게이트 적색 재현: 정상 budget(100ms)은 통과하지만, budget × 2(200ms)의
-  // 망가뜨린 지연(인위적 sleep)을 넣으면 같은 budget 단언이 실제로 실패한다.
-  // 이것은 게이트가 실제로 적색을 잡는다는 증거다.
+  // 게이트 적색 재현: 망가뜨린 지연 = perfBudgetMs(예산) × 2.
+  // 평상시 100ms × 2 = 200ms, 커버리지 모드 300ms × 2 = 600ms.
+  // 이 지연을 주입하면 동일한 budget 단언이 실제로 실패한다.
   it("gate red: budget × 2 지연을 넣으면 budget 단언이 실제로 실패함", async () => {
-      // 실제 sleep 대신, budget을 budget × 2로 올린 테스트: 정상 budget 단언이
-    // budget × 2 지연 상황에서도 통과하면 게이트가 무의미해진다.
-    // 대신 아래에서 budget × 2 지연을 직접 주입하지 않고,
-    // budget 단언 자체를 budget × 2로 올린 값으로 바꿔서 실패하게 한다.
-    // 그러나 vitest의 expect는 동적 budget을 못 받으므로,
-    // budget × 2 지연을 주입한 후 budget 단언으로 실패함을 확인한다.
-    // vitest fakeTimer 없이, 실제 performance.now()로 측정:
+    const budget = perfBudgetMs(100);
+    const corruptedDelay = budget * 2; // 200ms plain / 600ms coverage
+
     const start = performance.now();
-    // 150ms 지연 주입 (CPU idle 가정, budget 100ms × 1.5)
-    // busy-wait 대신 short sleep: Node.js 150ms
     await new Promise<void>((resolve) => {
-      const t0 = performance.now();
-      let busy = true;
-      setTimeout(() => { busy = false; resolve(); }, 150);
-      while (busy && performance.now() - t0 < 200) {
-        // spin until timeout
-      }
+      setTimeout(resolve, corruptedDelay);
     });
     const elapsed = performance.now() - start;
-    // 150ms 지연이 실제로 발생했는지 확인 (budget 100ms 초과)
-    expect(elapsed).toBeGreaterThan(100);
+
     // 게이트 budget 단언이 실제로 실패함을 재현:
-    expect(elapsed).not.toBeLessThan(perfBudgetMs(100));
+    expect(elapsed).not.toBeLessThan(budget);
   });
 });
 
