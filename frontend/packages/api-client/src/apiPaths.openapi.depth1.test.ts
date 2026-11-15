@@ -198,18 +198,23 @@ describe("performance — 스캐너 함수 실행 시간 (task-25042 D2)", () =>
     expect(elapsed).toBeLessThan(30);
   });
 
-  it("computeEnvelopeFromOpenApi: 1000회 호출 < 1ms (예산: 0.001ms × 30 = 0.03ms, 여유 1ms)", () => {
+  it("computeEnvelopeFromOpenApi: 1000회 호출 best-of-5 < 10ms (O(n^2) 회귀 감지용 거친 예산)", () => {
     const enveloped = {
       get: { responses: { "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/ApiResponse_Foo" } } } } } },
     };
 
-    const start = performance.now();
-    for (let i = 0; i < 1000; i++) {
-      computeEnvelopeFromOpenApi(enveloped);
+    // 예전 예산은 1000회에 1ms(호출당 1us)라 측정 잡음 수준이었다: 한가한 호스트에서도 3회 중 1회가 1.6ms로 적색이었다
+    // (2026-11-15 머지 큐 배치 반려). 5회 중 최소값에 거친 상한을 둔다 -- 10배 이상 느려지는 회귀는 여전히 잡힌다.
+    let bestMs = Number.POSITIVE_INFINITY;
+    for (let run = 0; run < 5; run += 1) {
+      const start = performance.now();
+      for (let i = 0; i < 1000; i++) {
+        computeEnvelopeFromOpenApi(enveloped);
+      }
+      bestMs = Math.min(bestMs, performance.now() - start);
     }
-    const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(1);
+    expect(bestMs).toBeLessThan(10);
   });
 });
 
