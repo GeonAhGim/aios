@@ -298,3 +298,58 @@ def test_drop_stale_slot_passes_password_via_env_not_argv(tmp_path: Path) -> Non
     assert "secret123" not in psql_argv
     assert psql_env is not None
     assert psql_env.get("PGPASSWORD") == "secret123"
+
+
+def test_pg_conn_args_rejects_non_numeric_port() -> None:
+    """negative: 포트가 숫자가 아니면 pg_basebackup 인자를 만들지 않고 거부한다(urlsplit.port)."""
+    with pytest.raises(ValueError):
+        base_backup.pg_conn_args("postgresql://alice@db.internal:notaport/aios_dev")
+
+
+def test_run_base_backup_rejects_dest_dir_that_is_a_file(tmp_path: Path) -> None:
+    """negative: dest-dir 자리에 일반 파일이 있으면 백업을 시작하지 않고 OSError로 거부한다.
+
+    목록 디렉터리를 만들 수 없으므로 pg_basebackup(run_cmd)은 한 번도 호출되지 않아야 한다.
+    """
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("occupied", encoding="utf-8")
+
+    def run_cmd(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+        raise AssertionError("dest 생성 실패 뒤에 run_cmd가 호출되면 안 된다")
+
+    with pytest.raises(OSError):
+        base_backup.run_base_backup(
+            blocker,
+            "postgresql://x/y",
+            which=lambda b: b,
+            run_cmd=run_cmd,
+        )
+    assert blocker.read_text(encoding="utf-8") == "occupied"  # 기존 파일을 건드리지 않는다
+
+
+def test_pg_basebackup_oserror_after_slot_drop_cleans_up(tmp_path: Path) -> None:
+    """실패 주입: 슬롯 정리(psql)는 성공했지만 pg_basebackup 실행 자체가 OSError를 내면
+    rc=1로 기록하고, 반쯤 쓰인 dest를 지우고, FAILED 마커를 남긴다."""
+    calls: list[str] = []
+
+    def run_cmd(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+        calls.append(cmd[0])
+        if cmd[0] == "pg_basebackup":
+            raise OSError("exec format error")
+        return (0, "")
+
+    manifest = base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda b: b,
+        run_cmd=run_cmd,
+    )
+
+    assert calls == ["psql", "pg_basebackup"]
+    assert manifest["ok"] is False
+    assert manifest["returncode"] == 1
+    assert "exec format error" in manifest["tail"]
+    assert not Path(manifest["dest"]).exists()
+    assert base_backup.latest_backup_dir(tmp_path) is None
+    failed_markers = list(tmp_path.glob("*-FAILED.json"))
+    assert len(failed_markers) == 1
