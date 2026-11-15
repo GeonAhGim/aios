@@ -213,7 +213,7 @@ def test_to_candle_records_propagates_duration_return_type_error(
         fake_duration_returns_string,
     )
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="unsupported operand|can only concatenate"):
         to_candle_records(columns, key)
 
 
