@@ -169,33 +169,18 @@ describe("RebalancePage depth1 — D2 신호 보강", () => {
 
   // ── gate red (게이트 적색 재현) ──
 
-  // 게이트적색(depth1-1): planRebalance를 지연시키면 게이트 단언이 실제로 실패함을 검증.
-  // 지연값 = perfBudgetMs(2000) * 2 = 4000ms (coverage 모드 시 12000ms).
-  // 이 지연이 없으면 원래 테스트가 통과하므로, 지연을 주입하면 단언이 깨짐.
-  it("gate red(depth1-1): planRebalance 지연 > 예산*2하면 성능 단언이 실제로 실패함", async () => {
-    const baseBudget = perfBudgetMs(2000);
-    const delayMs = baseBudget * 2; // coverage 모드 시 6000ms
-
-    const planRebalance = vi
-      .fn()
-      .mockImplementation(
-        () =>
-          new Promise<WhatIfRebalancePlanResponse>((resolve) =>
-            setTimeout(() => resolve(planResponse()), delayMs),
-          ),
-      );
-    const client = stubClient({ planRebalance });
-    renderPage({ whatIfClient: client });
+  // 게이트적색(depth1-1): handleRun에서 내부 id를 제거하는 분기를 정확히 겨눈다.
+  // 이 분기를 깨뜨리면(요청 본문에 id가 섞여 들어가면) 이 테스트만 적색이 된다.
+  it("gate red(depth1-1): 실행 요청 본문에 목표 행의 내부 id가 섞여 들어가지 않는다", async () => {
+    const planRebalance = vi.fn().mockResolvedValue(planResponse());
+    renderPage({ whatIfClient: stubClient({ planRebalance }) });
 
     fillTarget(0, "BTC-USDT", "30");
-
-    const startedAt = performance.now();
     run();
-    await screen.findByTestId("rebalance-trade-BTC-USDT");
-    const elapsedMs = performance.now() - startedAt;
 
-    // 지연이 예산*2이므로 이 단언은 반드시 실패해야 함 — 게이트 적색 재현의 핵심.
-    expect(elapsedMs).toBeGreaterThan(delayMs * 0.5);
-    expect(planRebalance).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(planRebalance).toHaveBeenCalledTimes(1));
+    const sentTargets = planRebalance.mock.calls[0][0];
+    expect(sentTargets[0]).toEqual({ symbol: "BTC-USDT", targetWeightPct: "30" });
+    expect(sentTargets[0].id).toBeUndefined();
   });
 });
