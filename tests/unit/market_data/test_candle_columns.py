@@ -134,11 +134,9 @@ def test_to_candle_records_rejects_mismatched_column_lengths(field: str, extra: 
     assert str(expected) in str(excinfo.value)
 
 
-def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
-    """negative test: model_construct는 검증.skip하므로 None이 Decimal
-    필드에 혼입되어도 즉시 예외를 던지지 않는다. downstream consumer가
-    이를 검증해야 함 — candle_columns 자체는 pure data holder이므로
-    값 검증을 하지 않는다. 이 테스트는 그 동작을 명시적으로 확인한다."""
+def test_to_candle_records_rejects_none_in_decimal_field() -> None:
+    """negative test: Decimal 필드(open/high/low/close/volume)에 None이
+    있으면 즉시 ValueError를 던진다(fail-closed)."""
     columns = _columns(3)
     corrupted = CandleColumns(
         ts=columns.ts,
@@ -150,15 +148,8 @@ def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
         quote_volume=columns.quote_volume,
     )
 
-    records = to_candle_records(corrupted, _key())
-    assert len(records) == 3
-    # None이 그대로 전달됨 — downstream이 검증해야 함
-    assert records[0].open is None
-
-
-# N/A(설계상 검증 위임: ohlc_sanity.check_candle가 write 시점에 가격·수량 검증,
-# model_construct는 perf 목적으로 검증을 의도적 생략). DoD 1번의
-# None/음수/0 가격·수량 명시 거부는 candle_columns 범위 밖.
+    with pytest.raises(ValueError):
+        to_candle_records(corrupted, _key())
 
 
 # ── failure injection tests ──────────────────────────────────────────────────
