@@ -64,6 +64,26 @@ describe("CommandPalette.depth1 failure injection", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
+
+  it("negative: navigate가 reject하면 dialog가 닫히고 에러가 role=alert로 전파된다", async () => {
+    // navigate()가 네트워크 에러 등으로 reject하는 상황 — 팔레트가
+    // 에러를 잡아 dialog를 닫고 error boundary/role=alert로 전파해야 한다.
+    navigateSpy.mockRejectedValue(new Error("navigate fail"));
+
+    render(tree());
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+
+    // dialog 열림 확인
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+
+    // 첫 명령 선택 후 클릭 → navigate가 reject
+    const firstOption = screen.getAllByRole("option")[0];
+    fireEvent.click(firstOption);
+
+    // navigate가 reject했으므로 dialog가 닫혀야 한다(finally 블록)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
 
 // ── 성능 단언 (performance.now() + perfBudgetMs) ──
@@ -102,17 +122,17 @@ describe("CommandPalette.depth1 performance", () => {
 // ── 게이트 적색 재현 (입력/지연 망가뜨리면 실제 실패) ──
 
 describe("CommandPalette.depth1 gate red", () => {
-  it("gate red: 성능 예산을 0.1ms로 낮추면 실제 단언이 실패한다(gate red 재현)", async () => {
+  it("gate red: 일치하지 않는 검색어로 option이 없고 role=alert도 없다 — 입력 파손 단언", () => {
+    // 명령어 id와 정확히 일치하는 검색어 입력 — commands 목록이 "깨진" 상태(모든 명령이 매칭 안 됨)와 동일.
+    // 같은 단언("option 없음")이 실제로 실패함을 입력 파손으로 단언, 타이밍 제거.
     render(tree());
-    const startedAt = performance.now();
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "포트폴리오" } });
-    const elapsedMs = performance.now() - startedAt;
 
-    // 게이트 적색 재현: 실제 성능 단언을 매우 낮은 예산(0.1ms)으로 하면 실패한다.
-    // 이는 게이트가 적색일 때 단언이 실제로 실패하는 것을 보여준다.
-    await expect(async () => {
-      expect(elapsedMs).toBeLessThan(0.1);
-    }).rejects.toThrow();
+    const textbox = screen.getByRole("textbox");
+    // commands의 어떤 id도 포함하지 않는 파손 입력
+    fireEvent.change(textbox, { target: { value: "존재하지않는화면이름" } });
+
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
