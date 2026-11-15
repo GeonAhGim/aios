@@ -205,8 +205,13 @@ def test_check_archive_advanced_ok_when_new_file_appears():
 
 
 def test_check_archive_advanced_fails_when_no_new_file():
-    reason = wal_archive.check_archive_advanced({"a"}, {"a"})
-    assert reason is not None
+    expected = "pg_switch_wal() 이후에도 아카이브 디렉터리에 새 파일이 나타나지 않았다"
+    # 같은 파일 — 사유 문자열 정확히 일치
+    assert wal_archive.check_archive_advanced({"a"}, {"a"}) == expected
+    # 빈 집합 — 빈 before/after 도 사유 반환
+    assert wal_archive.check_archive_advanced(set(), set()) == expected
+    # 파일이 줄어든 경우 — 새 파일 없으므로 사유 반환
+    assert wal_archive.check_archive_advanced({"a", "b"}, {"a"}) == expected
 
 
 # --- verify_archiving_advances ------------------------------------------------
