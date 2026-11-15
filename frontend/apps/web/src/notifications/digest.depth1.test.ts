@@ -176,7 +176,9 @@ describe("computeDailyDigest: gate red 재현", () => {
       return out;
     }
 
-    const input = uniqueDayHistory(15000);
+    // n=30000이면 O(n^2) 회귀가 plain(100ms)와 coverage(300ms) 둘 다에서
+    // 확실히 예산을 초과한다. plain ≈ 870ms, coverage ≈ 2.6x ≈ 2200ms.
+    const input = uniqueDayHistory(30000);
     const budget = perfBudgetMs(100);
 
     // 실제 구현(O(n)) — 예산 통과
