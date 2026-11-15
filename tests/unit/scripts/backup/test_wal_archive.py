@@ -213,23 +213,32 @@ def test_check_archive_advanced_fails_when_no_new_file():
 
 
 def test_verify_archiving_advances_detects_new_file_before_timeout():
-    calls = {"n": 0}
+    # list_dir: 1st(before)={"a"}, 2nd(first poll)={"a"}, 3rd(poll after sleep)={"a","new"}
+    list_dir_n = {"n": 0}
 
     def list_dir(_d):
-        calls["n"] += 1
-        return {"a"} if calls["n"] == 1 else {"a", "new-wal-file"}
+        list_dir_n["n"] += 1
+        if list_dir_n["n"] <= 2:
+            return {"a"}
+        return {"a", "new-wal-file"}
+
+    switched: list[str] = []
+    slept: list[float] = []
 
     reason = wal_archive.verify_archiving_advances(
         "postgresql://x/y",
         "archive-dir",
         timeout=10.0,
         poll_interval=1.0,
-        switch_wal=lambda dsn: None,
+        switch_wal=lambda dsn: switched.append(dsn),
         list_dir=list_dir,
-        sleep=lambda s: None,
-        clock=iter([0.0, 1.0, 2.0]).__next__,
+        sleep=lambda s: slept.append(s),
+        clock=iter([0.0, 1.0]).__next__,
     )
     assert reason is None
+    assert switched == ["postgresql://x/y"]  # switch_wal 정확히 1회
+    assert slept == [1.0]  # poll_interval로 정확히 1회 대기
+    assert list_dir_n["n"] == 3  # before + 2nd poll(새 파일 감지)
 
 
 def test_verify_archiving_advances_times_out_when_nothing_new():
