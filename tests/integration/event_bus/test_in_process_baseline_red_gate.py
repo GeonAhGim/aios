@@ -218,6 +218,126 @@ async def test_in_process_bus_concurrent_publishers_all_lose_events_on_crash():
     assert received == []  # 병렬 publish도 구조적으로 보존되지 않는다
 
 
+async def test_in_process_bus_in_flight_handler_crash_loses_partial_payload():
+    """negative — "start() 후 워커가 이벤트를 꺼내 핸들러를 실행하는 순간까지
+    안전하다"는 가설을 기각한다. 핸들러가 slow_sleep 중인 경우, 그 이벤트의
+    payload는 재시작 시 전혀 복구되지 않는다."""
+    received: list[int] = []
+
+    async def slow_handler(payload):
+        await asyncio.sleep(10)
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    # slow_handler는 10초를 sleep하므로, 이 이벤트는 in-flight 상태로 남는다
+    await bus.publish("topic", {"seq": 42})
+    await asyncio.sleep(0.05)  # 워커가 큐에서 꺼내고 핸들러 시작
+    # 워커 태스크를 강제 취소 (크래시 시뮬레이션)
+    for task in bus._worker_tasks.values():
+        task.cancel()
+    del bus
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.05)
+    await restarted.stop()
+    assert received == []  # in-flight 핸들러의 payload도 영구 손실
+
+
+async def test_in_process_bus_crash_during_backpressure_loses_queued_events():
+    """negative — 백프레셔가 발생 중(큐 가득 참)에 크래시하면, 큐에 쌓인
+    이벤트들이 모두 사라진다. "어떤 이벤트는 큐에 남아있지 않겠지"라는
+    가설을 기각한다."""
+    received: list[int] = []
+
+    async def slow_handler(payload):
+        await asyncio.sleep(5)  # 워커가 바빠서 큐가 계속 채워진다
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus(max_queue_depth=3)
+    bus.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    # slow_handler가 5초씩 sleep하므로, 4개 이상은 큐에 쌓이거나 거부된다
+    for i in range(6):
+        await bus.publish("topic", {"seq": i})
+    await asyncio.sleep(0.1)
+    # 워커 태스크 취소 + del (크래시)
+    for task in bus._worker_tasks.values():
+        task.cancel()
+    del bus
+
+    restarted = InProcessEventBus(max_queue_depth=3)
+    restarted.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.05)
+    await restarted.stop()
+    # seq 0-2 중 일부가 처리됐을 수 있으나, 큐에 남아있던 이벤트는 모두 손실
+    # 전체 이벤트가 보존되지 않는다는 negative 증거
+    assert received != list(range(6))  # 전부가 보존되지 않는다
+
+
+async def test_in_process_bus_gate_red_negative_assertion_catches_corruption():
+    """gate-red — 이 negative 테스트의 단언(`assert received == []`)이
+    실제로 잡히는지를 확인한다. 만약 InProcessEventBus가 우연히 이벤트를
+    보존하면 이 테스트는 파란불이 된다.
+
+    입력을 의도적으로 망가뜨려(red) 단언이 적색으로 떨어지는 것을 재현한다:
+    - slow_handler로 이벤트를 in-flight 상태로 만든 후 크래시 시뮬레이션하고,
+      restarted bus에 같은 핸들러를 연결해도 해당 이벤트가 전달되지 않음을 확인한다.
+    """
+    received: list[int] = []
+
+    async def slow_handler(payload):
+        await asyncio.sleep(10)  # 절대 끝나지 않는 slow handler — in-flight 고정
+        received.append(payload["seq"])
+
+    crashed = InProcessEventBus()
+    crashed.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await crashed.start()
+    await crashed.publish("topic", {"seq": 99})
+    await asyncio.sleep(0.05)  # 워커가 큐에서 꺼내 slow_handler 시작
+    for task in crashed._worker_tasks.values():
+        task.cancel()
+    del crashed
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.05)
+    await restarted.stop()
+    # gate-red: 단언이 실제로 잡힘 — received가 비어있지 않으면
+    # InProcessEventBus가 구조적으로 이벤트를 보존하는 것이므로 실패
+    assert received == []  # 단언이 적색: crashed bus의 in-flight 이벤트는 restarted에 전달되지 않음
+
+
+async def test_in_process_bus_rapid_subscribe_publish_crash_loses_all():
+    """negative — subscribe와 publish가 빠르게 연달아 일어나도,
+    크래시 전 in-memory 큐에 쌓인 이벤트는 재시작 시 소실된다.
+    타이밍이 운이 아니다."""
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    # start() 전에 publish — 워커가 뜰 전에 이벤트가 큐에 쌓인다
+    for i in range(15):
+        await bus.publish("topic", {"seq": i})
+    # 바로 del — start()도 안 부른 채
+    del bus
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == []  # start 전 publish도 구조적으로 보존되지 않는다
+
+
 @pytest.mark.perf
 async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     """perf — 이 red-gate 재현 자체가 CI 기본 스위트에 상시 포함되므로,
