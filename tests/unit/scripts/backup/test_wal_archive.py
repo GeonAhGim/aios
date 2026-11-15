@@ -164,9 +164,11 @@ def test_evaluate_flags_empty_archive_command():
 
 
 def test_evaluate_flags_disabled_archive_command():
+    """archive_command="(disabled)" — 위반 issue가 정확히 1건이어야 한다."""
     settings = {"wal_level": "replica", "archive_mode": "on", "archive_command": "(disabled)"}
     issues = wal_archive.evaluate(settings)
-    assert any("archive_command" in i for i in issues)
+    assert len(issues) == 1
+    assert "archive_command" in issues[0]
 
 
 def test_evaluate_accepts_always_archive_mode_and_logical_wal_level():
