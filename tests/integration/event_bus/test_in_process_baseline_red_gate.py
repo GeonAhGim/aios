@@ -217,6 +217,89 @@ async def test_in_process_bus_multiple_topics_all_lose_events_on_crash():
     assert all(received[topic] == [] for topic in received)
 
 
+async def test_in_process_bus_multiple_topics_in_flight_crash_loses_all():
+    """negative — 토픽별 워커가 모두 핸들러 실행 중(in-flight)일 때 크래시해도
+    모든 토픽의 이벤트가 재시작 후 복구되지 않는다."""
+    received: dict[str, list[int]] = {"a": [], "b": [], "c": []}
+
+    def make_handler(topic: str, delay: float):
+        async def handler(payload):
+            await asyncio.sleep(delay)
+            received[topic].append(payload["seq"])
+
+        return handler
+
+    crashed = InProcessEventBus()
+    for topic in received:
+        crashed.subscribe(topic, make_handler(topic, 10), criticality=HandlerCriticality.CRITICAL)
+    await crashed.start()
+    for topic in received:
+        await crashed.publish(topic, {"seq": 1})
+    await asyncio.sleep(0.05)
+    for task in crashed._worker_tasks.values():
+        task.cancel()
+    del crashed
+
+    restarted = InProcessEventBus()
+    for topic in received:
+        restarted.subscribe(topic, make_handler(topic, 0), criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == {"a": [], "b": [], "c": []}
+
+
+async def test_in_process_bus_multiple_topics_backpressure_rejects_lost_after_crash():
+    """negative — 토픽마다 큐가 가득 찬 상태(미시작)에서 크래시하면 수락된
+    이벤트도 거부된 이벤트도 재시작 후 전부 소실된다."""
+    received: dict[str, list[int]] = {"a": [], "b": []}
+
+    def make_handler(topic: str):
+        async def handler(payload):
+            received[topic].append(payload["seq"])
+
+        return handler
+
+    crashed = InProcessEventBus(max_queue_depth=1)
+    for topic in received:
+        crashed.subscribe(topic, make_handler(topic), criticality=HandlerCriticality.SAFE)
+    for topic in received:
+        await crashed.publish(topic, {"seq": 0})
+        await crashed.publish(topic, {"seq": 1})  # 큐 가득 — 거부
+    del crashed
+
+    restarted = InProcessEventBus(max_queue_depth=1)
+    for topic in received:
+        restarted.subscribe(topic, make_handler(topic), criticality=HandlerCriticality.SAFE)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == {"a": [], "b": []}
+
+
+async def test_in_process_bus_multiple_topics_gate_red_survivor_is_detected():
+    """gate-red — 크래시 없이 같은 bus를 계속 쓰면 모든 토픽이 전달된다.
+    즉 `== []` 단언은 이벤트가 실제로 보존될 때 적색이 되는 입력을 갖는다."""
+    received: dict[str, list[int]] = {"a": [], "b": [], "c": []}
+
+    def make_handler(topic: str):
+        async def handler(payload):
+            received[topic].append(payload["seq"])
+
+        return handler
+
+    bus = InProcessEventBus()
+    for topic in received:
+        bus.subscribe(topic, make_handler(topic), criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    for topic in received:
+        await bus.publish(topic, {"seq": 1})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+    assert not all(received[topic] == [] for topic in received)  # 망가진 입력 → 적색
+    assert received == {"a": [1], "b": [1], "c": [1]}
+
+
 async def test_in_process_bus_audit_sink_failure_does_not_rescue_lost_events():
     """failure-injection — audit_sink가 예외를 던지는 상황을 주입해도,
     (a) 워커가 죽지 않고 (b) 크래시로 소실된 이벤트가 어떤 식으로든
