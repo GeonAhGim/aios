@@ -143,44 +143,39 @@ def test_main_rc0_when_scan_roots_exist_but_no_bom_files(tmp_path):
 
 
 def test_find_bom_files_skips_files_that_raise_OSError(tmp_path, monkeypatch, capsys):
-    """OSError를 던지는 has_bom이 ThreadPoolExecutor에서 exceptions를 발생시키면
-    main()이 죽지 않고 해당 파일을 스킵하는지 검증한다.
+    """has_bom이 여는 단계(Path.open)에서 OSError가 나는 파일 하나가 있어도 스캔이
+    죽지 않고, 그 파일만 BOM 아님으로 스킵하며 나머지 BOM 파일은 그대로 보고하는지 검증한다.
 
-    check_no_bom.has_bom()은 내부에서 OSError → False를 반환하지만, ThreadPoolExecutor가
-    함수 객체 자체를 monkeypatch하면 original의 try/except 블록을 우회하므로,
-    _scan_all 내부에서 exceptions를 적절히 캐치하는지 확인해야 한다.
-
-    실제 스크립트는 has_bom()이 OSError를 반환하지 않고 False를 반환하므로,
-    이 테스트는 has_bom이 OSError를 던지는 *대신* scenario에서 main이 crash하지 않고
-    graceful하게 동작하는지 검증한다.
+    has_bom은 OSError를 내부에서 잡아 False로 바꾸므로, 주입된 예외가 ThreadPoolExecutor 밖으로
+    새어 나오면 이 테스트가 실패한다.
     """
-    original_has_bom = check_no_bom.has_bom
+    real_open = Path.open
+    injected: list[Path] = []
 
-    call_log: list[Path] = []
+    def open_raising_for_bad(self, *args, **kwargs):
+        if self.name == "bad.py":
+            injected.append(self)
+            raise OSError("injected: unreadable file")
+        return real_open(self, *args, **kwargs)
 
-    def failing_has_bom(path: Path) -> bool:
-        """OSError를 던지는 대신 False를 반환하는 has_bom."""
-        call_log.append(path)
-        if path.name == "bad.py":
-            # original has_bom이 OSError → False를 반환하는 것과 동일하게 동작
-            return False
-        return original_has_bom(path)
-
-    monkeypatch.setattr(check_no_bom, "has_bom", failing_has_bom)
-
-    # tmp_path 아래 BOM 파일 + OSError 시뮬레이션 파일 배치
     _write_bytes(tmp_path / "src" / "bom.py", BOM + b"x\n")
-    _write_bytes(tmp_path / "src" / "bad.py", b"bad content\n")
+    _write_bytes(tmp_path / "src" / "bad.py", BOM + b"would be BOM if readable\n")
     _write_bytes(tmp_path / "src" / "good.py", b"good content\n")
 
-    # main 호출: bad.py가 OSError 시뮬레이션으로 False 반환해도 bom.py는 정상 발견
-    rc = check_no_bom.main(["--repo", str(tmp_path)])
+    # 픽스처를 다 쓴 뒤에 패치한다 -- write_bytes도 Path.open을 거치므로 먼저 패치하면
+    # 셋업이 죽는다.
+    monkeypatch.setattr(Path, "open", open_raising_for_bad)
 
+    found = check_no_bom.find_bom_files(tmp_path)
+
+    assert injected == [tmp_path / "src" / "bad.py"]
+    assert found == [tmp_path / "src" / "bom.py"]
+
+    rc = check_no_bom.main(["--repo", str(tmp_path)])
     assert rc == 1
     output = capsys.readouterr().out
     assert "bom.py" in output
-    # bad.py도 스캔 대상에 포함되었음 (OSError 시뮬레이션으로 False 반환)
-    assert any(p.name == "bad.py" for p in call_log)
+    assert "bad.py" not in output
 
 
 # ── gate-red reproduction (단언이 실제로 잡는지 망가진 입력으로 확인) ───────────
@@ -189,7 +184,7 @@ def test_find_bom_files_skips_files_that_raise_OSError(tmp_path, monkeypatch, ca
 def test_gate_red_reproduction_bom_in_python_file(tmp_path, capsys):
     """BOM이 심어진 .py 파일을 --repo에 두고 main()이 FAIL + 파일명을 출력하는지
     망가진 입력으로 직접 재현한다. --repo=tmp_path/src/a.py (BOM 파일)를
-    스캔하면 rc=1, 출력에 'a.py'와 'FAIL'이 함께Must 나온다.
+    스캔하면 rc=1, 출력에 'a.py'와 'FAIL'이 함께 나온다.
     """
     target = _write_bytes(tmp_path / "src" / "a.py", BOM + b"x = 1\n")
     assert target.read_bytes()[: len(BOM)] == BOM
@@ -223,7 +218,7 @@ def test_gate_red_reproduction_bom_in_tsx_file(tmp_path, capsys):
 
 def test_gate_red_reproduction_multiple_bom_files_report_count(tmp_path, capsys):
     """여러 BOM 파일이 있을 때 main()이 위반 수를 정확히 세어 출력하는지
-    망가진 입력으로 직접 재현한다. 3개 파일에 BOM을 심으면 '3건'이Must 나온다.
+    망가진 입력으로 직접 재현한다. 3개 파일에 BOM을 심으면 '3건'이 나온다.
     """
     _write_bytes(tmp_path / "src" / "a.py", BOM + b"1\n")
     _write_bytes(tmp_path / "tests" / "b.py", BOM + b"2\n")
