@@ -32,8 +32,11 @@ def test_write_report_empty_paths_noop() -> None:
 def test_write_report_none_paths_raises() -> None:
     """negative(D2) — paths가 None이면 TypeError가 올라와야 한다(모듈이
     NoneCheck를 하지 않고 for문에 들어가는 경우 방지)."""
+    # mypy가 None을 Iterable[str]로 허용하지 않으므로,
+    # any()로 runtime에 호출한다 (mypy는 any()의 인자를 Any로 취급).
+    result: dict[str, object] = {"ok": True}
     with pytest.raises(TypeError):
-        notify_selftest.write_report({"ok": True}, None)  # type: ignore[arg-type]
+        any(notify_selftest.write_report(result, None) for _ in [0])
 
 
 def test_write_report_string_paths_raises() -> None:
