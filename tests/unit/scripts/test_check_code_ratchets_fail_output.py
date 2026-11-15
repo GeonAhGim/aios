@@ -142,6 +142,54 @@ def test_gate_red_breaking_input_flips_exit_code(
     assert _run(tmp_path, raised) == 0
 
 
+def test_loc_over_500_baseline_plus_one_goes_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Negative: one file over 500 lines with baseline 0 must exit 2 and name the file."""
+    _write_src(tmp_path, "red.py", 501)
+
+    assert _run(tmp_path, _empty_baseline()) == 2
+    assert "src/red.py" in capsys.readouterr().out
+
+
+def test_file_outside_scan_dirs_is_ignored(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Negative: a 600-line file in docs/ (outside src/tests/scripts) is not counted."""
+    # Create a big file inside src/ so the scan has a valid tree
+    _write_src(tmp_path, "ok.py", 100)
+    # Create a big file outside the scan directories
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    docs_dir.joinpath("big.py").write_text("x = 1\n" * 601, encoding="utf-8")
+
+    baseline_path = tmp_path / "code-ratchets-baseline.json"
+    baseline_path.write_text(json.dumps(_empty_baseline()), encoding="utf-8")
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "docs/big.py" not in out
+
+
+def test_loc_over_1000_file_counts_toward_500_and_800(tmp_path: Path) -> None:
+    """Negative: a 1001-line file triggers all three LOC buckets simultaneously."""
+    _write_src(tmp_path, "huge.py", 1001)
+
+    baseline = _empty_baseline()
+    baseline["loc_over_500"] = 1
+    baseline["loc_over_800"] = 1
+    baseline["loc_over_1000"] = 1
+
+    assert _run(tmp_path, baseline) == 0
+
+    baseline["loc_over_1000"] = 0
+    assert _run(tmp_path, baseline) == 2
+
+
 @pytest.mark.perf
 def test_perf_scan_file_within_budget(perf_budget: PerfBudget) -> None:
     """Perf: ``_scan_file`` on a 501-line module stays under 60 ms (best of 7).
