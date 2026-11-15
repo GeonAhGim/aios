@@ -194,18 +194,17 @@ async def test_unsupported_report_type_is_rejected_not_silently_accepted() -> No
         clock=lambda: _NOW,
     )
 
-    # 지원하지 않는 유형 → 파싱 실패 → 큐 적재 (게이트 거부 경로와 구분되어야 함)
+    # 지원하지 않는 유형 → 파싱 실패 → 큐 적재
     assert filings.appended == []
     assert len(queue.entries) == 1
-    reason = str(queue.entries[0]["reason"])
-    assert reason != ""
-    assert not reason.startswith("source_contract_denied")
+    assert "알 수 없는 report_type" in str(queue.entries[0]["reason"])
 
 
-async def test_filing_with_missing_required_fields_returns_none_and_queues() -> None:
+async def test_filing_with_missing_required_fields_is_queued_not_appended() -> None:
     """필수 필드(split_ratio_before/after)가 빠진 문서가 들어오면
-    normalize_filing 이 FilingParseError 를 던지고, ingest 는 None 을 반환하며
-    이를 성공으로 위장하지 않는다 — 파싱 실패는 반드시 큐 적재로 남는다."""
+    normalize_filing 이 FilingParseError 를 던지고, ingest 가 이를
+    조용히 None 으로 위장하지 않는다 — 파싱 실패는 반드시 큐 적재로
+    전파된다."""
 
     source_contracts = _FakeSourceContractRepo(_allowed_contract())
     filings = _FakeFilingRepo()
@@ -229,14 +228,12 @@ async def test_filing_with_missing_required_fields_returns_none_and_queues() -> 
         clock=lambda: _NOW,
     )
 
-    # 파싱 실패 → None 리턴, 저장소에는 아무것도 쓰이지 않음
+    # 파싱 실패 → None 리턴 (document not found in repo anyway)
     assert result is None
     assert filings.appended == []
-    # 파싱 실패가 큐에 기록됨 (게이트 거부 사유가 아니어야 함)
+    # 파싱 실패가 큐에 기록됨
     assert len(queue.entries) == 1
-    reason = str(queue.entries[0]["reason"])
-    assert reason != ""
-    assert not reason.startswith("source_contract_denied")
+    assert "split_ratio_before" in str(queue.entries[0]["reason"])
 
 
 # ---- 실패주입 (API timeout / DB failure) (task-10133 DEEPEN) ----
