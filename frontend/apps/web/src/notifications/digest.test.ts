@@ -142,7 +142,9 @@ describe("computeDailyDigest: 수치 성능 단언(spec 아키텍처: apps/web/s
   }
 
   it("실제 구현은 예산 안에 끝나지만, O(n^2) 회귀 구현은 같은 입력에서 예산을 초과한다(게이트 적색)", () => {
-    const input = uniqueDayHistory(10000);
+    // n=10000이면 O(n^2) 회귀 구현이 커버리지 실행(예산 x3=300ms)에서 298ms 안팎으로 예산 경계에 걸려 매번 깜빡였다
+    // (2026-11-15 머지 큐 배치 적색). n=20000이면 회귀 구현은 약 4배라 예산을 확실히 넘고 O(n) 구현은 여유가 크다.
+    const input = uniqueDayHistory(20000);
     const budget = perfBudgetMs(100);
 
     const realStart = performance.now();
