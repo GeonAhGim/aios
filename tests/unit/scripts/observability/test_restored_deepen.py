@@ -16,7 +16,6 @@ DoD:
 
 from __future__ import annotations
 
-import time as time_module
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +28,7 @@ from src.core.observability.notify_port import (
     NotifyResult,
     WebhookNotifyAdapter,
 )
+from tests.support.perf_budget import PerfBudget
 
 _ALERT = AlertNotification(
     alertname="H10_NotifySelfTest",
@@ -146,15 +146,17 @@ async def test_run_selftest_propagates_unexpected_adapter_exception(
 
 
 @pytest.mark.perf
-def test_write_report_100_paths_under_200ms(tmp_path: Path) -> None:
-    """Numeric performance assertion: writing the self-test report to 100
-    destinations (pure local filesystem I/O, no network) must complete well
-    under 200ms."""
-    paths = [tmp_path / f"dest_{i}" / "selftest_latest.json" for i in range(100)]
+def test_write_report_100_paths_under_budget(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """Numeric performance assertion (perf_budget, CPU-time based): writing the
+    self-test report to 100 destinations (pure local filesystem I/O, no
+    network) must stay within a 500ms CPU budget. Measured via PerfBudget so
+    Windows clock quantisation and wall-clock scheduler noise do not produce
+    false failures."""
+    report: dict[str, object] = {"ok": True, "status_code": 200, "error": None}
 
-    started = time_module.perf_counter()
-    notify_selftest.write_report({"ok": True, "status_code": 200, "error": None}, paths)
-    elapsed = time_module.perf_counter() - started
+    def run() -> None:
+        paths = [tmp_path / f"dest_{i}" / "selftest_latest.json" for i in range(100)]
+        notify_selftest.write_report(report, paths)
+        assert all(p.exists() for p in paths)
 
-    assert all(p.exists() for p in paths)
-    assert elapsed < 0.5, f"write_report(100 paths) took {elapsed:.3f}s, budget 0.5s"
+    perf_budget.assert_within(run, budget_ms=500.0, n=3, warmup=0, label="write_report(100 paths)")
