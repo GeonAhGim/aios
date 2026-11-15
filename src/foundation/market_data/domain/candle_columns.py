@@ -84,6 +84,20 @@ def to_candle_records(columns: CandleColumns, key: SeriesKey) -> list[CandleReco
     if any(length != n for length in lengths.values()):
         raise MismatchedColumnLengthError({"ts": n, **lengths})
 
+    # None in Decimal fields — asyncpg returns correct types, but callers
+    # that construct CandleColumns manually may inject None; catch early.
+    for i in range(n):
+        if columns.open[i] is None:
+            raise ValueError("CandleColumns.open에 None이 포함되었습니다")
+        if columns.high[i] is None:
+            raise ValueError("CandleColumns.high에 None이 포함되었습니다")
+        if columns.low[i] is None:
+            raise ValueError("CandleColumns.low에 None이 포함되었습니다")
+        if columns.close[i] is None:
+            raise ValueError("CandleColumns.close에 None이 포함되었습니다")
+        if columns.volume[i] is None:
+            raise ValueError("CandleColumns.volume에 None이 포함되었습니다")
+
     step = duration(key.timeframe)
     return [
         CandleRecord.model_construct(
