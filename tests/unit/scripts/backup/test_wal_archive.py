@@ -330,10 +330,12 @@ def test_evaluate_flags_missing_wal_level():
 
 
 def test_evaluate_flags_missing_archive_mode():
-    """archive_mode 키가 없으면 evaluate는 실패를 보고한다."""
+    """archive_mode 키가 없으면 evaluate는 정확히 1개 이슈를 반환한다.
+    그 이슈는 archive_mode=None으로 시작한다."""
     settings = {"wal_level": "replica", "archive_command": "cp %p /archive/%f"}
     issues = wal_archive.evaluate(settings)
-    assert any("archive_mode" in i for i in issues)
+    assert len(issues) == 1
+    assert issues[0].startswith("archive_mode=None")
 
 
 def test_evaluate_flags_empty_wal_level():
