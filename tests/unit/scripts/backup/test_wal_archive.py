@@ -162,7 +162,8 @@ def test_evaluate_flags_wrong_wal_level():
 def test_evaluate_flags_archive_mode_off():
     settings = {"wal_level": "replica", "archive_mode": "off", "archive_command": _OK_COMMAND}
     issues = wal_archive.evaluate(settings)
-    assert any("archive_mode" in i for i in issues)
+    assert len(issues) == 1
+    assert issues[0].startswith("archive_mode='off'")
 
 
 def test_evaluate_flags_empty_archive_command():
