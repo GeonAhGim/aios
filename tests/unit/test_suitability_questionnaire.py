@@ -137,7 +137,8 @@ def test_evaluate_propagates_scoring_dependency_failure(monkeypatch):
 def test_negative_years_of_experience_scores_zero():
     """Negative years_of_experience → 0 score (fail-closed)."""
     result = SuitabilityQuestionnaire().evaluate(_answers(years_of_experience=-1))
-    assert result.score == result.score  # still returns a valid int
+    # other defaults: ratio 5→0, loss 5→0, LONG_TERM_GROWTH→1, WITHIN_1_YEAR→0
+    assert result.score == 1
     assert sq_module._score_years_of_experience(-1) == 0
 
 
