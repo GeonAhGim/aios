@@ -13,9 +13,7 @@ from uuid import uuid4
 import pytest
 
 from src.foundation.market_data.contracts.v1 import (
-    QualityIssueType,
     SeriesKey,
-    Severity,
     Timeframe,
     Venue,
 )
@@ -24,7 +22,6 @@ from src.foundation.market_data.domain.candle_columns import (
     MismatchedColumnLengthError,
     to_candle_records,
 )
-from src.foundation.market_data.domain.quality.ohlc_sanity import check_candle
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
 from tests.support.perf_budget import PerfBudget
 
@@ -108,30 +105,37 @@ def test_candle_columns_len_matches_ts_length() -> None:
 
 
 def test_to_candle_records_rejects_negative_prices() -> None:
-    """negative test: to_candle_records itself trusts its input (model_construct),
-    so a negative price must be rejected by the write-time gate check_candle;
-    assert the reconstructed record is REJECTed, not silently accepted."""
+    """negative test: to_candle_records rejects negative open/high/low/close."""
+    columns = _columns(3)
+
+    for field in ("open", "high", "low", "close"):
+        bad = CandleColumns(
+            ts=columns.ts,
+            open=[Decimal(-1) if field == "open" else v for v in columns.open],
+            high=[Decimal(-1) if field == "high" else v for v in columns.high],
+            low=[Decimal(-1) if field == "low" else v for v in columns.low],
+            close=[Decimal(-1) if field == "close" else v for v in columns.close],
+            volume=columns.volume,
+            quote_volume=columns.quote_volume,
+        )
+        with pytest.raises(ValueError, match="negative price"):
+            to_candle_records(bad, _key())
+
+
+def test_to_candle_records_rejects_zero_volume() -> None:
+    """negative test: to_candle_records rejects zero or negative volume."""
     columns = _columns(3)
     bad = CandleColumns(
         ts=columns.ts,
-        open=[Decimal(-1)] * 3,
+        open=columns.open,
         high=columns.high,
         low=columns.low,
         close=columns.close,
-        volume=columns.volume,
+        volume=[Decimal(0)] * 3,
         quote_volume=columns.quote_volume,
     )
-
-    records = to_candle_records(bad, _key())
-
-    assert len(records) == 3
-    for record in records:
-        issues = check_candle(record)
-        assert issues
-        assert all(i.severity is Severity.REJECT for i in issues)
-        assert any(i.type is QualityIssueType.OHLC_INCONSISTENT for i in issues)
-    # the control row set stays clean, so the rejection comes from the negative price
-    assert all(not check_candle(r) for r in to_candle_records(columns, _key()))
+    with pytest.raises(ValueError, match="non-positive volume"):
+        to_candle_records(bad, _key())
 
 
 @pytest.mark.parametrize("extra", [-1, 1], ids=["one_short", "one_long"])
@@ -186,7 +190,13 @@ def test_to_candle_records_rejects_none_in_decimal_field() -> None:
         to_candle_records(corrupted, _key())
 
 
-# ── failure injection tests ──────────────────────────────────────────────────
+def test_passes_none_to_model_construct_unchanged() -> None:
+    """positive test: quote_volume=None이 model_construct를 통해 unchanged로
+    전달되는지 검증한다. (fail-open: 예외를 잡지 않고 통과시키지 않음.)"""
+    columns = _columns(3)
+    records = to_candle_records(columns, _key())
+    for record in records:
+        assert record.quote_volume is None
 
 
 def test_to_candle_records_propagates_unknown_timeframe_error(
