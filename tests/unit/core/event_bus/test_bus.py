@@ -68,7 +68,7 @@ def test_incomplete_subclass_cannot_be_instantiated() -> None:
 def test_subscribe_requires_criticality_keyword() -> None:
     bus = _SuperCallingBus()
     with pytest.raises(TypeError):
-        bus.subscribe("t", _noop_handler, HandlerCriticality.SAFE)  # type: ignore[misc]
+        bus.subscribe("t", _noop_handler, HandlerCriticality.SAFE)
 
 
 @pytest.mark.asyncio

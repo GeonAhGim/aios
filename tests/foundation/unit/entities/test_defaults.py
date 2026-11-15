@@ -162,8 +162,8 @@ def test_build_default_hierarchy_propagates_model_creation_error(monkeypatch):
 
     original = contracts.LegalEntity.__init__
     try:
-        contracts.LegalEntity.__init__ = mock_legal_entity_init  # type: ignore[assignment]
+        contracts.LegalEntity.__init__ = mock_legal_entity_init
         with pytest.raises(RuntimeError, match="mock DB unavailable"):
             build_default_hierarchy(user_id=uuid4(), tenant_id=uuid4(), **_KWARGS)
     finally:
-        contracts.LegalEntity.__init__ = original  # type: ignore[assignment]
+        contracts.LegalEntity.__init__ = original
