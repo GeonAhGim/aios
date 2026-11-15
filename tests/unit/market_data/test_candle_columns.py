@@ -69,6 +69,18 @@ def test_to_candle_records_reconstructs_values_and_shares_key(
 
 def test_to_candle_records_empty_columns_returns_empty_list() -> None:
     assert to_candle_records(_columns(0), _key()) == []
+    # 부정: ts는 빈 리스트, 나머지 필드는 길이 1 — 길이 불일치 거부
+    mismatched = CandleColumns(
+        ts=[],
+        open=[Decimal(100)],
+        high=[Decimal(110)],
+        low=[Decimal(90)],
+        close=[Decimal(105)],
+        volume=[Decimal(10)],
+        quote_volume=[None],
+    )
+    with pytest.raises(MismatchedColumnLengthError):
+        to_candle_records(mismatched, _key())
 
 
 def test_candle_columns_len_matches_ts_length() -> None:
