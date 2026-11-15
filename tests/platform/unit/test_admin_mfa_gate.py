@@ -122,6 +122,21 @@ async def test_mfa_enabled_but_never_verified_rejected():
         await get_current_mfa_admin(admin=admin)
 
 
+@pytest.mark.perf
+async def test_mfa_gate_latency_within_budget(perf_budget):
+    """성능 단언(D2) — 게이트 1회 호출의 CPU 지연이 예산 이내여야 한다.
+
+    순수 시각 비교 + 예외 없는 반환 경로이므로 1ms는 충분히 여유 있는 예산이다.
+    측정은 perf_budget 픽스처 경유(raw perf_counter 단언 금지)."""
+    admin = _admin(mfa_verified_at=datetime.now(UTC))
+    sample = await perf_budget.best_of_async(
+        lambda: get_current_mfa_admin(admin=admin), n=5, warmup=1
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"get_current_mfa_admin latency {sample.cpu_ms:.3f}ms exceeded 1.0ms budget"
+    )
+
+
 async def test_mfa_step_up_fresh_monkeypatch_raises():
     """실패주입 — monkeypatch로 break_glass.mfa_step_up_fresh 가 예외를
     유발할 때 게이트가 그 예외를 그대로 전파한다."""
