@@ -1,56 +1,18 @@
-# 파일 범위 분할 제안: task-24871 [재투입]
+# 파일 범위 분할 제안: task-25129
 
 ## 현황
+- task-25129: QA 묶음 1건(부모 24871), files=`src/` (디렉터리 단위라 path_scope 미해소).
+- 실제 대상은 원인 커밋 cc4e82bb(tests/unit/test_indicator_service.py 마커 3줄만 변경, 적색의 직접 원인 아님)이 아니라 spec이 지목한 테스트 3개다. 모두 `tests/`이며 `src/`는 수정 대상이 아니다.
 
-- task-24871: `[health:ci_red] CI pytest_perf_parallel_3 정정`
-- files: `["src/"]` — **과다 지정**. 전소스 스캔이 아니라 3개 테스트 파일의 개별 정정임.
-- 이전 시도: ops-2가 1회 시도 후 턴 한도 초과 (1362s, 46턴)
-- 원인: `files: ["src/"]`로 지정되어 있어 관련 파일 수백 개를 조사하려 함 → 턴 소모
-- **핵심 발견: 3개 테스트 모두 현재 main에서 이미 통과함.**
+## 실제 파일별 분할안 (리프 1개 = 파일 1개)
+1. `tests/unit/data/models/test_serialization.py` (212줄) — `test_serialize_cpu_measurement_converges_with_batch`(L143) 적색: Windows 15.6ms 틱 양자화로 batch=1 cpu=15.625ms. 보조: `tests/support/perf_budget.py`(PerfBudget.best_of/sample) 사용.
+2. `tests/unit/services/test_open_order_sweeper_edge.py` (191줄) — `test_sweep_open_orders_p95_latency_detection_injected_delay`.
+3. `tests/integration/foundation/allocation/test_conftest_deepen.py` (180줄) — `test_create_order_with_fills_round_trip_stays_within_local_budget` (실DB, TEST_DATABASE_URL).
 
-## 실제 변경 파일 분석
+세 파일 모두 500줄 미만이라 `check_code_ratchets.py --near 30` 분할 부담 없음. 서로 독립이라 병렬 가능, 의존 없음.
 
-### 회귀 원인 커밋: cc4e82bb924 (2026-11-05)
+## 지침
+- files 를 위 3개 경로로 교체(`src/` 제거). 예산 상향·기준선 상향·skip/ignore 금지(B-2): 타이머 해상도 의존 측정은 `perf_counter` 기반/반복 배치로 측정 가능한 크기까지 키워 양자화에 둔감하게 고친다.
+- 공용 `tests/support/perf_budget.py` 수정이 필요하면 4번째 리프로 분리(영향 범위 넓음).
+- 원본 task-25129 hold 해제·재큐·코드 수정은 이 제안에서 하지 않았다.
 
-```
-fix(indicators): 지표 지연 검증을 perf 단계로 분리
-```
-
-- 변경 파일: **1개** (`tests/unit/test_indicator_service.py`, +4줄)
-- 내용: 2개 테스트에 `@pytest.mark.perf` 마커 추가
-- **이 커밋 자체가 3개 probe 테스트를 변경하지 않음** — CI가 병렬 실행 시 다른 테스트와의 상호작용으로 적색
-
-### probe 1회 대상 테스트 3건
-
-| 테스트 파일 | 함수명 | 현재 상태 | 실제 수정 파일 |
-|------------|--------|----------|---------------|
-| `tests/unit/data/models/test_serialization.py` | `test_serialize_cpu_measurement_converges_with_batch` | **통과** | `test_serialization.py` (commit `8dd266256`: sample → best_of) |
-| `tests/unit/services/test_open_order_sweeper_edge.py` | `test_sweep_open_orders_p95_latency_detection_injected_delay` | **통과** | 이 파일만 수정 필요 (perf_budget 전환 관련) |
-| `tests/integration/foundation/allocation/test_conftest_deepen.py` | `test_create_order_with_fills_round_trip_stays_within_local_budget` | **통과** | 이 파일만 수정 필요 (budget 상향, baseline 위치 변경) |
-
-### 각 테스트의 실제 수정 파일
-
-| split | 범위 | 파일 수 | 줄 수 | 검증 | 예상 턴 |
-|-------|------|---------|-------|------|---------|
-| split-1 | `tests/unit/data/models/test_serialization.py` | 1 | ~200 | `pytest tests/unit/data/models/test_serialization.py` (15 passed) | 2-3 |
-| split-2 | `tests/unit/services/test_open_order_sweeper_edge.py` | 1 | ~192 | `pytest tests/unit/services/test_open_order_sweeper_edge.py` | 3-5 |
-| split-3 | `tests/integration/foundation/allocation/test_conftest_deepen.py` | 1 | ~181 | `pytest tests/integration/foundation/allocation/test_conftest_deepen.py` | 3-5 |
-
-## 권장
-
-1. **task-24871은 현재 main에서 이미 모든 테스트가 통과하므로 no-op 가능**
-   - `git log cc4e82bb..HEAD -- tests/unit/data/models/test_serialization.py` → `8dd266256`에서 fix
-   - `test_sweep_open_orders_p95_latency_detection_injected_delay` → 현재 통과
-   - `test_create_order_with_fills_round_trip_stays_within_local_budget` → commit `8e04419fb`/`053acaccd`에서 budget/baseline 정정
-
-2. **만약 ND-17 재발행이 새 회귀를 가리킨다면** — files를 위 3개 파일로 좁혀야 함:
-   ```
-   files: [
-     "tests/unit/data/models/test_serialization.py",
-     "tests/unit/services/test_open_order_sweeper_edge.py",
-     "tests/integration/foundation/allocation/test_conftest_deepen.py"
-   ]
-   ```
-
-3. **분할 권장**: split-1은 trivial(2줄 변경), split-2와 split-3은 각각 독립적.
-   split-2와 split-3을 별도 task로 나누면 각 task가 3-5턴으로 턴 한도 문제를 피함.
