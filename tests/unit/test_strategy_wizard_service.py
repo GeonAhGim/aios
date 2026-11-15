@@ -118,3 +118,16 @@ def test_handles_preview_condition_creation_failure(service):
         assert call_log, "_rsi가 호출되었으나 예외가 던져지지 않음"
     finally:
         mod._rsi = original_rsi
+
+
+# ── performance assertion (perf_budget 픽스처 경유) ─────────────────
+
+
+@pytest.mark.perf
+def test_perf_generate_within_budget(service, perf_budget):
+    """마법사 조건 생성은 요청당 호출되므로 예산을 perf_budget으로 건다."""
+    perf_budget.assert_within(
+        lambda: service.generate("STEADY_GROWTH", "LOW"),
+        budget_ms=50,
+        label="generate() 1회",
+    )
