@@ -43,6 +43,52 @@ async def test_in_process_bus_loses_events_on_crash_baseline():
     assert processed == 0  # red baseline — in_process는 구조적으로 이걸 고칠 수 없다
 
 
+async def test_in_process_bus_loses_events_on_crash_baseline_repeat_is_stable():
+    """negative — 시나리오를 반복해도 소실 결과가 우연이 아니라 매번 0이다."""
+    assert [await _scenario() for _ in range(3)] == [0, 0, 0]
+
+
+async def test_in_process_bus_loses_events_on_crash_baseline_fresh_bus_has_no_history():
+    """negative — 재시작한 새 버스에는 이전 인스턴스의 큐/구독 이력이 없다."""
+    crashed = InProcessEventBus()
+    for i in range(3):
+        await crashed.publish("topic", {"seq": i})
+    del crashed
+
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.05)
+    await restarted.stop()
+    assert received == []  # 구독이 없던 시점의 publish는 새 인스턴스로 이월되지 않는다
+
+
+async def test_in_process_bus_loses_events_on_crash_baseline_only_post_restart_events_arrive():
+    """negative — 재시작 뒤 새로 발행한 이벤트만 도착하고 크래시 전 이벤트는 오지 않는다."""
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    crashed = InProcessEventBus()
+    crashed.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await crashed.publish("topic", {"seq": 0})
+    del crashed
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await restarted.publish("topic", {"seq": 1})
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    assert received == [1]  # seq=0(크래시 전)은 복구되지 않는다
+
+
 async def test_in_process_bus_loses_events_even_when_started_before_crash():
     """negative — "start()를 안 불러서 그렇다"는 가설을 기각한다.
 
