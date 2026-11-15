@@ -98,6 +98,17 @@ def to_candle_records(columns: CandleColumns, key: SeriesKey) -> list[CandleReco
         if columns.volume[i] is None:
             raise ValueError("CandleColumns.volume에 None이 포함되었습니다")
 
+    # Validate prices non-negative and volume positive before reconstruction.
+    for i in range(n):
+        if columns.open[i] < 0 or columns.high[i] < 0 or columns.low[i] < 0 or columns.close[i] < 0:
+            raise ValueError(
+                f"CandleColumns row {i} has negative price: "
+                f"open={columns.open[i]}, high={columns.high[i]}, "
+                f"low={columns.low[i]}, close={columns.close[i]}"
+            )
+        if columns.volume[i] <= 0:
+            raise ValueError(f"CandleColumns row {i} has non-positive volume: {columns.volume[i]}")
+
     step = duration(key.timeframe)
     return [
         CandleRecord.model_construct(
