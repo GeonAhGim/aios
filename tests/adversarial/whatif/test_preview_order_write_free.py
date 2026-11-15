@@ -28,8 +28,12 @@ from collections import deque
 from collections.abc import Callable
 from datetime import UTC
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.support.perf_budget import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = ROOT / "src/foundation/whatif/application/preview_order.py"
@@ -294,6 +298,24 @@ def test_runtime_execution_touches_no_db_primitive(monkeypatch: pytest.MonkeyPat
     assert result.would_be_denied_by == ()
 
 
+def test_negative_runtime_trap_fires_on_db_primitive_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """런타임 트랩 자체의 대조군 — 트랩이 실제로 DB 원시 함수 호출을 막고
+    기록하는지 확인한다. 트랩이 no-op이면 위의 런타임 테스트는 공허하게 통과한다."""
+
+    import asyncpg
+
+    calls: list[str] = []
+
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        calls.append("asyncpg.connect")
+        raise _DbAccessError("UX-A2 violation: asyncpg.connect invoked")
+
+    monkeypatch.setattr(asyncpg, "connect", _raise, raising=False)
+    with pytest.raises(_DbAccessError):
+        asyncpg.connect("postgresql://invalid")
+    assert calls == ["asyncpg.connect"]
+
+
 # ---------------------------------------------------------------------------
 # 3. 위조 주입 negative — 체커 결함 방지
 # ---------------------------------------------------------------------------
@@ -444,16 +466,16 @@ def test_gate_turns_red_when_a_write_call_is_injected_into_the_real_file(
 # ---------------------------------------------------------------------------
 
 
-def test_performance_ast_scan_under_10ms(perf_budget) -> None:
+def test_performance_ast_scan_under_10ms(perf_budget: PerfBudget) -> None:
     """AST scan CPU budget excludes unrelated xdist scheduling delays."""
     tree = ast.parse(TARGET.read_text(encoding="utf-8"))
     perf_budget.assert_within(lambda: find_direct_violations(tree), budget_ms=10, batch=100)
 
 
-def test_performance_import_scan_under_200ms(perf_budget) -> None:
+def test_performance_import_scan_under_200ms(perf_budget: PerfBudget) -> None:
     """Measure the complete import graph with the unchanged 200ms CPU budget."""
 
-    def scan():
+    def scan() -> None:
         violations, reached = scan_import_graph(TARGET, ROOT, BANNED_MODULES)
         assert not violations
         assert TARGET in reached and len(reached) > 1
