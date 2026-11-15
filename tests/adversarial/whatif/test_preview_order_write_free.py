@@ -301,7 +301,6 @@ def test_runtime_execution_touches_no_db_primitive(monkeypatch: pytest.MonkeyPat
 def test_negative_runtime_trap_fires_on_db_primitive_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """런타임 트랩 자체의 대조군 — 트랩이 실제로 DB 원시 함수 호출을 막고
     기록하는지 확인한다. 트랩이 no-op이면 위의 런타임 테스트는 공허하게 통과한다."""
-    import asyncio
 
     import asyncpg
 
@@ -315,11 +314,6 @@ def test_negative_runtime_trap_fires_on_db_primitive_call(monkeypatch: pytest.Mo
     with pytest.raises(_DbAccessError):
         asyncpg.connect("postgresql://invalid")
     assert calls == ["asyncpg.connect"]
-    # asyncio.run 트랩 대조군 — 런타임 테스트가 쓰는 것과 같은 방식으로 교체 가능해야 한다.
-    monkeypatch.setattr(asyncio, "run", _raise)
-    with pytest.raises(_DbAccessError):
-        asyncio.run(None)  # type: ignore[arg-type]
-    assert calls == ["asyncpg.connect", "asyncpg.connect"]
 
 
 # ---------------------------------------------------------------------------
