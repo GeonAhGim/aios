@@ -91,3 +91,56 @@ def test_main_propagates_oserror_from_db_connect(monkeypatch):
 
     with pytest.raises(OSError, match="connection refused"):
         wal_archive.main(["--dsn", "postgresql://x/y"])
+
+
+# --- negative: verify-write path with non-directory path ----------------------
+
+
+def test_main_exits_1_when_verify_write_path_is_file(monkeypatch, tmp_path, capsys):
+    """--verify-write에 파일을 넘기면 실제 verify 경로가 타임아웃 위반(종료코드 1).
+
+    디렉터리가 존재하지만 파일인 경로는 glob("*")이 빈 집합을 돌려
+    pg_switch_wal() 이후에도 새 파일이 나타나지 않는 결과와 같다.
+    """
+    _healthy_settings(monkeypatch)
+    _unmocked_verify(monkeypatch)
+    regular_file = tmp_path / "not_a_dir"
+    regular_file.write_text("I am a file")
+
+    code = wal_archive.main(["--dsn", "postgresql://x/y", "--verify-write", str(regular_file)])
+
+    assert code == 1
+    assert "새 파일" in capsys.readouterr().err
+
+
+# --- failure injection: PermissionError from list_dir (Path.glob) ------------
+
+
+def test_verify_raises_PermissionError_from_list_dir(monkeypatch, tmp_path):
+    """_default_list_dir의 Path.glob가 PermissionError를 던지면 verify_archiving_advances가
+    예외를 전파한다 -- 실패 모드를 실제 fs 호출 대상으로 단언."""
+
+    def _boom_list_dir(_d):
+        raise PermissionError("Permission denied (injected)")
+
+    with pytest.raises(PermissionError, match="Permission denied"):
+        wal_archive.verify_archiving_advances(
+            "postgresql://x/y",
+            tmp_path,
+            switch_wal=lambda _dsn: None,
+            list_dir=_boom_list_dir,
+            sleep=lambda _s: None,
+            clock=_fast_clock(),
+        )
+
+
+# --- negative: archive_command whitespace-only -------------------------------
+
+
+def test_evaluate_flags_whitespace_only_archive_command():
+    """archive_command가 공백만("  ")이면 strip() 후 빈 값으로 위반 1건."""
+    settings = {"wal_level": "replica", "archive_mode": "on", "archive_command": "  "}
+    issues = wal_archive.evaluate(settings)
+    assert len(issues) == 1
+    assert "archive_command" in issues[0]
+    assert "비어" in issues[0]
