@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
@@ -26,7 +27,8 @@ async def test_in_process_bus_multiple_topics_gate_red_corrupt_payload():
     crashed = InProcessEventBus()
     crashed.subscribe("a", handler, criticality=HandlerCriticality.CRITICAL)
     await crashed.publish("a", {"seq": 1})
-    await crashed.publish("a", None)  # type: ignore[arg-type] — 의도적 망가짐
+    corrupt: Any = None  # 의도적 망가짐
+    await crashed.publish("a", corrupt)
     del crashed
 
     restarted = InProcessEventBus()
@@ -50,7 +52,7 @@ async def test_in_process_bus_multiple_topics_gate_red_corrupt_topic_name():
 
     crashed = InProcessEventBus()
     crashed.subscribe("topic_a", handler, criticality=HandlerCriticality.CRITICAL)
-    await crashed.publish("topic_b", {"seq": 1})  # type: ignore[arg-type] — 의도적 불일치
+    await crashed.publish("topic_b", {"seq": 1})
     del crashed
 
     restarted = InProcessEventBus()
