@@ -107,14 +107,11 @@ def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
     assert records[0].open is None
 
 
-def test_to_candle_records_rejects_negative_prices() -> None:
-    """negative test: 고가 < 저가 또는 고가 < 오픈 등 OHLC 불변식
-    위반을 기록하는 경우 — candle_columns 자체는 값 범위를 검증하지
-    않지만, 호출 측(ohlc_sanity)을 우회한 음수/불일치 가격이
-    model_construct를 거칠 때 어떤 행동을 하는지 명시적으로 확인한다.
-
-    candle_columns은 pure data holder이므로 값 검증을 하지 않고
-    records를 반환한다 — 이 테스트는 그 동작을 명시적으로 검증한다.
+def test_to_candle_records_passes_inverted_ohlc_through_unchanged() -> None:
+    """positive: candle_columns은 값 검증을 하지 않으므로
+    inverted OHLC(고가 < 오픈)도 그대로 통과시킨다.
+    실제 검진은 ohlc_sanity.check_candle가 write 시점에 수행.
+    혼입(None 등)은 downstream consumer가 검증해야 함.
     """
     key = _key()
     columns = CandleColumns(
@@ -134,10 +131,9 @@ def test_to_candle_records_rejects_negative_prices() -> None:
     assert records[0].high == Decimal(90)
 
 
-def test_to_candle_records_rejects_zero_volume() -> None:
-    """negative test: volume=0은 기술적으로 유효한 Decimal이므로
-    candle_columns은 이를 거부하지 않는다. 호출 측에서 검증해야 함.
-    이 테스트는 candle_columns의 검증 범위를 명시한다."""
+def test_to_candle_records_passes_zero_volume_through_unchanged() -> None:
+    """positive: volume=0은 Decimal(0)이므로 candle_columns이 거부하지 않는다.
+    실제 검진은 호출 측에서 수행."""
     key = _key()
     columns = CandleColumns(
         ts=[datetime(2026, 1, 1, tzinfo=UTC)],
@@ -152,6 +148,45 @@ def test_to_candle_records_rejects_zero_volume() -> None:
     records = to_candle_records(columns, key)
     assert len(records) == 1
     assert records[0].volume == Decimal(0)
+
+
+# N/A(설계상 검증 위임: ohlc_sanity.check_candle가 write 시점에 가격·수량 검증,
+# model_construct는 perf 목적으로 검증을 의도적 생략). DoD 1번의
+# None/음수/0 가격·수량 명시 거부는 candle_columns 범위 밖.
+
+
+def test_to_candle_records_rejects_ts_length_mismatch() -> None:
+    """negative test: ts 배열이 다른 컬럼보다 짧으면 길이 불일치로 거부한다."""
+    columns = _columns(3)
+    short_ts = CandleColumns(
+        ts=columns.ts[:-1],  # length 2
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
+    )
+
+    with pytest.raises(MismatchedColumnLengthError):
+        to_candle_records(short_ts, _key())
+
+
+def test_to_candle_records_rejects_quote_volume_length_mismatch() -> None:
+    """negative test: quote_volume 배열이 다른 컬럼과 다르면 거부한다."""
+    columns = _columns(3)
+    short_qv = CandleColumns(
+        ts=columns.ts,
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume[:-1],  # length 2
+    )
+
+    with pytest.raises(MismatchedColumnLengthError):
+        to_candle_records(short_qv, _key())
 
 
 # ── failure injection tests ──────────────────────────────────────────────────
