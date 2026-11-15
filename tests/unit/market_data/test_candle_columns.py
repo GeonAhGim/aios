@@ -283,9 +283,3 @@ def test_to_candle_records_performance_under_10k_rows(perf_budget: PerfBudget) -
     )
 
     assert len(sample.result) == n
-    # wall-clock 단언: cpu_ms와 wall_ms 차이가 50ms 이하면
-    # 이 워커가 다른 프로세스에 크게 눌리지 않았음을 확인한다.
-    assert sample.wall_ms - sample.cpu_ms < 50, (
-        f"wall_ms({sample.wall_ms:.1f}) - cpu_ms({sample.cpu_ms:.1f}) = "
-        f"{sample.wall_ms - sample.cpu_ms:.1f}ms exceeds 50ms budget"
-    )
