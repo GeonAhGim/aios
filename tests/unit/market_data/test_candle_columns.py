@@ -84,7 +84,17 @@ def test_to_candle_records_empty_columns_returns_empty_list() -> None:
 
 
 def test_candle_columns_len_matches_ts_length() -> None:
-    assert len(_columns(5)) == 5
+    """CandleColumns.__len__은 ts 길이를 반환하고, 모든 필드 배열의 길이가 ts와 같다."""
+    cols = _columns(5)
+    n = len(cols)
+    assert n == 5
+    assert len(cols.ts) == n
+    assert len(cols.open) == n
+    assert len(cols.high) == n
+    assert len(cols.low) == n
+    assert len(cols.close) == n
+    assert len(cols.volume) == n
+    assert len(cols.quote_volume) == n
 
 
 # ── negative tests ───────────────────────────────────────────────────────────
