@@ -42,18 +42,29 @@ def _columns(n: int) -> CandleColumns:
 # ── positive / baseline ──────────────────────────────────────────────────────
 
 
-def test_to_candle_records_reconstructs_values_and_shares_key() -> None:
+def test_to_candle_records_reconstructs_values_and_shares_key(
+    perf_budget: PerfBudget,
+) -> None:
     key = _key()
     columns = _columns(3)
 
-    records = to_candle_records(columns, key)
+    sample = perf_budget.assert_within(
+        lambda: to_candle_records(columns, key),
+        budget_ms=10,
+        label="to_candle_records(3 rows)",
+    )
+    records = sample.result
 
     assert len(records) == 3
     assert all(r.key is key for r in records)
     assert [r.open_time for r in records] == columns.ts
     assert [r.close_time for r in records] == [ts + timedelta(minutes=1) for ts in columns.ts]
     assert [r.open for r in records] == columns.open
+    assert [r.high for r in records] == columns.high
+    assert [r.low for r in records] == columns.low
     assert [r.close for r in records] == columns.close
+    assert [r.volume for r in records] == columns.volume
+    assert [r.quote_volume for r in records] == columns.quote_volume
 
 
 def test_to_candle_records_empty_columns_returns_empty_list() -> None:
@@ -98,7 +109,7 @@ def test_to_candle_records_rejects_mismatched_column_lengths() -> None:
 
 def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
     """negative test: model_construct는 검증.skip하므로 None이 Decimal
-    필드에혼입되어도 즉시 예외를 던지지 않는다. downstream consumer가
+    필드에 혼입되어도 즉시 예외를 던지지 않는다. downstream consumer가
     이를 검증해야 함 — candle_columns 자체는 pure data holder이므로
     값 검증을 하지 않는다. 이 테스트는 그 동작을 명시적으로 확인한다."""
     columns = _columns(3)
