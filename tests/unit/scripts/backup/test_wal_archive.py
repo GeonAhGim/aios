@@ -247,19 +247,36 @@ def test_verify_archiving_advances_detects_new_file_before_timeout():
 
 
 def test_verify_archiving_advances_times_out_when_nothing_new():
-    clock_values = iter([0.0, 1.0, 5.0, 11.0, 11.0])
+    timeout = 10.0
+    poll_interval = 1.0
+    current_time = [0.0]
+    sleep_calls = [0]
+    switch_wal_calls = []
+
+    def fake_clock() -> float:
+        return current_time[0]
+
+    def fake_sleep(duration: float) -> None:
+        sleep_calls[0] += 1
+        if sleep_calls[0] > 100:
+            raise AssertionError("sleep이 100회 초과 — 구현이 끝나지 않음")
+        current_time[0] += poll_interval
+
     reason = wal_archive.verify_archiving_advances(
         "postgresql://x/y",
         "archive-dir",
-        timeout=10.0,
-        poll_interval=1.0,
-        switch_wal=lambda dsn: None,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        switch_wal=lambda dsn: switch_wal_calls.append(dsn),
         list_dir=lambda _d: {"a"},
-        sleep=lambda s: None,
-        clock=lambda: next(clock_values),
+        sleep=fake_sleep,
+        clock=fake_clock,
     )
     assert reason is not None
     assert "새 파일" in reason
+    assert "10초 대기" in reason
+    assert switch_wal_calls == ["postgresql://x/y"]
+    assert sleep_calls[0] == int(timeout / poll_interval)
 
 
 # --- negative tests: invalid/corrupted inputs --------------------------------
