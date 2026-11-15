@@ -266,11 +266,14 @@ def test_verify_archiving_advances_times_out_when_nothing_new():
 
 
 def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
-    """존재하지 않는 아카이브 디렉터리를 --verify-write로 지정하면 종료코드 1."""
+    """존재하지 않는 아카이브 디렉터리를 --verify-write로 지정하면 종료코드 1.
+
+    verify_archiving_advances 자체를 mock하지 않고, read_wal_settings만 mock해
+    실제 verify_archiving_advances 경로가 timeout으로 종료코드 1을 반환함을 검증.
+    """
     import sys
     from io import StringIO
 
-    # read_wal_settings를 mock해서 DB 연결 없이 valid settings를 반환
     monkeypatch.setattr(
         wal_archive,
         "read_wal_settings",
@@ -280,13 +283,22 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
             "archive_command": "cp %p /archive/%f",
         },
     )
-    # verify_archiving_advances가 switch_wal을 통해 DB에 연결하므로
-    # verify_archiving_advances 자체를 mock해서 reason을 반환하도록 한다
-    monkeypatch.setattr(
-        wal_archive,
-        "verify_archiving_advances",
-        lambda *a, **k: "verify failed",
-    )
+    # verify_archiving_advances의 keyword-only default 인수를 덮어
+    # DB/대기 없이 timeout 경로로 유도
+    _call_count = [0]
+
+    def _counter_clock():
+        _call_count[0] += 1
+        if _call_count[0] == 1:
+            return 0.0  # switch_time: 첫 호출은 0
+        return 9999.0  # 이후 호출: deadline(30.0) 초과
+
+    kw = dict(wal_archive.verify_archiving_advances.__kwdefaults__)
+    kw["switch_wal"] = lambda dsn: None  # DB 연결 안 함
+    kw["list_dir"] = lambda _d: set()  # 빈 집합 (실제 부재 디렉터리와 동일)
+    kw["sleep"] = lambda s: None  # 즉시 반환
+    kw["clock"] = _counter_clock
+    wal_archive.verify_archiving_advances.__kwdefaults__ = kw
 
     old_argv = sys.argv
     old_stdout = sys.stdout
@@ -299,9 +311,7 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
         "/nonexistent/dir/that/does/not/exist",
     ]
     sys.stdout = StringIO()
-    sys.stderr = StringIO(
-        "stderr",
-    )  # noqa: DUPL125
+    sys.stderr = StringIO()
     try:
         code = wal_archive.main()
         assert code == 1
@@ -309,10 +319,23 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
         sys.argv = old_argv
         sys.stdout = old_stdout
         sys.stderr = old_stderr
+        # restore original kwdefaults
+        wal_archive.verify_archiving_advances.__kwdefaults__ = {
+            "timeout": 30.0,
+            "poll_interval": 1.0,
+            "switch_wal": wal_archive._default_switch_wal,
+            "list_dir": wal_archive._default_list_dir,
+            "sleep": __import__("time").sleep,
+            "clock": __import__("time").monotonic,
+        }
 
 
 def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
-    """쓰기 권한이 없는 디렉터리를 --verify-write로 지정하면 종료코드 1."""
+    """쓰기 권한이 없는 디렉터리를 --verify-write로 지정하면 종료코드 1.
+
+    verify_archiving_advances 자체를 mock하지 않고, default 인수만 조작해
+    실제 함수가 새 파일 없이 timeout으로 종료코드 1을 반환함을 검증.
+    """
     import sys
     import tempfile
     from io import StringIO
@@ -328,6 +351,23 @@ def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
     )
 
     tmpdir = tempfile.mkdtemp()
+    # verify_archiving_advances의 keyword-only default 인수를 덮어
+    # timeout 경로로 유도
+    _call_count2 = [0]
+
+    def _counter_clock2():
+        _call_count2[0] += 1
+        if _call_count2[0] == 1:
+            return 0.0
+        return 9999.0
+
+    kw = dict(wal_archive.verify_archiving_advances.__kwdefaults__)
+    kw["switch_wal"] = lambda dsn: None
+    kw["list_dir"] = lambda _d: set()
+    kw["sleep"] = lambda s: None
+    kw["clock"] = _counter_clock2
+    wal_archive.verify_archiving_advances.__kwdefaults__ = kw
+
     old_argv = sys.argv
     old_stdout = sys.stdout
     old_stderr = sys.stderr
@@ -339,13 +379,8 @@ def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
         tmpdir,
     ]
     sys.stdout = StringIO()
-    sys.stderr = StringIO(
-        "stderr",
-    )  # noqa: DUPL125
+    sys.stderr = StringIO()
     try:
-        # list_dir를 monkeypatch하여 비어있도록 만들어 verify_archiving_advances가
-        # 타임아웃으로 실패하도록 유도 (verify_write 경로가 실패 경로를 타는지 확인)
-        monkeypatch.setattr(wal_archive, "verify_archiving_advances", lambda *a, **k: "타임아웃")
         code = wal_archive.main()
         assert code == 1
     finally:
@@ -355,6 +390,15 @@ def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
         import shutil
 
         shutil.rmtree(tmpdir, ignore_errors=True)
+        # restore original kwdefaults
+        wal_archive.verify_archiving_advances.__kwdefaults__ = {
+            "timeout": 30.0,
+            "poll_interval": 1.0,
+            "switch_wal": wal_archive._default_switch_wal,
+            "list_dir": wal_archive._default_list_dir,
+            "sleep": __import__("time").sleep,
+            "clock": __import__("time").monotonic,
+        }
 
 
 def test_evaluate_flags_missing_wal_level():
@@ -390,24 +434,77 @@ def test_evaluate_flags_multiple_issues():
     assert any("archive_command" in i for i in issues)
 
 
+# --- negative tests: corrupted/missing WAL file paths ------------------------
+
+
+def test_evaluate_returns_issue_for_missing_archive_command_path():
+    """archive_command가 빈 문자열이면 WAL 파일 경로 부재 위반을 반환한다."""
+    settings = {
+        "wal_level": "replica",
+        "archive_mode": "on",
+        "archive_command": "",
+    }
+    issues = wal_archive.evaluate(settings)
+    assert any("archive_command" in i for i in issues)
+
+
+def test_evaluate_returns_issue_for_disabled_archive_command():
+    """archive_command가 '(disabled)'면 아카이브 불가 위반을 반환한다."""
+    settings = {
+        "wal_level": "replica",
+        "archive_mode": "on",
+        "archive_command": "(disabled)",
+    }
+    issues = wal_archive.evaluate(settings)
+    assert any("archive_command" in i for i in issues)
+
+
+def test_evaluate_returns_issue_for_whitespace_only_archive_command():
+    """archive_command가 공백만 있으면 비어있는 것으로 간주한다."""
+    settings = {
+        "wal_level": "replica",
+        "archive_mode": "on",
+        "archive_command": "   ",
+    }
+    issues = wal_archive.evaluate(settings)
+    assert any("archive_command" in i for i in issues)
+
+
+# --- _default_list_dir: non-existent dir returns empty set (quiet handling) --
+
+
+def test_default_list_dir_returns_empty_set_for_nonexistent_directory():
+    """_default_list_dir가 없는 디렉터리를 호출하면 빈 집합을 반환한다.
+
+    이 동작은 결함으로 간주될 수 있음(실수 silently 통과): 디렉터리가
+    존재하지 않아도 오류 없이 빈 집합을 반환하므로 호출자가 실수를
+    인지하지 못한다. 필요시 xfail로 문서화할 것.
+    """
+    from pathlib import Path
+
+    result = wal_archive._default_list_dir(Path("/nonexistent/path/that/does/not/exist"))
+    assert result == set()
+
+
 # --- failure injection: OSError in verify_archiving_advances -----------------
 
 
-def test_verify_archiving_advances_raises_OSError_from_list_dir():
-    """list_dir가 OSError를 던지면 호출부가 이를 삼키지 않고 전파한다."""
+def test_verify_archiving_advances_raises_OSError_from_switch_wal():
+    """switch_wal(= copy/move에 해당하는 WAL 스위치 조작)가 OSError를 던지면
+    호출부가 이를 삼키지 않고 전파한다."""
     import pytest
 
-    def failing_list_dir(_d):
-        raise OSError("directory read failed")
+    def failing_switch_wal(_dsn):
+        raise OSError("WAL switch failed — copy/move error")
 
-    with pytest.raises(OSError, match="directory read failed"):
+    with pytest.raises(OSError, match="WAL switch failed"):
         wal_archive.verify_archiving_advances(
             "postgresql://x/y",
             "archive-dir",
             timeout=1.0,
             poll_interval=0.5,
-            switch_wal=lambda dsn: None,
-            list_dir=failing_list_dir,
+            switch_wal=failing_switch_wal,
+            list_dir=lambda _d: set(),
             sleep=lambda s: None,
             clock=lambda: 999.0,  # deadline 초과 방지
         )
