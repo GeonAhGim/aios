@@ -86,3 +86,18 @@ def test_missing_demo_credentials_propagates_when_environ_access_fails(
 
     with pytest.raises(RuntimeError):
         missing_demo_credentials()
+
+
+def test_skip_guard_stays_within_budget_on_missing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
+) -> None:
+    # 성능 단언: 자격증명 누락 가드는 매 픽스처 진입마다 호출되므로 상수 시간이어야 한다.
+    for name in CREDENTIAL_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    def _guard() -> None:
+        with pytest.raises(Skipped):
+            skip_if_missing_demo_credentials()
+
+    perf_budget.assert_within(_guard, budget_ms=5.0)
