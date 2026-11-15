@@ -197,10 +197,10 @@ async def test_unsupported_report_type_is_rejected_not_silently_accepted() -> No
     # 지원하지 않는 유형 → 파싱 실패 → 큐 적재
     assert filings.appended == []
     assert len(queue.entries) == 1
-    assert "parse" in str(queue.entries[0]["reason"]).lower() or queue.entries[0]["reason"] != ""
+    assert "알 수 없는 report_type" in str(queue.entries[0]["reason"])
 
 
-async def test_filing_with_missing_required_fields_raises_not_swallowed() -> None:
+async def test_filing_with_missing_required_fields_is_queued_not_appended() -> None:
     """필수 필드(split_ratio_before/after)가 빠진 문서가 들어오면
     normalize_filing 이 FilingParseError 를 던지고, ingest 가 이를
     조용히 None 으로 위장하지 않는다 — 파싱 실패는 반드시 큐 적재로
@@ -233,7 +233,7 @@ async def test_filing_with_missing_required_fields_raises_not_swallowed() -> Non
     assert filings.appended == []
     # 파싱 실패가 큐에 기록됨
     assert len(queue.entries) == 1
-    assert "parse" in str(queue.entries[0]["reason"]).lower() or queue.entries[0]["reason"] != ""
+    assert "split_ratio_before" in str(queue.entries[0]["reason"])
 
 
 # ---- 실패주입 (API timeout / DB failure) (task-10133 DEEPEN) ----
