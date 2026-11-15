@@ -123,18 +123,60 @@ def test_top_n_orders_bids_descending_and_asks_ascending():
 
 
 def test_top_n_boundary_negative_zero():
-    """failure-injection — top_n(n) 에 음수/0 을 넘겨도 예외 없이 빈 시퀀스를 반환한다."""
+    """negative — top_n(n<0) 은 슬라이싱으로 조용히 잘리지 않고 ValueError 로 거부한다.
+    경계 — top_n(0) 은 예외 없이 빈 시퀀스를 반환한다."""
     book = OrderBookState.from_snapshot(_snapshot())
-    # n < 0: Python 슬라이싱 [:−1] 은 마지막 요소 제외, 도메인 검증 없음 확인
-    top_bids_neg, top_asks_neg = book.top_n(-1)
-    # bids 2 개 → [:−1] 은 1 개 반환 (마지막 제외)
-    assert len(top_bids_neg) == 1
-    assert len(top_asks_neg) == 1
+    with pytest.raises(ValueError):
+        book.top_n(-1)
 
-    # n == 0: 슬라이싱 [:0] 은 항상 빈 리스트
     top_bids_zero, top_asks_zero = book.top_n(0)
     assert top_bids_zero == []
     assert top_asks_zero == []
+
+
+def test_top_n_failure_injection_sort_error_propagates(monkeypatch):
+    """failure-injection — 정렬 의존성 예외는 삼키지 않고 전파하며 원본 상태는 변하지 않는다."""
+    from src.foundation.market_data.domain import l2_orderbook
+
+    book = OrderBookState.from_snapshot(_snapshot())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("injected sort failure")
+
+    monkeypatch.setattr(l2_orderbook, "sorted", _boom, raising=False)
+    with pytest.raises(RuntimeError, match="injected sort failure"):
+        book.top_n(1)
+    monkeypatch.undo()
+
+    assert book.bids[Decimal("10.0")] == Decimal("1")
+    assert book.asks[Decimal("10.5")] == Decimal("1")
+
+
+def test_apply_diff_failure_injection_validator_error_keeps_source(monkeypatch):
+    """failure-injection — 검증 예외 시 apply_diff 는 새 상태를 만들지 않고 원본을 유지한다."""
+    from src.foundation.market_data.domain import l2_orderbook
+
+    book = OrderBookState.from_snapshot(_snapshot())
+    diff = L2Diff(
+        sequence=101, as_of=_T1, bid_updates=((Decimal("9.0"), Decimal("3")),), ask_updates=()
+    )
+
+    def _boom(_updates):
+        raise RuntimeError("injected validator failure")
+
+    monkeypatch.setattr(l2_orderbook, "_validate_diff_side", _boom)
+    with pytest.raises(RuntimeError, match="injected validator failure"):
+        book.apply_diff(diff)
+    monkeypatch.undo()
+
+    assert book.sequence == 100
+    assert Decimal("9.0") not in book.bids
+
+
+def test_top_n_perf_budget(perf_budget):
+    """perf — 2 레벨 호가에서 top_n(50) 은 예산 내 완료된다 (perf_budget 경유)."""
+    book = OrderBookState.from_snapshot(_snapshot())
+    perf_budget.assert_within(lambda: book.top_n(50), budget_ms=5.0)
 
 
 def test_top_n_returns_min_n_len():
