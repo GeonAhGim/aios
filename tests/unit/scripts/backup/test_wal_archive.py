@@ -152,7 +152,11 @@ def test_evaluate_performance_baseline_and_gate_red_with_virtual_delay():
 def test_evaluate_flags_wrong_wal_level():
     settings = {"wal_level": "minimal", "archive_mode": "on", "archive_command": _OK_COMMAND}
     issues = wal_archive.evaluate(settings)
-    assert any("wal_level" in i for i in issues)
+    assert len(issues) == 1, f"expected exactly 1 issue, got {len(issues)}: {issues}"
+    assert issues[0].startswith("wal_level="), f"expected wal_level violation, got: {issues[0]}"
+    # 대조군: replica에서는 위반이 없어야 함(항상 위반을 내는 evaluate()를 잡음)
+    good = {"wal_level": "replica", "archive_mode": "on", "archive_command": _OK_COMMAND}
+    assert wal_archive.evaluate(good) == []
 
 
 def test_evaluate_flags_archive_mode_off():
