@@ -247,3 +247,44 @@ def test_plan_is_schedule_500_slices_under_budget(
         n=15,
         label="plan_is_schedule 500-slice depth1",
     )
+
+
+# -- failure_injection: guard.check_participation 가짜 inject → 적색 ----------
+
+
+def test_failure_inject_corrupted_participation_cap_triggers_guard_failure() -> None:
+    """Corrupt `algo.max_participation_pct` to `150` (> 100) after
+    ParentOrder construction. The `_validate_participation_cap` call
+    inside `plan_is_schedule` invokes `check_participation(0, 1, cap)`,
+    which rejects any cap outside `(0, 100]` -- this is the fail-closed
+    path that catches post-validation mutations.
+
+    This is a failure-injection test: we mutate the parent object after
+    construction to simulate a post-validation bug.
+    """
+    from src.foundation.ems.domain.algo.guard import ParticipationExceededError
+
+    parent = _parent(urgency=Decimal("1"), max_participation_pct=Decimal("100"))
+    # Mutate the cap to an out-of-range value -- simulates a corruption bug.
+    parent.algo.max_participation_pct = Decimal("150")
+    tight_profile = [Decimal("1000")] * 4
+
+    with pytest.raises(ParticipationExceededError, match="out-of-range cap"):
+        plan_is_schedule(parent, volume_profile=tight_profile)
+
+
+# -- gate_red: corrupted max_participation_pct → 적색 확인 -------------------
+
+
+def test_gate_red_negative_cap_raises_participation_exceeded() -> None:
+    """Gate-red reproduction: mutate `max_participation_pct` to a negative
+    value after construction. The `_validate_participation_cap` call inside
+    `plan_is_schedule` invokes `check_participation(0, 1, cap)` which
+    rejects any cap <= 0. This proves the fail-closed guard actually fires
+    with the correct error type and message."""
+    from src.foundation.ems.domain.algo.guard import ParticipationExceededError
+
+    parent = _parent(qty=Decimal("10000"), urgency=Decimal("1"))
+    parent.algo.max_participation_pct = Decimal("-5")
+    with pytest.raises(ParticipationExceededError, match="must be a value in \\(0, 100\\]"):
+        plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
