@@ -100,33 +100,38 @@ def test_candle_columns_len_matches_ts_length() -> None:
 # ── negative tests ───────────────────────────────────────────────────────────
 
 
-def test_to_candle_records_rejects_mismatched_column_lengths() -> None:
-    """negative test: 배열 길이가 다르면 조용히 어긋난 행을 짝짓지 않고
-    거부한다(fail-closed)."""
+@pytest.mark.parametrize("extra", [-1, 1], ids=["one_short", "one_long"])
+@pytest.mark.parametrize(
+    "field",
+    ["ts", "open", "high", "low", "close", "volume", "quote_volume"],
+)
+def test_to_candle_records_rejects_mismatched_column_lengths(field: str, extra: int) -> None:
+    """Negative test: if any single column differs in length from the others
+    (shorter or longer), reject instead of silently pairing misaligned rows
+    (fail-closed). The error reports the offending length."""
     columns = _columns(3)
+    arrays = {
+        "ts": list(columns.ts),
+        "open": list(columns.open),
+        "high": list(columns.high),
+        "low": list(columns.low),
+        "close": list(columns.close),
+        "volume": list(columns.volume),
+        "quote_volume": list(columns.quote_volume),
+    }
+    if extra < 0:
+        arrays[field] = arrays[field][:extra]
+    else:
+        arrays[field] = [*arrays[field], arrays[field][-1]]
+    broken = CandleColumns(**arrays)
 
-    # 각 필드별로 1개 짧게 만든 배열을 테스트한다.
-    for field, shorten in [
-        ("ts", lambda c: c.ts[:-1]),
-        ("open", lambda c: c.open[:-1]),
-        ("high", lambda c: c.high[:-1]),
-        ("low", lambda c: c.low[:-1]),
-        ("close", lambda c: c.close[:-1]),
-        ("volume", lambda c: c.volume[:-1]),
-        ("quote_volume", lambda c: c.quote_volume[:-1]),
-    ]:
-        short_col = CandleColumns(
-            ts=shorten(columns) if field == "ts" else columns.ts,
-            open=shorten(columns) if field == "open" else columns.open,
-            high=shorten(columns) if field == "high" else columns.high,
-            low=shorten(columns) if field == "low" else columns.low,
-            close=shorten(columns) if field == "close" else columns.close,
-            volume=shorten(columns) if field == "volume" else columns.volume,
-            quote_volume=shorten(columns) if field == "quote_volume" else columns.quote_volume,
-        )
+    with pytest.raises(MismatchedColumnLengthError) as excinfo:
+        to_candle_records(broken, _key())
 
-        with pytest.raises(MismatchedColumnLengthError):
-            to_candle_records(short_col, _key())
+    # The message lists every length, so the odd column's length appears
+    # whether it is `ts` (reported as n) or another column.
+    expected = 3 + extra
+    assert str(expected) in str(excinfo.value)
 
 
 def test_to_candle_records_passes_none_to_model_construct_unchanged() -> None:
