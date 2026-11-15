@@ -6,6 +6,7 @@ _promote_to_paper_fakes.py`와 동일한 분리 관례).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -67,7 +68,7 @@ class FakeMandateRepository:
             state=MandateRevisionState.ACTIVE,
             max_total_exposure_pct=100.0,
             max_single_instrument_pct=100.0,
-            min_cash_buffer_pct=0.0,
+            min_cash_buffer_pct=Decimal("0"),
             max_daily_loss_pct=100.0,
             allowed_autonomy=Autonomy.PAPER,
             forbidden_assets=forbidden_assets,
