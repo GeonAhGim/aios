@@ -17,8 +17,12 @@ _OK_COMMAND = "cp %p /archive/%f"
 
 
 def test_evaluate_passes_when_all_settings_correct():
-    settings = {"wal_level": "replica", "archive_mode": "on", "archive_command": _OK_COMMAND}
-    assert wal_archive.evaluate(settings) == []
+    for wl in wal_archive._OK_WAL_LEVELS:
+        for am in wal_archive._OK_ARCHIVE_MODES:
+            settings = {"wal_level": wl, "archive_mode": am, "archive_command": _OK_COMMAND}
+            assert wal_archive.evaluate(settings) == [], (
+                f"evaluate({settings!r}) returned issues: {wal_archive.evaluate(settings)}"
+            )
 
 
 # --- negative tests for test_evaluate_passes_when_all_settings_correct -------
