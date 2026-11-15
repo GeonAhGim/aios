@@ -107,7 +107,14 @@ async def test_record_audit_log_perf_budget_detects_10x_injection(conn, monkeypa
     )
 
 
-async def test_record_audit_log_verification_chain_optional(conn):
+@pytest.mark.perf
+async def test_record_audit_log_verification_chain_optional(conn, monkeypatch):
+    """perf + gate-red — verification_chain=None 경로 기능 테스트 + perf 예산 + 10× 지연 적색 재현.
+
+    실측 (2026-11-15, local Postgres, best_of 30): min wall_ms ≈ 0.258ms.
+    예산 = 실측의 30배 이상 → 3.0ms. DB 왕복은 wall-bound이므로 wall_ms 기준.
+    """
+    # --- functional: verification_chain is None ---
     await record_audit_log(
         conn,
         actor_agent="test-suite",
@@ -119,6 +126,42 @@ async def test_record_audit_log_verification_chain_optional(conn):
         "ORDER BY log_id DESC LIMIT 1"
     )
     assert row["verification_chain"] is None
+
+    # --- perf measurement (after functional assertions) ---
+    reset_virtual_totals()
+
+    async def _insert():
+        await record_audit_log(
+            conn,
+            actor_agent="perf-bench",
+            action_type="test.audit.no_chain_perf",
+            decision_data={"ok": True},
+        )
+
+    sample = await PerfBudget().best_of_async(_insert, n=10, warmup=2)
+    budget_ms = 3.0  # 30× real min (0.258ms), wall-bound DB round-trip
+    assert sample.wall_ms < budget_ms, (
+        f"audit_log insert wall={sample.wall_ms:.3f}ms exceeds budget {budget_ms:.3f}ms"
+    )
+
+    # --- gate-red: 10× budget injection ---
+    reset_virtual_totals()
+    original_execute = asyncpg.Connection.execute
+    wrapped_execute = virtual_delayed_async(original_execute, 10 * budget_ms / 1000)
+    monkeypatch.setattr(asyncpg.Connection, "execute", wrapped_execute)
+
+    sample = await PerfBudget().best_of_async(
+        lambda: record_audit_log(
+            conn,
+            actor_agent="gate-red",
+            action_type="test.audit.no_chain_gate_red",
+            decision_data={"ok": True},
+        ),
+        n=3,
+        warmup=0,
+    )
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < budget_ms
 
 
 async def test_record_audit_log_rejects_null_actor_agent(conn):
