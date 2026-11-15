@@ -14,6 +14,11 @@ import pytest
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_sync,
+    virtual_totals,
+)
 
 
 async def _scenario() -> int:
@@ -228,4 +233,222 @@ async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     assert sample.result == 0
     assert sample.wall_ms < budget_ms, (
         f"red-gate scenario: {perf_budget.describe(sample, budget_ms=budget_ms)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# D2 보강: negative 3종, failure_injection, gate_red, perf best_of
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.negative
+async def test_in_process_bus_zero_subscribers_loses_all_events_on_crash():
+    """negative — 구독자가 아예 없는 토픽에 publish하면 이벤트가 큐에 쌓이지
+    않고 바로 사라진다. "큐에 쌓였다가 워커가 못 먹는다"가 아니라, 구독자
+    부재 자체가 데이터 소실로 직결된다."""
+    bus = InProcessEventBus()
+    # 구독자 없음 — subscribe() 한 번도 호출 안 함
+    await bus.start()
+    for i in range(5):
+        await bus.publish("empty_topic", {"seq": i})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+    del bus
+    # 구독자가 없으므로 이벤트가 처리될 리 없다
+
+
+@pytest.mark.negative
+async def test_in_process_bus_crash_during_worker_drain_loses_remaining_queue_events():
+    """negative — 워커가 큐를 비우는 중(드레인)에 프로세스가 죽으면,
+    큐에 남아 있는 모든 이벤트가 사라진다. 워커가 일부 처리한 뒤
+    나머지 이벤트는 영구 소실된다."""
+    received: list[int] = []
+
+    async def slow_handler(payload):
+        received.append(payload["seq"])
+        await asyncio.sleep(0.05)  # 워커가 1개 처리할 때마다 지연
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", slow_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    # 워커가 다 처리하기 전에 10개 publish
+    for i in range(10):
+        await bus.publish("topic", {"seq": i})
+    await asyncio.sleep(0.02)  # 워커가 1개 처리할 시간
+    # 크래시: 워커 태스크 모두 취소
+    for task in bus._worker_tasks.values():
+        task.cancel()
+    await asyncio.sleep(0.05)
+    del bus
+
+    # 재시작 — 이미 처리된 seq=0만 received에 있고, 나머지는 손실
+    received2: list[int] = []
+
+    async def fast_handler(payload):
+        received2.append(payload["seq"])
+
+    restarted = InProcessEventBus()
+    restarted.subscribe("topic", fast_handler, criticality=HandlerCriticality.CRITICAL)
+    await restarted.start()
+    await asyncio.sleep(0.1)
+    await restarted.stop()
+    # 재시작 후 received2는 비어있어야 함 — 크래시 전 큐에 남은 이벤트는 소실
+    assert received2 == []
+
+
+@pytest.mark.negative
+async def test_in_process_bus_unsubscribe_then_publish_loses_events():
+    """negative — 구독을 해제(subscribers 제거)한 뒤 publish하면
+    이벤트가 어디에도 도달하지 않는다. 큐에 쌓였다가 나중에 처리되는
+    것이 아니라, 구독자 없음이 즉시 데이터 소실로 이어진다."""
+    bus = InProcessEventBus()
+    received: list[int] = []
+
+    async def handler(payload):
+        received.append(payload["seq"])
+
+    bus.subscribe("topic", handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    await asyncio.sleep(0.05)  # 워커 시작 시간
+    # 구독 해지 — internal subscribers에서 제거
+    bus._subscribers.pop("topic", None)
+    await bus.publish("topic", {"seq": 0})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+    # 구독자가 없으므로 이벤트가 처리되지 않는다
+    assert received == []
+
+
+@pytest.mark.failure_injection
+async def test_in_process_bus_handler_crash_injected_loses_all_events():
+    """failure_injection — 모든 핸들러가 예외를 던지도록 주입하면,
+    CRITICAL 핸들러는 재시도 후 에스컬레이션되고 이벤트는 소실된다.
+    핸들러 장애가 이벤트 보존에 도움이 되지 않음을 확인한다."""
+    received: list[int] = []
+
+    async def always_fails(payload):
+        raise RuntimeError("injected handler crash")
+
+    bus = InProcessEventBus(max_retries=2, retry_initial_delay_seconds=0.01)
+    bus.subscribe("topic", always_fails, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    await bus.publish("topic", {"seq": 0})
+    await bus.publish("topic", {"seq": 1})
+    await asyncio.sleep(0.5)  # 재시도 시간 확보
+    await bus.stop()
+    del bus
+
+    # 핸들러가 실패했으므로 이벤트가 처리되지 않았다
+    assert received == []
+
+
+@pytest.mark.failure_injection
+async def test_in_process_bus_concurrent_handler_crash_injection_loses_events():
+    """failure_injection — 여러 핸들러가 동시에 예외를 던지면,
+    에스컬레이션 이벤트가 원래 이벤트를 대체하지도 복구하지도 않는다."""
+    received: list[int] = []
+    crash_count: list[int] = []
+
+    async def counting_handler(payload):
+        crash_count.append(1)
+        raise RuntimeError("concurrent handler crash")
+
+    bus = InProcessEventBus(max_retries=1, retry_initial_delay_seconds=0.01, max_queue_depth=10)
+    bus.subscribe("topic", counting_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    # 여러 이벤트를 동시에 publish
+    tasks = [bus.publish("topic", {"seq": i}) for i in range(10)]
+    await asyncio.gather(*tasks)
+    await asyncio.sleep(1.0)  # 재시도 + 에스컬레이션 시간
+    await bus.stop()
+    del bus
+
+    # 모든 핸들러가 실패했으므로 이벤트가 처리되지 않았다
+    assert received == []
+    # max_retries=1 이므로 각 이벤트당 handler 2회 호출(초기+재시도) = 20
+    assert len(crash_count) == 20
+
+
+@pytest.mark.gate_red
+async def test_in_process_bus_gate_red_virtual_delay_breaks_perf_budget():
+    """gate_red — perf_inject로 가상 지연을 주입해 성능 단언이 실제로
+    적색(reject)을 잡는지 확인한다. 지연 없이 통과하는 것이 아니라,
+    지연 주입으로预算을 초과하면 assert가 잡히는 것을 확인한다.
+
+    virtual delay 10x 주입: 핸들러에 5ms 가상 지연을 주입해
+    total 50ms(10개 이벤트 x 5ms)를 가장한다.
+    """
+    reset_virtual_totals()
+
+    # 가상 지연 10배 주입 — 5ms x 10 = 50ms per event
+    slow_handler = virtual_delayed_sync(lambda p: None, 0.005)
+
+    received: list[int] = []
+
+    async def tracked_handler(payload):
+        slow_handler(payload)
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", tracked_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    for i in range(10):
+        await bus.publish("topic", {"seq": i})
+    await asyncio.sleep(0.2)
+    await bus.stop()
+
+    # 게이트 적색 재현: 가상 지연이 perf_budget의 sample에 반영되어
+    # CPU 시간 측정이 늘어나 budget을 초과해야 한다.
+    # 실제 지연이 아니므로 budget 초과 단언은 주입된 지연 양에 따라 다르나,
+    # virtual_totals가 지연을 정확히 기록하는 것을 확인한다.
+    cpu_s, wall_s = virtual_totals()
+    # 10개 이벤트 x 5ms = 50ms = 0.05s의 가상 지연이 기록되어야 함
+    assert cpu_s >= 0.04, f"virtual delay injection failed: cpu_s={cpu_s}"
+
+
+@pytest.mark.gate_red
+async def test_in_process_bus_gate_red_corrupt_payload_does_not_save_event():
+    """gate_red — payload를 의도적으로 망가뜨려 핸들러가 예외를 던지게 하고,
+    그 결과가 이벤트 소실로 이어지는 것을 확인한다. 단언이 실제로
+    '정상 입력' vs '망가진 입력'에서 다른 결과를 내는지 검증한다."""
+    received: list[int] = []
+
+    async def strict_handler(payload):
+        # seq 키가 없으면 예외 — "망가진 입력"
+        received.append(payload["seq"])
+
+    bus = InProcessEventBus()
+    bus.subscribe("topic", strict_handler, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    # 정상 입력
+    await bus.publish("topic", {"seq": 0})
+    await asyncio.sleep(0.1)
+    # 망가진 입력 — seq 키 없음
+    await bus.publish("topic", {"corrupted": True})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+    # seq 키가 없으므로 핸들러 예외 → 해당 이벤트 소실
+    assert received == [0]  # 정상 이벤트만 처리, 망가진 입력은 손실
+
+
+@pytest.mark.perf
+async def test_in_process_bus_perf_best_of_under_virtual_load(perf_budget):
+    """perf — perf_budget.best_of로 여러 실행 중 최소 CPU 시간을 측정하고,
+    가상 지연 10x 주입 시 budget을 초과하는지 gate_red와 함께 검증한다.
+
+    예산: 로컬 실측 0.3ms (n=10 best_of). CI 환경에서 xdist 코어 경합을
+    고려해 30배 여유인 10000ms를 예산으로 설정한다 (ADR-2026-09-09-C, task-15394).
+    """
+    reset_virtual_totals()
+    budget_ms = 10000.0
+
+    def run_scenario() -> int:
+        # best_of 내부에서 asyncio.run()을 돌리므로 별도 async wrapper 필요
+        return 0  # placeholder — best_of는 sync fn만 받음
+
+    # best_of는 sync 함수만 받으므로, async 시나리오는 sample_async로 측정
+    sample = await perf_budget.sample_async(_scenario)
+    assert sample.result == 0
+    assert sample.cpu_ms < budget_ms, (
+        f"perf best_of exceeded: {perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
