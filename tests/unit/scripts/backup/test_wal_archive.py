@@ -1,3 +1,4 @@
+# loc-allow: test_wal_archive — spec requires adding list_dir failure injection test
 """scripts/backup/wal_archive.py 단위 테스트 -- H-4(task-2609, ADR-2026-09-09-B).
 
 evaluate()/check_archive_advanced()는 순수 함수라 실제 Postgres 없이 위반 주입이
@@ -508,6 +509,37 @@ def test_verify_archiving_advances_raises_OSError_from_switch_wal():
             sleep=lambda s: None,
             clock=lambda: 999.0,  # deadline 초과 방지
         )
+
+
+def test_verify_archiving_advances_raises_OSError_from_list_dir():
+    """list_dir(archive_dir)가 OSError를 던지면 호출부가 삼키지 않고 전파한다.
+
+    switch_wal보다 먼저 list_dir가 호출되므로, 이 실패 시 switch_wal은
+    호출되지 않았음을 함께 단언한다.
+    """
+    from pathlib import Path
+
+    switch_wal_called = False
+
+    def failing_list_dir(_d):
+        raise OSError("archive dir listing failed")
+
+    def dummy_switch_wal(_dsn):
+        nonlocal switch_wal_called
+        switch_wal_called = True
+
+    with pytest.raises(OSError, match="archive dir listing failed"):
+        wal_archive.verify_archiving_advances(
+            "postgresql://x/y",
+            Path("archive-dir"),
+            timeout=1.0,
+            poll_interval=0.5,
+            switch_wal=dummy_switch_wal,
+            list_dir=failing_list_dir,
+            sleep=lambda s: None,
+            clock=lambda: 999.0,
+        )
+    assert switch_wal_called is False, "list_dir 실패 시 switch_wal이 호출되어서는 안 된다"
 
 
 # --- perf: evaluate() budget + gate-red with virtual delay -------------------
