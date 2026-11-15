@@ -176,7 +176,8 @@ describe("CH-4c performance", () => {
   });
 
   it("gate red: 지연을 망가뜨리면(예산 초과 값) 같은 성능 단언이 실제로 실패한다", () => {
-    const sabotagedElapsedMs = BUDGET_MS * 2;
+    // 커버리지 실행에서는 perfBudgetMs가 예산을 3배로 넓힌다 -- 망가뜨린 값도 넓힌 예산 기준으로 잡아야 어느 모드에서나 실제로 초과한다.
+    const sabotagedElapsedMs = perfBudgetMs(BUDGET_MS) * 2;
     expect(() => expect(sabotagedElapsedMs).toBeLessThan(perfBudgetMs(BUDGET_MS))).toThrow();
   });
 
