@@ -113,12 +113,16 @@ def test_gate_decision_allowed_requires_both_decision_ids() -> None:
 # ── failure-injection test ───────────────────────────────────────────
 
 
-def test_evaluate_conditions_missing_indicator_propagates_runtime_error(
+def test_evaluate_conditions_compare_value_failure_propagates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Failure-injection: if the shared `compare_value` dependency raises
-    unexpectedly (e.g. corrupted operator), the exception must propagate
-    rather than silently returning False. This mirrors
+    unexpectedly (e.g. corrupted operator string), the RuntimeError must
+    propagate — the caller (evaluate_conditions) does not swallow it.
+
+    Note: indicator *missing* (key absent from `indicators` map) is handled
+    differently — `evaluate_condition` returns `False` (fail-closed, I-02).
+    Only the shared dependency failure is injected here. This mirrors
     test_indicator_condition_compare_value_failure_propagates in
     test_evaluate.py but is a required negative for this module per DEEPEN.
     """
@@ -162,12 +166,18 @@ def test_evaluate_conditions_missing_indicator_propagates_runtime_error(
 
 
 @pytest.mark.perf
-def test_evaluate_conditions_500_price_conditions_under_200ms() -> None:
+def test_evaluate_conditions_500_price_conditions_under_budget(
+    perf_budget,
+) -> None:
     """Numeric performance assertion: 500 AND-composed price conditions
-    against one snapshot must complete well under 200ms — pure in-memory
-    comparison, no I/O."""
-    import time as time_module
+    against one snapshot must stay under the 200ms budget — pure in-memory
+    comparison, no I/O.
 
+    ADR-2026-09-09-C Decision 1 does not list a dedicated budget for
+    evaluate_conditions; the closest analogue is "DSL 컴파일 300ms".
+    200ms is tighter and matches the existing assertion in
+    test_evaluate.py (same scenario).  Using best-of-5 via perf_budget.
+    """
     from src.foundation.automation.contracts.v1 import PriceCondition, PriceField
     from src.foundation.automation.domain.evaluate import (
         MarketSnapshot,
@@ -197,8 +207,9 @@ def test_evaluate_conditions_500_price_conditions_under_200ms() -> None:
             close_time=_EPOCH,
         )
     )
-    started = time_module.perf_counter()
-    result = evaluate_conditions(conditions, {"005930": snapshot}, {})
-    elapsed = time_module.perf_counter() - started
-    assert result is True
-    assert elapsed < 0.2, f"evaluate_conditions took {elapsed:.3f}s, budget 0.2s"
+    sample = perf_budget.assert_within(
+        lambda: evaluate_conditions(conditions, {"005930": snapshot}, {}),
+        budget_ms=200.0,
+        label="evaluate_conditions x500",
+    )
+    assert sample.cpu_ms < 200.0
