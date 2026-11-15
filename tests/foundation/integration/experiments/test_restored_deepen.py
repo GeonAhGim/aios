@@ -38,8 +38,8 @@ _NOW = datetime.now(UTC)
 
 
 @pytest.fixture
-async def pool():
-    dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+async def pool() -> asyncpg.Pool:
+    dsn = os.environ["TEST_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
     p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
     yield p
     await p.close()
