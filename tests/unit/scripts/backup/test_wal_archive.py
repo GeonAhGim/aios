@@ -172,8 +172,18 @@ def test_evaluate_flags_disabled_archive_command():
 
 
 def test_evaluate_accepts_always_archive_mode_and_logical_wal_level():
-    settings = {"wal_level": "logical", "archive_mode": "always", "archive_command": _OK_COMMAND}
-    assert wal_archive.evaluate(settings) == []
+    settings_ok = {"wal_level": "logical", "archive_mode": "always", "archive_command": _OK_COMMAND}
+    assert wal_archive.evaluate(settings_ok) == []
+    # 대조: archive_mode=always는 허용하지만 wal_level=minimal은 위반
+    settings_bad_wal = {
+        "wal_level": "minimal",
+        "archive_mode": "always",
+        "archive_command": _OK_COMMAND,
+    }
+    issues = wal_archive.evaluate(settings_bad_wal)
+    assert len(issues) == 1
+    assert "wal_level" in issues[0]
+    assert "archive_mode" not in issues[0]
 
 
 # --- check_archive_advanced ---------------------------------------------------
