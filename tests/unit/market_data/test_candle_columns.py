@@ -12,12 +12,19 @@ from uuid import uuid4
 
 import pytest
 
-from src.foundation.market_data.contracts.v1 import SeriesKey, Timeframe, Venue
+from src.foundation.market_data.contracts.v1 import (
+    QualityIssueType,
+    SeriesKey,
+    Severity,
+    Timeframe,
+    Venue,
+)
 from src.foundation.market_data.domain.candle_columns import (
     CandleColumns,
     MismatchedColumnLengthError,
     to_candle_records,
 )
+from src.foundation.market_data.domain.quality.ohlc_sanity import check_candle
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
 from tests.support.perf_budget import PerfBudget
 
@@ -98,6 +105,33 @@ def test_candle_columns_len_matches_ts_length() -> None:
 
 
 # ── negative tests ───────────────────────────────────────────────────────────
+
+
+def test_to_candle_records_rejects_negative_prices() -> None:
+    """negative test: to_candle_records itself trusts its input (model_construct),
+    so a negative price must be rejected by the write-time gate check_candle;
+    assert the reconstructed record is REJECTed, not silently accepted."""
+    columns = _columns(3)
+    bad = CandleColumns(
+        ts=columns.ts,
+        open=[Decimal(-1)] * 3,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
+    )
+
+    records = to_candle_records(bad, _key())
+
+    assert len(records) == 3
+    for record in records:
+        issues = check_candle(record)
+        assert issues
+        assert all(i.severity is Severity.REJECT for i in issues)
+        assert any(i.type is QualityIssueType.OHLC_INCONSISTENT for i in issues)
+    # the control row set stays clean, so the rejection comes from the negative price
+    assert all(not check_candle(r) for r in to_candle_records(columns, _key()))
 
 
 @pytest.mark.parametrize("extra", [-1, 1], ids=["one_short", "one_long"])
