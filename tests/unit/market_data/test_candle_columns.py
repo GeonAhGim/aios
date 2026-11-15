@@ -200,15 +200,20 @@ def test_passes_none_to_model_construct_unchanged() -> None:
 
 
 def test_to_candle_records_propagates_unknown_timeframe_error(
+    perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """실패주입: duration()이 UnknownTimeframeError를 던질 때
-    to_candle_records가 이를 삼키지 않고 전파하는지 검증한다."""
+    to_candle_records가 이를 삼키지 않고 전파하는지 검증한다.
+
+    동시에 exception path의 wall-clock 단언 — fail-closed는 즉시 거부해야
+    하므로 5ms 미만이어야 한다.
+    """
     key = _key()
     columns = _columns(2)
 
     def fake_duration(timeframe: Timeframe) -> None:
-        raise UnknownTimeframeError(f"알 수 없는 timeframe: {timeframe!r}")
+        raise UnknownTimeframeError(f"unknown timeframe: {timeframe!r}")
 
     monkeypatch.setattr(
         "src.foundation.market_data.domain.candle_columns.duration",
@@ -216,7 +221,11 @@ def test_to_candle_records_propagates_unknown_timeframe_error(
     )
 
     with pytest.raises(UnknownTimeframeError):
-        to_candle_records(columns, key)
+        perf_budget.assert_within(
+            lambda: to_candle_records(columns, key),
+            budget_ms=5,
+            label="to_candle_records(UnknownTimeframeError path)",
+        )
 
 
 def test_to_candle_records_propagates_model_construct_failure(
