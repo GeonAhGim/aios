@@ -160,10 +160,19 @@ def test_build_default_hierarchy_propagates_model_creation_error(monkeypatch):
     # dataclass인 LegalEntity의 __init__을 모킹하여 예외 주입
     import src.foundation.entities.contracts.v1 as contracts
 
-    original = contracts.LegalEntity.__init__
-    try:
-        contracts.LegalEntity.__init__ = mock_legal_entity_init  # type: ignore[assignment]
-        with pytest.raises(RuntimeError, match="mock DB unavailable"):
-            build_default_hierarchy(user_id=uuid4(), tenant_id=uuid4(), **_KWARGS)
-    finally:
-        contracts.LegalEntity.__init__ = original  # type: ignore[assignment]
+    monkeypatch.setattr(contracts.LegalEntity, "__init__", mock_legal_entity_init)
+    with pytest.raises(RuntimeError, match="mock DB unavailable"):
+        build_default_hierarchy(user_id=uuid4(), tenant_id=uuid4(), **_KWARGS)
+
+
+# --- perf assertion (D2): perf_budget 픽스처 경유 ---
+
+
+def test_build_default_hierarchy_within_latency_budget(perf_budget):
+    """결정론적 id 계산 + 4개 엔티티 생성은 단건 호출 기준 예산 안에 든다."""
+    user_id = uuid4()
+    tenant_id = uuid4()
+    perf_budget.assert_within(
+        lambda: build_default_hierarchy(user_id=user_id, tenant_id=tenant_id, **_KWARGS),
+        budget_ms=5.0,
+    )
