@@ -358,10 +358,15 @@ def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
 
 
 def test_evaluate_flags_missing_wal_level():
-    """wal_level 키가 없으면 evaluate는 실패를 보고한다."""
+    """wal_level 키가 없으면 evaluate는 wal_level=None 이슈 정확히 1건만 반환한다.
+
+    archive_mode와 archive_command는 정상 값이므로 이슈가 없어야 한다.
+    부분 문자열 매칭으로 가짜 음성을 막기 위해 길이+시작 단언으로 강화.
+    """
     settings = {"archive_mode": "on", "archive_command": "cp %p /archive/%f"}
     issues = wal_archive.evaluate(settings)
-    assert any("wal_level" in i for i in issues)
+    assert len(issues) == 1
+    assert issues[0].startswith("wal_level=None")
 
 
 def test_evaluate_flags_missing_archive_mode():
