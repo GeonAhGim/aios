@@ -54,6 +54,9 @@ def _make(root: Path, name: str, text: str) -> str:
 
 def test_frozenset_parametrize_is_flagged_and_sorted_list_is_not(tmp_path: Path) -> None:
     module = _load()
+    # An ini file pins pytest's rootdir to tmp_path; without it rootdir falls back to an
+    # ancestor and nodeids get a "tmpXXXX/" prefix that never matches the "tests/..." keys.
+    (tmp_path / "pytest.ini").write_text("[pytest]" + NL, encoding="utf-8")
     stable = _make(tmp_path, "test_stable_tmp.py", STABLE)
     unstable = _make(tmp_path, "test_unstable_tmp.py", UNSTABLE)
     assert module.unstable_files([stable], tmp_path) == []
