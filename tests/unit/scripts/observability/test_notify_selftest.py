@@ -82,11 +82,13 @@ async def test_run_selftest_with_empty_error_string():
 
 
 def test_write_report_with_empty_path_list(tmp_path: Path):
-    """negative(D2) — 경로 리스트가 비어 있으면 아무것도 쓰지 않고 예외를
+    """negative(D2) — 경로 리스트가 비어 있으면 파일 0개를 쓰고 예외를
     내지 않아야 한다(write_report가 경로 검증 없이 바로 for문에 들어가는
     경우를 막음)."""
+    report = tmp_path / "report.json"
     notify_selftest.write_report({"ok": True}, [])
-    # 예외가.raise되지 않으면 통과 — 디렉터리가 생성되지 않았는지 확인
+    # 예외가 raise되지 않으면 통과 — report가 생성되지 않았고 tmp_path가 비었는지 확인
+    assert not report.exists()
     assert not list(tmp_path.iterdir())
 
 
