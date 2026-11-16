@@ -216,32 +216,229 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+async def test_post_confirm_tenant_mismatch(client: TestClient) -> None:
+    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary).
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    Uses a real repo with a cross-tenant connection so the service path
+    rejects it at confirm_connection.py:57 — not a monkeypatched ValueError.
+    """
+    from uuid import uuid4
 
-    from src.api.routers.foundation import connections
+    from src.foundation.connections.application.confirm_connection import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import AccountConnection, ConnectionState
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
-        client.post(f"/v1/foundation/connections/{cid}:confirm")
+    own_tenant = UUID("550e8400-e29b-41d4-a716-446655440000")
+    other_tenant = UUID("00000000-0000-0000-0000-000000000001")
+    cid = uuid4()
+
+    class FakeRepo:
+        """Minimal repo holding one cross-tenant connection."""
+
+        connections_store: dict[UUID, AccountConnection]
+
+        def __init__(self) -> None:
+            self.connections_store = {
+                cid: AccountConnection(
+                    id=cid,
+                    tenant_id=other_tenant,
+                    owner_subject_id=other_tenant,
+                    provider_code="ex",
+                    opaque_account_ref="ref",
+                    state=ConnectionState.PENDING_CONSENT,
+                    capability_profile=(),
+                    revision=1,
+                )
+            }
+            self.transition_called = False
+
+        async def get_connection(self, connection_id: UUID) -> AccountConnection | None:
+            return self.connections_store.get(connection_id)
+
+        async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
+            return []
+
+        async def insert_pending_connection(
+            self,
+            connection: AccountConnection,
+        ) -> AccountConnection:
+            return connection
+
+        async def transition_connection_state(
+            self,
+            connection_id: UUID,
+            *,
+            tenant_id: UUID,
+            expected_state: str,
+            new_state: str,
+        ) -> AccountConnection:
+            self.transition_called = True
+            return self.connections_store[connection_id]
+
+        async def insert_consent_link(self, link: Any) -> Any:
+            return link
+
+        async def insert_credential_binding(self, binding: Any) -> Any:
+            return binding
+
+        async def get_credential_binding(self, connection_id: UUID) -> Any:
+            return None
+
+        async def revoke_credential_binding(self, connection_id: UUID) -> None:
+            pass
+
+        async def persist_snapshot_if_syncable(
+            self,
+            connection_id: UUID,
+            tenant_id: UUID,
+            snapshot: Any,
+            health: Any,
+        ) -> Any:
+            return snapshot
+
+        async def get_latest_snapshot(self, connection_id: UUID) -> Any:
+            return None
+
+        async def insert_health_record(self, health: Any) -> Any:
+            return health
+
+        async def get_latest_health(self, connection_id: UUID) -> Any:
+            return None
+
+    async def mock_provider_verify() -> Any:
+        from src.foundation.connections.domain.models import ScopeProof
+
+        return ScopeProof(
+            provider_verified=False,
+            granted_scopes=(),
+            provider_credential_ref="ref",
+        )
+
+    repo = FakeRepo()
+    from unittest.mock import AsyncMock
+
+    provider = AsyncMock()
+    provider.verify_readonly_scope = mock_provider_verify
+
+    with pytest.raises(CrossTenantConnectionAccessError):
+        from src.foundation.connections.application.confirm_connection import (
+            confirm_connection,
+        )
+
+        await confirm_connection(
+            repo,
+            provider,
+            tenant_id=own_tenant,
+            connection_id=cid,
+            encryption_key="test-key",
+        )
+
+    # Repo state must remain unchanged — no transition should have fired.
+    assert repo.transition_called is False
 
 
-def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
+async def test_post_sync_tenant_mismatch(client: TestClient) -> None:
     """Reject sync when connection belongs to a different tenant."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    from uuid import uuid4
 
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    from src.foundation.connections.application.errors import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import AccountConnection, ConnectionState
 
-    from src.api.routers.foundation import connections
+    own_tenant = UUID("550e8400-e29b-41d4-a716-446655440000")
+    other_tenant = UUID("00000000-0000-0000-0000-000000000001")
+    cid = uuid4()
 
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
-        client.post(f"/v1/foundation/connections/{cid}:sync")
+    class FakeRepo:
+        """Minimal repo holding one cross-tenant connection."""
+
+        connections_store: dict[UUID, AccountConnection]
+
+        def __init__(self) -> None:
+            self.connections_store = {
+                cid: AccountConnection(
+                    id=cid,
+                    tenant_id=other_tenant,
+                    owner_subject_id=other_tenant,
+                    provider_code="ex",
+                    opaque_account_ref="ref",
+                    state=ConnectionState.ACTIVE_READONLY,
+                    capability_profile=(),
+                    revision=1,
+                )
+            }
+
+        async def get_connection(self, connection_id: UUID) -> AccountConnection | None:
+            return self.connections_store.get(connection_id)
+
+        async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
+            return []
+
+        async def insert_pending_connection(
+            self,
+            connection: AccountConnection,
+        ) -> AccountConnection:
+            return connection
+
+        async def transition_connection_state(
+            self,
+            connection_id: UUID,
+            *,
+            tenant_id: UUID,
+            expected_state: str,
+            new_state: str,
+        ) -> AccountConnection:
+            return self.connections_store[connection_id]
+
+        async def insert_consent_link(self, link: Any) -> Any:
+            return link
+
+        async def insert_credential_binding(self, binding: Any) -> Any:
+            return binding
+
+        async def get_credential_binding(self, connection_id: UUID) -> Any:
+            return None
+
+        async def revoke_credential_binding(self, connection_id: UUID) -> None:
+            pass
+
+        async def persist_snapshot_if_syncable(
+            self,
+            connection_id: UUID,
+            tenant_id: UUID,
+            snapshot: Any,
+            health: Any,
+        ) -> Any:
+            return snapshot
+
+        async def get_latest_snapshot(self, connection_id: UUID) -> Any:
+            return None
+
+        async def insert_health_record(self, health: Any) -> Any:
+            return health
+
+        async def get_latest_health(self, connection_id: UUID) -> Any:
+            return None
+
+    repo = FakeRepo()
+    from unittest.mock import AsyncMock
+
+    provider = AsyncMock()
+
+    with pytest.raises(CrossTenantConnectionAccessError):
+        from src.foundation.connections.application.sync_snapshot import sync_snapshot
+
+        await sync_snapshot(
+            repo,
+            provider,
+            tenant_id=own_tenant,
+            connection_id=cid,
+        )
+
+    # Repo state must remain unchanged — no writes should have occurred.
+    assert len(repo.connections_store) == 1
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
