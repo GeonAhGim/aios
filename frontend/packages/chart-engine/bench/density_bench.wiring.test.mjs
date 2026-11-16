@@ -46,10 +46,13 @@ describe("density-bench CI wiring (DEEPEN task-3107)", () => {
     () => {
       const baselineBackup = readFileSync(BASELINE_PATH, "utf-8");
       try {
+        // task-25434: smoke mode (1 sweep, no warmup) so the wiring proof
+        // finishes in ~3s instead of ~38s; loaded CI hosts must not stretch
+        // past the 60s test timeout. The real gate never sets this env.
         const result = spawnSync(
           process.execPath,
           ["--experimental-strip-types", "bench/density_bench.mjs"],
-          { cwd: CHART_ENGINE_DIR, encoding: "utf-8", timeout: 60_000 },
+          { cwd: CHART_ENGINE_DIR, encoding: "utf-8", timeout: 60_000, env: { ...process.env, DENSITY_BENCH_SMOKE: "1" } },
         );
         // A crash before any measurement (bad import path, missing compute/render
         // module, syntax error) is what "wiring silently rotted" looks like --

@@ -96,7 +96,12 @@ const INDICATOR_ADD_RUNS = 9;
  * (not 3 of 5) to move it, the same "more samples narrows the spread"
  * argument already applied to `INDICATOR_ADD_RUNS` above.
  */
-const MEASURE_SWEEPS = 9;
+// DENSITY_BENCH_SMOKE=1 (wiring proof only, see density_bench.wiring.test.mjs):
+// one measured sweep and no warmup so the end-to-end run finishes in seconds
+// instead of ~40s, which a loaded CI host can stretch past the test timeout.
+// The real gate never sets this env.
+const SMOKE = process.env.DENSITY_BENCH_SMOKE === "1";
+const MEASURE_SWEEPS = SMOKE ? 1 : 9;
 /**
  * task-6460: sweeps run before the loop below are timed and discarded so
  * the code under measurement (cullToViewport/downsampleLOD/renderPlot/the
@@ -107,7 +112,7 @@ const MEASURE_SWEEPS = 9;
  * showed elevated, more scattered values in the first ~8-10 sweeps that
  * settled into a tighter band afterward.
  */
-const WARMUP_SWEEPS = 3;
+const WARMUP_SWEEPS = SMOKE ? 0 : 3;
 /**
  * task-6744 (esc-ci-frontend.json recurrence of task-6725): even per-metric
  * calib brackets (one pair bracketing panZoom's whole ~120-frame, ~250-350ms
