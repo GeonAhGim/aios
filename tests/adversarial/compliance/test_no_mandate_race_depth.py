@@ -1,5 +1,5 @@
-"""task-24421 DEEPEN-DEPTH H-1c — test_no_mandate_reject.py race 테스트 D2 보강
-(negative 3 / 실패 주입 1 / perf 예산 + 10x 지연 적색 재현).
+"""task-25348 DEEPEN-DEPTH H-1c — test_no_mandate_race_depth.py D2 보강
+(negative 4 / 실패 주입 1 / perf 예산 + 10x 지연 적색 재현).
 
 원본 파일이 500줄 한도에 닿아 있어 형제 파일로 분리했다(CLAUDE.md §6-12)."""
 
@@ -88,6 +88,20 @@ async def test_concurrent_pause_race_db_failure_never_allows(pool, repo, trust_r
     except Exception:  # noqa: BLE001 - propagation is fail-closed
         return
     assert decision.outcome == GateOutcome.DENY
+
+
+async def test_pause_denies_across_different_execution_ids(pool, repo, trust_repo):
+    """negative 4 — pause는 tenant 단위로 동작하므로, 다른 execution_id로
+    제출해도 모두 DENY(STATE_MANDATE_PAUSED)된다."""
+    user_id, gate, _ = await _warmed_race_setup(pool, repo, trust_repo)
+
+    await pause_mandate(repo, tenant_id=user_id)
+
+    # 다른 execution_id로 여러 제출 — 모두 PAUSED로 DENY되어야 한다
+    for _ in range(3):
+        decision = await gate(_context(user_id, execution_id=_unique_execution_id()))
+        assert decision.outcome == GateOutcome.DENY
+        assert "STATE_MANDATE_PAUSED" in decision.reason_codes
 
 
 # 성능 예산(task-24421): pause 경합 뒤 게이트 wall 실측 약 5ms(로컬, best-of-5)의 30배 이상 여유.
