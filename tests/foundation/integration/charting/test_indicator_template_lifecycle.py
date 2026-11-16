@@ -118,7 +118,7 @@ async def test_create_duplicate_name_in_same_tenant_raises_concurrency_conflict(
         template=_sample_template(),
     )
 
-    with pytest.raises(ConcurrencyConflictError):
+    with pytest.raises(ConcurrencyConflictError, match="template already exists"):
         await create_indicator_template(
             repo,
             tenant_id=tenant_id,
