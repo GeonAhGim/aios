@@ -1,8 +1,8 @@
 {
- "refreshed_at": "2026-11-15T17:14:01+00:00",
+ "refreshed_at": "2026-11-16T17:15:06+00:00",
  "specs": [
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_ai_research_strategy_factory_v1.0.md",
    "spec": "ai_research_strategy_factory",
    "total": 23,
@@ -12,13 +12,12 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 1,
     "D2": 8,
-    "D3": 14
+    "D3": 15
    }
   },
   {
-   "below_floor": 3,
+   "below_floor": 0,
    "file": "L4_analytics_authoring_backtest_marketplace_v1.0.md",
    "spec": "analytics_authoring_backtest_marketplace",
    "total": 107,
@@ -26,15 +25,14 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 17,
-   "reopened": 7,
+   "reopened": 5,
    "depth": {
-    "D1": 3,
-    "D2": 21,
+    "D2": 24,
     "D3": 66
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_compliance_and_regulatory_v1.0.md",
    "spec": "compliance_and_regulatory",
    "total": 20,
@@ -44,12 +42,11 @@
    "hold": 1,
    "reopened": 0,
    "depth": {
-    "D2": 1,
-    "D3": 18
+    "D3": 19
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_ems_routing_algos_and_tca_v1.0.md",
    "spec": "ems_routing_algos_and_tca",
    "total": 18,
@@ -59,8 +56,7 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 1,
-    "D2": 6,
+    "D2": 7,
     "D3": 11
    }
   },
@@ -143,7 +139,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D1": 1,
     "D2": 11,
@@ -151,7 +147,7 @@
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_product_experience_and_discovery_v1.0.md",
    "spec": "product_experience_and_discovery",
    "total": 22,
@@ -161,9 +157,8 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 1,
     "D2": 15,
-    "D3": 6
+    "D3": 7
    }
   },
   {
