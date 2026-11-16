@@ -282,12 +282,18 @@ def test_verify_archiving_advances_times_out_when_nothing_new():
 # --- negative tests: invalid/corrupted inputs --------------------------------
 
 
-def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
-    """존재하지 않는 아카이브 디렉터리를 --verify-write로 지정하면 종료코드 1."""
-    import sys
-    from io import StringIO
+def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch, tmp_path, capsys):
+    """존재하지 않는 아카이브 디렉터리를 --verify-write로 지정하면 종료코드 1.
 
-    # read_wal_settings를 mock해서 DB 연결 없이 valid settings를 반환
+    부재 디렉터리는 현재 빈 집합으로 처리되어 타임아웃 경로로 빠진다
+    (결함은 별도 리프에서 고정).
+    timeout=0 래퍼로 실제 대기 없이 verify_archiving_advances 본 로직을 실행한다
+    (기본 인자가 정의 시점에 바인딩되어 sleep/clock을 monkeypatch할 수 없으므로).
+    """
+    import sys
+    from unittest.mock import AsyncMock
+
+    # read_wal_settings: DB 없이 valid settings 반환
     monkeypatch.setattr(
         wal_archive,
         "read_wal_settings",
@@ -297,35 +303,42 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch):
             "archive_command": "cp %p /archive/%f",
         },
     )
-    # verify_archiving_advances가 switch_wal을 통해 DB에 연결하므로
-    # verify_archiving_advances 자체를 mock해서 reason을 반환하도록 한다
+    # _default_switch_wal 내부에서 asyncio.run(_switch_wal(dsn)) 호출 시
+    # 실제 DB 연결을 피하려면 _switch_wal(비동기)을 no-op으로 우회한다.
+    monkeypatch.setattr(wal_archive, "_switch_wal", AsyncMock(return_value=None))
+
+    # verify_archiving_advances의 기본 인자(sleep=time.sleep, clock=time.monotonic)는
+    # 정의 시점에 바인딩되어 monkeypatch로 바꿀 수 없다.
+    # 원본 함수를 직접 호출하되 timeout=0으로 감싸서 실제 대기 없이 본 로직을 실행한다.
+    _real_verify = wal_archive.verify_archiving_advances
+
+    def _fast_verify(dsn, archive_dir, *, timeout=30.0, **kw):
+        return _real_verify(
+            dsn,
+            archive_dir,
+            timeout=0,
+            sleep=lambda s: None,
+            clock=lambda: 0.0,
+        )
+
+    monkeypatch.setattr(wal_archive, "verify_archiving_advances", _fast_verify)
+
     monkeypatch.setattr(
-        wal_archive,
-        "verify_archiving_advances",
-        lambda *a, **k: "verify failed",
+        sys,
+        "argv",
+        [
+            "wal_archive",
+            "--dsn",
+            "postgresql://x/y",
+            "--verify-write",
+            str(tmp_path / "does-not-exist"),
+        ],
     )
 
-    old_argv = sys.argv
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    sys.argv = [
-        "wal_archive",
-        "--dsn",
-        "postgresql://x/y",
-        "--verify-write",
-        "/nonexistent/dir/that/does/not/exist",
-    ]
-    sys.stdout = StringIO()
-    sys.stderr = StringIO(
-        "stderr",
-    )  # noqa: DUPL125
-    try:
-        code = wal_archive.main()
-        assert code == 1
-    finally:
-        sys.argv = old_argv
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+    code = wal_archive.main()
+    assert code == 1
+    # stderr에 "새 파일" 사유가 포함되어야 타임아웃 경로임을 확인한다.
+    assert "새 파일" in capsys.readouterr().err
 
 
 def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
