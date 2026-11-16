@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import status
@@ -18,6 +19,10 @@ from src.api.schemas.foundation.connections import (
     CapabilityScope,
     ConnectionState,
 )
+from src.foundation.connections.application.errors import (
+    CrossTenantConnectionAccessError,
+)
+from src.foundation.connections.domain.models import AccountConnection, ScopeProof
 
 
 def test_list_connections(client: TestClient, monkeypatch) -> None:
@@ -217,31 +222,110 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
 
 
 def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    """Confirm rejects when connection.tenant_id != request tenant_id (I-03).
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    Uses a fake repo that returns a connection owned by another tenant so the
+    real confirm_connection() path raises CrossTenantConnectionAccessError.
+    """
+    owner_tenant_id = uuid4()
+    cid = uuid4()
+    fake_conn = AccountConnection(
+        id=cid,
+        tenant_id=owner_tenant_id,
+        owner_subject_id=owner_tenant_id,
+        provider_code="BITGET",
+        opaque_account_ref="ACCT1234567890",
+        state=ConnectionState.PENDING_CONSENT,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
-    from src.api.routers.foundation import connections
+    async def fake_get_connection(connection_id: UUID) -> AccountConnection | None:
+        return fake_conn
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    async def fake_transition(
+        connection_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
+    ) -> AccountConnection:
+        raise AssertionError("transition_connection_state must not be called on tenant mismatch")
+
+    async def fake_get_provider_proof(lease: Any) -> ScopeProof:
+        raise AssertionError("provider must not be called on tenant mismatch")
+
+    from src.api import foundation_deps
+
+    mock_repo = AsyncMock()
+    mock_repo.get_connection = fake_get_connection
+    mock_repo.transition_connection_state = fake_transition
+    mock_repo.insert_credential_binding = AsyncMock()
+    mock_repo.list_connections = AsyncMock(return_value=[])
+    mock_repo.insert_pending_connection = AsyncMock()
+    mock_repo.insert_consent_link = AsyncMock()
+    mock_repo.get_credential_binding = AsyncMock()
+    mock_repo.revoke_credential_binding = AsyncMock()
+    mock_repo.persist_snapshot_if_syncable = AsyncMock()
+    mock_repo.get_latest_snapshot = AsyncMock()
+    mock_repo.insert_health_record = AsyncMock()
+    mock_repo.get_latest_health = AsyncMock()
+
+    mock_provider = AsyncMock()
+    mock_provider.verify_readonly_scope = fake_get_provider_proof
+
+    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: mock_repo)
+    monkeypatch.setattr(foundation_deps, "get_readonly_account_provider", lambda: mock_provider)
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:confirm")
+
+    # Repo state unchanged — no transition, no credential insert
+    mock_repo.insert_credential_binding.assert_not_called()
 
 
 def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection belongs to a different tenant."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    """Reject sync when connection.tenant_id != request tenant_id (I-03)."""
+    owner_tenant_id = uuid4()
+    cid = uuid4()
+    fake_conn = AccountConnection(
+        id=cid,
+        tenant_id=owner_tenant_id,
+        owner_subject_id=owner_tenant_id,
+        provider_code="BITGET",
+        opaque_account_ref="ACCT1234567890",
+        state=ConnectionState.ACTIVE_READONLY,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    async def fake_get_connection(connection_id: UUID) -> AccountConnection | None:
+        return fake_conn
 
-    from src.api.routers.foundation import connections
+    from src.api import foundation_deps
 
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    mock_repo = AsyncMock()
+    mock_repo.get_connection = fake_get_connection
+    mock_repo.list_connections = AsyncMock(return_value=[])
+    mock_repo.insert_pending_connection = AsyncMock()
+    mock_repo.transition_connection_state = AsyncMock()
+    mock_repo.insert_consent_link = AsyncMock()
+    mock_repo.get_credential_binding = AsyncMock()
+    mock_repo.revoke_credential_binding = AsyncMock()
+    mock_repo.insert_credential_binding = AsyncMock()
+    mock_repo.persist_snapshot_if_syncable = AsyncMock()
+    mock_repo.get_latest_snapshot = AsyncMock()
+    mock_repo.insert_health_record = AsyncMock()
+    mock_repo.get_latest_health = AsyncMock()
+
+    mock_provider = AsyncMock()
+
+    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: mock_repo)
+    monkeypatch.setattr(foundation_deps, "get_readonly_account_provider", lambda: mock_provider)
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:sync")
+
+    # Repo state unchanged — no snapshot persisted
+    mock_repo.persist_snapshot_if_syncable.assert_not_called()
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
