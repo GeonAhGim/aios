@@ -3,7 +3,7 @@
 Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §9 AI-16 DoD.
 DEEPEN-DEPTH task-25215: supplements existing tests with remaining D2 items.
 
-  - negative tests ≥ 3: empty script, reused ticket, mismatched digest
+  - negative tests ≥ 3: empty script, reused ticket, missing hypothesis, unauthenticated
   - failure injection 1: repo failure -> 500
 
 Imports/fixtures mirror `test_tools_propose_paper.py` and `conftest.py`.
@@ -78,7 +78,43 @@ async def test_submit_proposal_rejects_empty_script(
     assert response.status_code == 400, response.text
 
 
-# --- negative #2: 소모된 ticket으로 confirm하면 409 ---
+# --- negative #2: 필수 필드 누락(hypothesis 미제출)은 422 ---
+
+
+async def test_submit_proposal_rejects_missing_hypothesis(
+    pool,
+    client,
+    mandate_repo,
+    trust_repo,
+    coverage_repo,
+    instrument_repo,
+    token_repo: PostgresAgentTokenRepository,
+):
+    """missing `hypothesis` field -> 422 via Pydantic schema validator."""
+    tenant_id, instrument_id = await _proposal_ready_tenant(
+        pool, mandate_repo, trust_repo, coverage_repo, instrument_repo
+    )
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.PROPOSE}))
+    response = await client.post(
+        "/mcp/tools/submit_proposal",
+        json={
+            "script_source": "signal go_long = True",
+            "data_scope": {
+                "instruments": [instrument_id],
+                "tf": "1m",
+                "span": [
+                    datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+                    datetime(2026, 1, 31, tzinfo=UTC).isoformat(),
+                ],
+            },
+            "params": {},
+        },
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 422, response.text
+
+
+# --- negative #3: 소모된 ticket으로 confirm하면 409 ---
 
 
 async def test_confirm_promotion_reuses_ticket_is_409(
@@ -133,10 +169,10 @@ async def test_confirm_promotion_reuses_ticket_is_409(
     assert second.status_code == 409, second.text
 
 
-# --- negative #3: digest 불일치로 confirm하면 409 ---
+# --- negative #4: digest 불일치로 confirm하면 404 (not found, not 500) ---
 
 
-async def test_confirm_promotion_digest_mismatch_is_409(
+async def test_confirm_promotion_digest_mismatch_is_404(
     pool,
     client,
     mandate_repo,
