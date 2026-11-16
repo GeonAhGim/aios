@@ -20,19 +20,23 @@
 
 ## §0 요약 표
 
-| ID   | 심각도 | 파일:줄              | 내용                        | 재현                          | 조치 제안              |
-|------|--------|----------------------|-----------------------------|-------------------------------|------------------------|
-| F1   | M      | md_candle, md_tick   | tenant_id 누락              | DB 스키마 확인                | tenant_id 추가 FK      |
-| F2   | M      | backfill_job.py:158  | backfill↔실시간 동시 구간   | 동시 백필+실시간 테스트       | SELECT ... FOR UPDATE   |
-| F3   | M      | ingest_ticks.py:106  | trade_id 중복 시 upsert 덮어쓰기 | 중복 trade_id 재전송 테스트 | quarantine 또는 ignore   |
-| F4   | M      | as_of_binding.py:21  | default_as_of() 결정성 문제   | datetime.now() patch 테스트   | clock 의존성 주입       |
-| F5   | L      | get_candles.py:123   | as_of==close_time 경계       | 경계값 테스트                 | spec 명시 또는 ≤로 변경  |
-| F6   | L      | backfill_job.py:148  | partition 중복 생성 오버헤드  | 짧은 구간 여러 번 백필        | skip_if_exists 옵션      |
-| F7   | L      | replay_candles.py:83 | 시계·난수 시드 의존 누락      | CI hash-seed 환경에서 재생    | seed 주입 계약 추가      |
-| F8   | M      | ingest_candles.py:294-298, postgres_candle_store.py:125-132 | upsert conflict 시 silent drop이 감사 이벤트에 반영 안 됨 | 동시 백필+실시간 중 conflict 재현 | upsert 반환행수 검증·불일치 기록 |
-| F9   | L      | ingest_candles.py:185-204 | 심볼 상태 확인-fetch-쓰기 TOCTOU | fetch 중 상태 변경 주입 테스트 | 쓰기 트랜잭션 내 재확인 |
+| ID   | 심각도 | 파일:줄              | 내용                        | 재현                          | 조치 제안              | 현재 상태     |
+|------|--------|----------------------|-----------------------------|-------------------------------|------------------------|--------------|
+| F1   | M      | md_candle, md_tick   | tenant_id 누락              | DB 스키마 확인                | tenant_id 추가 FK      | §7 해소      |
+| F2   | M      | backfill_job.py:158  | backfill↔실시간 동시 구간   | 동시 백필+실시간 테스트       | SELECT ... FOR UPDATE   | §7 전제 오류 |
+| F3   | M      | ingest_ticks.py:106  | trade_id 중복 시 upsert 덮어쓰기 | 중복 trade_id 재전송 테스트 | quarantine 또는 ignore   | §7 해소      |
+| F4   | M      | as_of_binding.py:21  | default_as_of() 결정성 문제   | datetime.now() patch 테스트   | clock 의존성 주입       | §7 해소/위치오류 |
+| F5   | L      | get_candles.py:123   | as_of==close_time 경계       | 경계값 테스트                 | spec 명시 또는 ≤로 변경  | §7 전제 오류 |
+| F6   | L      | backfill_job.py:148  | partition 중복 생성 오버헤드  | 짧은 구간 여러 번 백필        | skip_if_exists 옵션      | §7 위치 오류 |
+| F7   | L      | replay_candles.py:83 | 시계·난수 시드 의존 누락      | CI hash-seed 환경에서 재생    | seed 주입 계약 추가      | §7 재현 안됨 |
+| F8   | M      | ingest_candles.py:294-298, postgres_candle_store.py:125-132 | upsert conflict 시 silent drop이 감사 이벤트에 반영 안 됨 | 동시 백필+실시간 중 conflict 재현 | upsert 반환행수 검증·불일치 기록 | §7 해소      |
+| F9   | L      | ingest_candles.py:185-204 | 심볼 상태 확인-fetch-쓰기 TOCTOU | fetch 중 상태 변경 주입 테스트 | 쓰기 트랜잭션 내 재확인 | §7 해소      |
 
 (F8~F9는 분할 2/5(task-10438)에서 `ingest_candles.py` 재검사로 추가됨. 상세는 §4.)
+
+> **참고:** §7(QA 재검증, task-25409)에서 원문 §0~§5의 주장을 현재 HEAD 코드로 대조한 결과,
+> F2/F3/F4/F7은 원문 주장과 코드가 불일치함(문서 정확성 M, record id 482).
+> 코드 변경은 필요 없음 — §7의 정정 결론이 최종 상태다.
 
 ## §1 선례 대조
 
@@ -402,3 +406,8 @@ F7의 전제("ingest_candles.py:66에 `hash(json.dumps(...))`가 있다")는 현
 - 같은 부류 점검(task-25409 요청 (4)): 제품 코드의 `hash()` 시드 의존은 `src/foundation/market_data`·`research_data` 범위에서 발견되지 않음. 결정적 해시는 `hashlib.sha256` 경유.
 - 미검증: F6의 파티션 중복 오버헤드는 이 QA에서 재현하지 않았다. 코드 변경·신규 테스트 없음. 실행한 테스트 없음(부모 커밋이 문서만 변경).
 - 실패 주입·동시성 재현(백필↔실시간 동시 쓰기)은 본 QA 범위 밖이며 기존 테스트 위치는 확인하지 않음 — 후속 리프 필요 시 CTO/PM 발행.
+
+**task-25417 조치 기록**
+- 문서 정확성 발견 1건: F2/F3/F4/F7의 원문 주장(§0·§2)이 현 코드와 불일치.
+- 코드 변경 없음. §0 요약 표에 "현재 상태" 열 추가, §7 정정 결론이 최종 판정임을 명시.
+- 문서 폐기보다는 정정 유지(원문 §1 선례 대조, §4 정정 내용은 여전히 유효).
