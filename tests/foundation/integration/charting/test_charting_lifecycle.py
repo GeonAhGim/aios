@@ -127,7 +127,7 @@ async def test_update_layout_wrong_revision_raises_concurrency_conflict(repo, po
     assert updated.revision == layout.revision + 1
     assert updated.name == "v1"
 
-    with pytest.raises(ConcurrencyConflictError):
+    with pytest.raises(ConcurrencyConflictError, match="no longer the latest"):
         await update_layout(
             repo,
             tenant_id=tenant_id,
@@ -188,7 +188,7 @@ async def test_put_drawings_round_trips_and_rejects_stale_revision(repo, pool):
     fetched = await get_drawings(repo, tenant_id=tenant_id, layout_id=layout.id)
     assert fetched.drawings == [_sample_trendline()]
 
-    with pytest.raises(ConcurrencyConflictError):
+    with pytest.raises(ConcurrencyConflictError, match="no longer the latest"):
         await put_drawings(
             repo,
             tenant_id=tenant_id,
