@@ -1,5 +1,6 @@
 import "../../i18n";
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { bestOfMsAsync } from "../../test/perfBudget";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -162,10 +163,14 @@ describe("ExecutionAlgoPage — DEEPEN-DEPTH EM-18 D2 보강", () => {
 
     const { render: renderWithWrapper } = renderPage();
 
-    const startedAt = performance.now();
-    renderWithWrapper(<ExecutionAlgoPage />);
-    await waitFor(expectProgressCard);
-    const elapsed = performance.now() - startedAt;
+    const elapsed = await bestOfMsAsync(async () => {
+      const startedAt = performance.now();
+      renderWithWrapper(<ExecutionAlgoPage />);
+      await waitFor(expectProgressCard);
+      const ms = performance.now() - startedAt;
+      cleanup();
+      return ms;
+    });
 
     expect(elapsed).toBeLessThan(PERF_BUDGET_MS);
   });

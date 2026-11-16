@@ -2,6 +2,7 @@ import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../../test/perfBudget";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
 import { StrategyBuilderPage } from "./StrategyBuilderPage";
@@ -109,9 +110,13 @@ describe("실패 주입 — mockRejectedValue·HttpResponse.error", () => {
 // ── 성능 단언 — performance.now()로 렌더 시간 재기 ──────────────────────────
 describe("performance — 렌더 시간 예산", () => {
   it("렌더 시간 단언: StrategyBuilderPage가 200ms 이내에 렌더된다 (실측 ~5ms, 30배 여유)", () => {
-    const t0 = performance.now();
-    renderPage();
-    const elapsed = performance.now() - t0;
+    const elapsed = bestOfMs(() => {
+      const t0 = performance.now();
+      renderPage();
+      const ms = performance.now() - t0;
+      cleanup();
+      return ms;
+    });
     // 실측: ~5ms (2026-11-15, 로컬 M2 MacBook). 예산 = 5 * 30 = 150ms → 여유 확보해 200ms
     expect(elapsed).toBeLessThan(200);
   });

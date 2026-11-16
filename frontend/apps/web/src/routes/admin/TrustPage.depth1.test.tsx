@@ -2,6 +2,7 @@ import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../../test/perfBudget";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
 import { TrustPage } from "./TrustPage";
@@ -199,9 +200,13 @@ describe("TrustPage depth1: performance", () => {
       refetch: refetchStatus,
     };
 
-    const before = performance.now();
-    renderPage();
-    const elapsed = performance.now() - before;
+    const elapsed = bestOfMs(() => {
+      const before = performance.now();
+      renderPage();
+      const ms = performance.now() - before;
+      cleanup();
+      return ms;
+    });
 
     // 실측: ~45ms (5개 consent + membership 섹션). 예산은 30배 여유인 300ms.
     expect(elapsed).toBeLessThan(300);

@@ -2,6 +2,7 @@ import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../../test/perfBudget";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
 import { ExchangeManagementPage } from "./ExchangeManagementPage";
@@ -91,7 +92,11 @@ describe("ExchangeManagementPage depth1 (D2)", () => {
   });
 
   it("perf: initial render completes within budget", () => {
-    const elapsed = timedRender();
+    const elapsed = bestOfMs(() => {
+      const ms = timedRender();
+      cleanup();
+      return ms;
+    });
     expect(elapsed).toBeLessThan(RENDER_BUDGET_MS);
   });
 

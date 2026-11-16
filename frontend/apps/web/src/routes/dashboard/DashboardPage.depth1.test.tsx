@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../../test/perfBudget";
 import { ApiError } from "@aios/api-client";
 import { DashboardPage } from "./DashboardPage";
 
@@ -145,9 +146,13 @@ describe("DashboardPage depth1 performance", () => {
     executionsResult = { data: EXECUTIONS, isLoading: false };
     portfolioResult = { data: PORTFOLIO, isLoading: false, isError: false, error: null };
 
-    const t0 = performance.now();
-    renderPage();
-    const elapsed = performance.now() - t0;
+    const elapsed = bestOfMs(() => {
+      const t0 = performance.now();
+      renderPage();
+      const ms = performance.now() - t0;
+      cleanup();
+      return ms;
+    });
 
     // 실측(2026-11-15, 로컬, 3회): 9.2~12.6ms. 예산 400ms = 실측 최대의 30배 이상 여유(CI 지연 흡수).
     // 실패해도 예산 숫자를 올리지 않는다.

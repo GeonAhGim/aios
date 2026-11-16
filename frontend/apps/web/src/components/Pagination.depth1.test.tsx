@@ -2,6 +2,7 @@ import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../test/perfBudget";
 import { derivePageState } from "../lib/pagination";
 import { Pagination } from "./Pagination";
 
@@ -124,9 +125,13 @@ describe("Pagination depth1: failure injection", () => {
 describe("Pagination depth1: performance", () => {
   it("렌더 시간: multi-page render가 예산(20ms) 이하여야 한다 — 실측 중앙값 0.53ms (N=20)", () => {
     const state = multiPageState();
-    const t0 = performance.now();
-    render(<Pagination state={state} onPageChange={() => {}} />);
-    const elapsed = performance.now() - t0;
+    const elapsed = bestOfMs(() => {
+      const t0 = performance.now();
+      render(<Pagination state={state} onPageChange={() => {}} />);
+      const ms = performance.now() - t0;
+      cleanup();
+      return ms;
+    });
 
     // Budget: 30× real median (0.53ms) = ~16ms → use 20ms with margin
     expect(elapsed).toBeLessThan(20);

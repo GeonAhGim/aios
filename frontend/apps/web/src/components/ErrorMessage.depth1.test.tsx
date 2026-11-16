@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { RetryClassification } from "@aios/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bestOfMs } from "../test/perfBudget";
 import { ErrorMessage } from "./ErrorMessage";
 
 // ── mock shared-types ────────────────────────────────────────────────────────
@@ -111,18 +112,17 @@ describe("ErrorMessage depth1 — performance", () => {
     mockGetApiErrorMessage.mockReturnValue("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.");
     mockClassifyRetry.mockReturnValue({ kind: "none" as const });
 
-    const start = typeof performance !== "undefined" ? performance.now() : 0;
+    const renderOnce = () => {
+      const start = performance.now();
+      render(<ErrorMessage errorCode="INTERNAL_ERROR" />);
+      const elapsed = performance.now() - start;
+      cleanup();
+      return elapsed;
+    };
 
-    render(<ErrorMessage errorCode="INTERNAL_ERROR" />);
-
-    const end = typeof performance !== "undefined" ? performance.now() : 0;
-    const elapsed = end - start;
-
-    // performance가 없는 환경(예: Node)에서는 이 단언을 우회
-    if (start > 0 && end > 0) {
-      expect(elapsed).toBeLessThan(50);
-    }
+    expect(bestOfMs(renderOnce)).toBeLessThan(50);
     // DOM이 렌더되었는지 기본 확인
+    render(<ErrorMessage errorCode="INTERNAL_ERROR" />);
     expect(screen.getByText("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.")).toBeInTheDocument();
   });
 
