@@ -34,6 +34,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
 )
 from src.foundation.market_data.ports.ingest_source import IngestSource
+from tests.support.perf_budget import PerfBudget
 
 
 class MockIngestSource(IngestSource):
@@ -237,26 +238,11 @@ def test_clock_returns_consistent_time() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_ingest_monkeypatch_source_raises_connection_error() -> None:
-    """실패주입: ingest_candles가 호출될 때 source.fetch_candles가
-    ConnectionError를 raise하면 해당 예외가 전파된다."""
-    from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey
-
+async def test_mock_ingest_source_timeout_fail_mode_raises_timeout() -> None:
+    """부정: fail_mode="timeout"이면 fetch_candles가 TimeoutError를 raise한다."""
     base_time = datetime(2026, 1, 1, tzinfo=UTC)
-    test_candle = CandleRecord(
-        key=SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1),
-        open_time=base_time,
-        close_time=base_time + timedelta(minutes=1),
-        open=Decimal("100"),
-        high=Decimal("110"),
-        low=Decimal("95"),
-        close=Decimal("105"),
-        volume=Decimal("100"),
-    )
+    source = MockIngestSource(candles=[], fail_mode="timeout")
 
-    source = MockIngestSource(candles=[test_candle], fail_mode="timeout")
-
-    # fail_mode="timeout"이므로 fetch_candles가 TimeoutError를 raise
     with pytest.raises(TimeoutError, match="did not respond within budget"):
         await source.fetch_candles(
             Venue.BITGET,
@@ -265,6 +251,49 @@ async def test_run_ingest_monkeypatch_source_raises_connection_error() -> None:
             base_time,
             base_time + timedelta(minutes=1),
         )
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_injected_via_monkeypatch_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: monkeypatch로 source.fetch_candles를 ConnectionError 발생기로
+    교체하면 호출자에게 예외가 그대로 전파되고, 호출 시도는 기록된다."""
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    source = MockIngestSource(candles=[])
+
+    async def _broken_fetch(*args: object, **kwargs: object) -> list[CandleRecord]:
+        raise ConnectionError("injected: upstream connection reset")
+
+    monkeypatch.setattr(source, "fetch_candles", _broken_fetch)
+
+    with pytest.raises(ConnectionError, match="injected"):
+        await source.fetch_candles(
+            Venue.BITGET,
+            "TESTUSDT",
+            Timeframe.M1,
+            base_time,
+            base_time + timedelta(minutes=1),
+        )
+
+
+@pytest.mark.perf
+def test_simple_sma_perf_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언: 2000개 종가 SMA(20) best-of-5 가 예산 미만 (perf_budget 경유)."""
+    closes = [Decimal(i) for i in range(2000)]
+    sample = perf_budget.best_of(lambda: simple_sma(closes, 20), n=5, warmup=1)
+    budget_ms = 500.0
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+
+@pytest.mark.perf
+def test_simple_sma_perf_gate_red_with_impossible_budget(perf_budget: PerfBudget) -> None:
+    """게이트 적색 재현: 예산을 비현실적으로 낮추면 같은 성능 단언이 실패한다."""
+    closes = [Decimal(i) for i in range(2000)]
+    sample = perf_budget.best_of(lambda: simple_sma(closes, 20), n=3, warmup=1)
+    # cpu_ms >= 0 always, so a 0ms budget is unsatisfiable (independent of timer quantization)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 0.0, perf_budget.describe(sample, budget_ms=0.0)
 
 
 def test_ingest_cmd_produces_valid_command() -> None:
