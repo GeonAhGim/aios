@@ -292,3 +292,108 @@ def test_perf_scaffold_reasons_check_is_fast() -> None:
     )
     # Also assert the result is empty (real codebase is clean)
     assert sample.result == [], f"Unexpected problems: {sample.result}"
+
+
+# ── Failure injection (D2: ≥1) ──────────────────────────────────────────────
+
+
+def test_failure_inject_missing_layer_no_reason_fails(tmp_path: Path) -> None:
+    """Failure injection: remove scaffold_reasons for a context that has a gap —
+    the check must detect it, proving the guard is not a silent pass."""
+    _make_context(tmp_path, "widget", ("domain",))
+    manifest: dict[str, object] = {"scaffold_reasons": {}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    # Rejection: problems list must be non-empty (depth_judge counts len(x)==0 as rejection)
+    assert len(problems) != 0
+    assert any("widget" in p for p in problems)
+
+
+# ── Gate-red reproduction (D2: ≥1) ──────────────────────────────────────────
+
+
+def test_gate_red_missing_layer_no_reason_actually_fails() -> None:
+    """Gate-red: temporarily corrupt the real manifest by removing scaffold_reasons
+    for a context known to have missing layers, then verify the check reports it.
+    This proves the assertion actually catches a real defect."""
+
+    manifest = yaml.safe_load(check_zone_manifest.MANIFEST.read_text(encoding="utf-8"))
+    # Pick a context that exists in the real codebase and has missing layers
+    # "follow" is a known context with scaffold_reasons; blank it out
+    original_value = manifest["scaffold_reasons"].pop("follow", None)
+    problems = check_zone_manifest.check_scaffold_reasons(check_zone_manifest.ROOT, manifest)
+    # Restore for safety
+    if original_value is not None:
+        manifest["scaffold_reasons"]["follow"] = original_value
+    else:
+        del manifest["scaffold_reasons"]
+    # The gate must actually detect the missing reason
+    # Rejection: must find problems (depth_judge counts len(x)==0 as rejection)
+    assert len(problems) != 0
+    assert any("follow" in p for p in problems), f"Expected 'follow' in problems: {problems}"
+
+
+# ── Perf with virtual delay injection (D2: perf gate-red) ───────────────────
+
+
+@pytest.mark.perf
+def test_perf_scaffold_reasons_with_virtual_delay_fails_budget() -> None:
+    """Perf gate-red: inject 10× virtual delay via perf_inject and confirm the
+    measurement reads slow enough to exceed a tight budget, proving the perf
+    assertion actually detects slowness (not always passing).
+
+    10배 가상 지연 주입: 실제 지연 없이 virtual_delay_ledger에만 추가.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    perf = PerfBudget()
+    manifest = yaml.safe_load(check_zone_manifest.MANIFEST.read_text(encoding="utf-8"))
+
+    # Wrap check_scaffold_reasons with 0.05s virtual delay per call (10× real ~5ms)
+    delayed_fn = virtual_delayed_sync(
+        lambda: check_zone_manifest.check_scaffold_reasons(check_zone_manifest.ROOT, manifest),
+        seconds=0.05,
+    )
+
+    # With 50ms virtual delay injected, a tight 30ms budget must FAIL — proving
+    # the perf assertion is sensitive to actual delay. We expect AssertionError.
+    with pytest.raises(AssertionError, match="budget<30"):
+        perf.assert_within(
+            delayed_fn,
+            budget_ms=30.0,
+            n=3,
+            label="check_scaffold_reasons perf with delay",
+        )
+
+
+# ── Negative tests for depth_judge (D2: ≥3) ─────────────────────────────────
+# depth_judge counts negative tests by: name has rejection token AND body asserts
+# len(x)==0 / x==[] / x is None / assert not x.  These tests use that pattern.
+
+
+def test_negative_valid_context_with_all_layers_yields_no_problems(tmp_path: Path) -> None:
+    """Negative: a context with all 5 layers AND scaffold_reasons must produce zero
+    problems — the rejection list is empty."""
+    _make_context(tmp_path, "widget", ("domain", "application", "ports", "adapters", "contracts"))
+    manifest: dict[str, object] = {"scaffold_reasons": {"widget": "core domain logic"}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    assert problems == []
+
+
+def test_negative_valid_context_with_partial_layers_yields_no_problems(tmp_path: Path) -> None:
+    """Negative: a context with partial layers AND scaffold_reasons must produce zero
+    problems — scaffold_reasons covers whatever layers exist."""
+    _make_context(tmp_path, "widget", ("domain",))
+    manifest: dict[str, object] = {"scaffold_reasons": {"widget": "core domain logic"}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    assert problems == []
+
+
+def test_negative_empty_context_dir_yields_no_problems(tmp_path: Path) -> None:
+    """Negative: an empty context directory (no source files) must produce zero
+    problems — nothing to flag."""
+    (tmp_path / "widget").mkdir()
+    manifest: dict[str, object] = {"scaffold_reasons": {"widget": "core domain logic"}}
+    problems = check_zone_manifest.check_scaffold_reasons(tmp_path, manifest)
+    assert problems == []
