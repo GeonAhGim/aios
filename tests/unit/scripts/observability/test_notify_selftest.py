@@ -90,6 +90,65 @@ def test_write_report_with_empty_path_list(tmp_path: Path):
     assert not list(tmp_path.iterdir())
 
 
+async def test_run_selftest_with_unicode_error():
+    """negative(D2) — error에 한글/유니코드 특수문자가 포함돼도 JSON 직렬화가
+    깨지지 않고 원문 그대로 기록된다(ensure_ascii=False가 작동함)."""
+    adapter = _FakeAdapter(
+        NotifyResult(
+            ok=False, status_code=502, error="웹훅 응답: \uc624\ub958 \ubc88\ud638 \uc5c6\uc774"
+        )
+    )
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is False
+    assert result["error"] == "웹훅 응답: \uc624\ub958 \ubc88\ud638 \uc5c6\uc774"
+
+
+async def test_run_selftest_with_special_chars_in_error():
+    """negative(D2) — error에 JSON 특수문자(따옴표, 역슬래시, 개행)가 포함돼도
+    원문이 망가지지 않는다(run_selftest가 error를 문자열로 그대로 전달함)."""
+    adapter = _FakeAdapter(
+        NotifyResult(ok=False, status_code=400, error='bad "json": \\error\nline2')
+    )
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is False
+    assert result["error"] == 'bad "json": \\error\nline2'
+
+
+# ── adversarial tests (D2: adversarial ≥ 1) ───────────────────────────────────
+
+
+async def test_run_selftest_adversarial_status_code_boundary():
+    """adversarial(D2) — status_code가 최대 정수값인极端 case에서
+    run_selftest가 예외 없이 dict를 반환한다."""
+    adapter = _FakeAdapter(NotifyResult(ok=False, status_code=2**31 - 1, error="overflow status"))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is False
+    assert result["status_code"] == 2**31 - 1
+    assert result["error"] == "overflow status"
+
+
+async def test_run_selftest_adversarial_none_all_fields():
+    """adversarial(D2) — ok=False, status_code=None, error=None인
+    완전히 텅 빈 결과에서 run_selftest가 None을 뭉개지 않고 기록한다.
+    write_report가 json.dumps에 None을 넣어도 JSON null로 직렬화됨을 확인."""
+    adapter = _FakeAdapter(NotifyResult(ok=False, status_code=None, error=None))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is False
+    assert result["status_code"] is None
+    assert result["error"] is None
+    # JSON 직렬화 검증 — None이 "null"로 직렬화되어야 함
+    payload = json.dumps(result, ensure_ascii=False, indent=2)
+    assert '"null"' in payload or "null" in payload
+
+
 # ── gate-red reproduction ─────────────────────────────────────────────────────
 
 
