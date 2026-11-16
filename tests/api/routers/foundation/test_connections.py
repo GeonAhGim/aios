@@ -217,31 +217,97 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
 
 
 def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
+    """Reject confirm when connection belongs to a different tenant (I-03).
+
+    Uses a fake repo that returns a connection owned by another tenant so the
+    real confirm_connection() path hits the tenant_id check at line 57.
+    """
+    from unittest.mock import AsyncMock
+
+    from src.api import foundation_deps
+    from src.foundation.connections.application.confirm_connection import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import (
+        AccountConnection,
+        CapabilityScope,
+        ConnectionState,
+    )
+
+    other_tenant = UUID("00000000-0000-0000-0000-000000000001")
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    owner_conn = AccountConnection(
+        id=cid,
+        tenant_id=other_tenant,
+        owner_subject_id=other_tenant,
+        provider_code="BITGET",
+        opaque_account_ref="ref",
+        state=ConnectionState.PENDING_CONSENT,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    fake_repo = AsyncMock()
+    fake_repo.get_connection = AsyncMock(return_value=owner_conn)
 
-    from src.api.routers.foundation import connections
+    def override_repo():
+        return fake_repo
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    client.app.dependency_overrides[foundation_deps.get_connection_repository] = override_repo
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:confirm")
+
+    # Repo state unchanged — no transition should have been attempted
+    assert fake_repo.transition_connection_state.call_count == 0
 
 
 def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection belongs to a different tenant."""
+    """Reject sync when connection belongs to a different tenant (I-03).
+
+    Uses a fake repo that returns a connection owned by another tenant so the
+    real sync_snapshot() path hits the tenant_id check at line 87.
+    """
+    from unittest.mock import AsyncMock
+
+    from src.api import foundation_deps
+    from src.foundation.connections.application.sync_snapshot import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import (
+        AccountConnection,
+        CapabilityScope,
+        ConnectionState,
+    )
+
+    other_tenant = UUID("00000000-0000-0000-0000-000000000002")
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    owner_conn = AccountConnection(
+        id=cid,
+        tenant_id=other_tenant,
+        owner_subject_id=other_tenant,
+        provider_code="BITGET",
+        opaque_account_ref="ref",
+        state=ConnectionState.ACTIVE_READONLY,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    fake_repo = AsyncMock()
+    fake_repo.get_connection = AsyncMock(return_value=owner_conn)
 
-    from src.api.routers.foundation import connections
+    def override_repo():
+        return fake_repo
 
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    client.app.dependency_overrides[foundation_deps.get_connection_repository] = override_repo
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:sync")
+
+    # Repo state unchanged — no transition should have been attempted
+    assert fake_repo.transition_connection_state.call_count == 0
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
