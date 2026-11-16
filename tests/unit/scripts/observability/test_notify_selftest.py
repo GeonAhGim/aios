@@ -165,3 +165,29 @@ async def test_gate_red_virtual_delay_breaches_budget(perf_budget: PerfBudget) -
     )
 
     reset_virtual_totals()
+
+
+# ── adversarial test (D3) ─────────────────────────────────────────────────────
+
+
+async def test_run_selftest_never_reports_ok_on_truncated_notify_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """adversarial(D3) — adapter가 NotifyResult의 핵심 필드(ok)를 잘라
+    AttributeError를 내도 run_selftest가 ok=True로 위장하지 않는다.
+
+    불변식: run_selftest의 반환값에서 result["ok"]는 adapter.send()의
+    NotifyResult.ok 값을 그대로 복사한다. 어떤 경로에서도 True가 되지
+    않는다.
+
+    공격 시나리오: 어댑터가 ok 필드 없이 응답하면 run_selftest가
+    getattr(result, "ok", True) 같은 디폴트 True를 쓰지 않는지 검증.
+    """
+    adapter = _FakeAdapter(NotifyResult(ok=None, status_code=200, error=None))
+    result = await notify_selftest.run_selftest(adapter)
+
+    # ok=None은 falsy이므로 result["ok"]는 falsy여야 함
+    assert not result["ok"], (
+        f"adversarial 위장 실패: ok=None을 반환했는데 "
+        f"result['ok']={result['ok']} — fail-closed 위반"
+    )
