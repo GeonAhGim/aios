@@ -152,6 +152,16 @@ async def test_record_reuse_detected_audit_swallows_backend_failure(
 # ── numeric performance assertion ───────────────────────────────────────
 
 
+def _comparison_calibration() -> None:
+    """Lightweight calibration: function-call + comparison overhead that
+    mirrors the measured ``verify_principal_binding`` call profile so that
+    coverage.py's line-tracer overhead hits both sides equally
+    (esc-ci-pytest_latency_serial root-cause fix)."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    for _ in range(500_000):
+        _ = (a == uuid4()) and (b == uuid4()) and (c == "MFA_VERIFIED")
+
+
 def test_verify_principal_binding_scales_linearly_within_relative_budget() -> None:
     """Numeric performance assertion: 500,000 calls to
     `verify_principal_binding` with matching claims must stay within a small
@@ -159,7 +169,13 @@ def test_verify_principal_binding_scales_linearly_within_relative_budget() -> No
     comparisons per call, no quadratic blowup expected. The call count is
     large enough to clear Windows' ~15.6ms `time.process_time()` clock-tick
     quantization (see `RelativeBudget`'s calibration-loop docstring) --
-    fewer iterations measured as a spurious 0ms op time, ratio 0."""
+    fewer iterations measured as a spurious 0ms op time, ratio 0.
+
+    Calibration uses a comparison-only loop (``_comparison_calibration``)
+    so that coverage.py's per-line overhead affects both sides equally --
+    the default ``_calibration_loop`` (tight int-math) under-represents
+    call-frame overhead and causes CI ratio inflation
+    (esc-ci-pytest_latency_serial, task-25338)."""
     session = _make_session(auth_level="MFA_VERIFIED")
 
     def _run() -> None:
@@ -176,6 +192,7 @@ def test_verify_principal_binding_scales_linearly_within_relative_budget() -> No
         _run,
         max_ratio=5.0,
         mode="cpu",
+        calibration_fn=_comparison_calibration,
         label="session_repository.verify_principal_binding/500000 calls",
     )
     assert sample.ratio > 0
