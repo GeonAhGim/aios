@@ -8,6 +8,7 @@ The original 171-line __init__.py tests had review findings:
 Improved versions live in sibling test files.
 
 D2 evidence (task-25065): perf assertions + gate-red reproduction for _pool_retry_delay.
+D2 evidence (task-25392): negative tests for _pool_retry_delay boundary inputs.
 """
 
 from __future__ import annotations
@@ -85,3 +86,34 @@ class TestPoolRetryDelayGateRed:
         # Gate-red: the budget assertion should raise because 500ms >> 3ms
         with pytest.raises(AssertionError):
             assert sample.cpu_ms < 3.0
+
+
+# ---------------------------------------------------------------------------
+# db._pool_retry_delay — negative tests (D2: negative ≥3, task-25392)
+# ---------------------------------------------------------------------------
+
+
+class TestPoolRetryDelayNegative:
+    """Negative / boundary tests for _pool_retry_delay.
+
+    The function is ``_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1)``
+    (BASE=0.5). These tests verify correct behaviour at and beyond the
+    normal input range [0, 9] that ``test_frozen.py`` covers.
+    """
+
+    def _delay(self, attempt: int) -> float:
+        from tests.support.db import _pool_retry_delay  # noqa: PLC0415
+
+        return _pool_retry_delay(attempt)
+
+    def test_negative_attempt_minus_one_returns_zero(self) -> None:
+        """_pool_retry_delay(-1) must return exactly 0.0 (boundary of attempt+1)."""
+        assert self._delay(-1) == 0.0
+
+    def test_negative_attempt_below_minus_one_returns_negative(self) -> None:
+        """_pool_retry_delay(-2) must return -0.5 — deterministic, no clamp."""
+        assert self._delay(-2) == pytest.approx(-0.5)
+
+    def test_large_attempt_returns_scaled_value(self) -> None:
+        """_pool_retry_delay(999999) must return 500000.0 — no overflow."""
+        assert self._delay(999999) == pytest.approx(500000.0)
