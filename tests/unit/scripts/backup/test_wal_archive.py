@@ -201,7 +201,11 @@ def test_evaluate_accepts_always_archive_mode_and_logical_wal_level():
 
 
 def test_check_archive_advanced_ok_when_new_file_appears():
-    assert wal_archive.check_archive_advanced({"a"}, {"a", "b"}) is None
+    before, after = {"a"}, {"a", "b"}
+    assert wal_archive.check_archive_advanced(before, after) is None
+    assert (before, after) == ({"a"}, {"a", "b"})  # 순수 함수: 입력 불변
+    assert wal_archive.check_archive_advanced(set(), {"b"}) is None
+    assert wal_archive.check_archive_advanced({"a"}, {"b"}) is None  # 교체도 새 파일
 
 
 def test_check_archive_advanced_fails_when_no_new_file():
