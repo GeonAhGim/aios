@@ -1,7 +1,8 @@
 """RD-16 depth-1 supplement for `research_data_search` (D2 floor).
 
-Adds negative tests x4, failure injection x1, gate-red reproduction x1 and a
-best-of perf assertion x1 on top of `test_tools_research_data.py` (unchanged).
+Adds negative tests x7 (3 domain-level + 4 auth/validation), failure injection x1,
+gate-red reproduction x1 and a best-of perf assertion x1 on top of
+`test_tools_research_data.py` (unchanged).
 Fixtures/helpers are reused from that module.
 
 Perf budget (new): one `research_data_search` call over 20 seeded items must
@@ -95,6 +96,46 @@ async def test_search_kind_filter_without_match_returns_empty(
     )
     assert response.status_code == 200, response.text
     assert response.json() == []
+
+
+async def test_search_source_not_in_contract_returns_403(
+    client, pool, token_repo: PostgresAgentTokenRepository, research_repo
+):
+    """A source_id that has no source_contract row must be rejected with 403 (fail-closed)."""
+    tenant_id = await _make_tenant(pool)
+    await _register_source(research_repo)
+    # insert an item under this tenant but NO source_contract row
+    await research_repo.append_item(tenant_id, _item(), external_id=f"ext-{uuid.uuid4().hex}")
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
+    response = await client.post(
+        _URL,
+        json={"source_id": "NO_SUCH_SOURCE"},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 403, (
+        "source_contract이 없는 source_id는 403을 반환해야 하며 "
+        "빈 목록으로 조용히 반환되어서는 안 된다"
+    )
+
+
+async def test_search_cross_tenant_isolation(
+    client, pool, token_repo: PostgresAgentTokenRepository, research_repo
+):
+    """Items indexed under tenant A must not leak when searched with tenant B's token."""
+    await _insert_source_contract(pool)
+    await _register_source(research_repo)
+    tenant_a = await _make_tenant(pool)
+    tenant_b = await _make_tenant(pool)
+    # seed items under tenant A only
+    await research_repo.append_item(tenant_a, _item(), external_id=f"ext-{uuid.uuid4().hex}")
+    token_b = await issue(token_repo, tenant_id=tenant_b, scopes=frozenset({Scope.READ}))
+    response = await client.post(
+        _URL,
+        json={"source_id": SOURCE_ID},
+        headers={AGENT_TOKEN_HEADER: token_b.secret},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == [], "tenant B의 토큰으로 tenant A의 항목이 조회되어서는 안 된다"
 
 
 # -- failure injection ----------------------------------------------------------
