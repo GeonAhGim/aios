@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -217,31 +218,77 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
 
 
 def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
+    """Reject confirm when connection belongs to a different tenant (I-03)."""
+    from src.api import foundation_deps
+    from src.foundation.connections.application.confirm_connection import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import AccountConnection
+
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    other_tenant = UUID("550e8400-e29b-41d4-a716-446655440002")
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    fake_conn = AccountConnection(
+        id=cid,
+        tenant_id=other_tenant,
+        owner_subject_id=other_tenant,
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.PENDING_CONSENT,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+    )
 
-    from src.api.routers.foundation import connections
+    async def fake_get_connection(connection_id: UUID):
+        return fake_conn
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    repo = AsyncMock()
+    repo.get_connection = fake_get_connection
+
+    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: repo)
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:confirm")
+
+    # repo state unchanged — no mutation before tenant check
+    repo.transition_connection_state.assert_not_called()
 
 
 def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection belongs to a different tenant."""
+    """Reject sync when connection belongs to a different tenant (I-03)."""
+    from src.api import foundation_deps
+    from src.foundation.connections.application.sync_snapshot import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.domain.models import AccountConnection
+
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    other_tenant = UUID("550e8400-e29b-41d4-a716-446655440002")
 
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
+    fake_conn = AccountConnection(
+        id=cid,
+        tenant_id=other_tenant,
+        owner_subject_id=other_tenant,
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.ACTIVE_READONLY,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+    )
 
-    from src.api.routers.foundation import connections
+    async def fake_get_connection(connection_id: UUID):
+        return fake_conn
 
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    repo = AsyncMock()
+    repo.get_connection = fake_get_connection
+
+    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: repo)
+
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:sync")
+
+    # repo state unchanged — no mutation before tenant check
+    repo.transition_connection_state.assert_not_called()
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
