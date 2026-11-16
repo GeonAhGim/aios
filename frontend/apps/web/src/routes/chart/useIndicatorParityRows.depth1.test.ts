@@ -39,10 +39,14 @@ describe("useIndicatorParityRows — negative tests (D2)", () => {
 
     const { result } = renderHook(() => useIndicatorParityRows(bars, overlays, catalog, resolveServerSeries, null));
 
-    // SMA is verified → gate passes, returns "pending" (compute dispatched)
-    await waitFor(() => expect(result.current).toHaveLength(1));
+    // SMA is verified → gate passes, returns "pending" (compute dispatched). "pending" is the synchronous gate row of the first
+    // render and only lasts until the dispatched compute resolves (here: with no bars and no server series -> "unverified"),
+    // so it must be asserted right after render -- waiting first made this race the microtask that settles the row.
+    expect(result.current).toHaveLength(1);
     expect(result.current[0]!.source).toBe("pending");
     expect(result.current[0]!.id).toBe("SMA");
+    // and the dispatched compute then settles it without ever reaching an indicator name the whitelist rejected
+    await waitFor(() => expect(result.current[0]!.source).toBe("unverified"));
   });
 
   it("empty overlays returns no rows even with bars", () => {
