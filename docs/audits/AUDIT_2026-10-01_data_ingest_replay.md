@@ -377,3 +377,28 @@ F7의 전제("ingest_candles.py:66에 `hash(json.dumps(...))`가 있다")는 현
 - F8(upsert 시 silent drop과 감사 불일치)이 새로 발견된 가장 중요한 항목 — 표준-105의
   "영향받은 행 수 확인" 패턴이 데이터 수집 경로에 없다는 것을 구체적으로 보여준다
 - 코드 변경 없음(기존 코드 감사만). 정정 리프는 CTO/PM이 발행.
+
+## §6 QA 재검증 (task-25409, 부모 커밋 e50cc8d5c8c3 대조, HEAD 781050648 기준)
+
+원문(§0~§5)은 감사 시점 코드 기준이다. 이후 정정 커밋이 착지해 현재 HEAD와 어긋나는
+항목이 많아, 원문은 고치지 않고 현재 상태를 아래에 덧붙인다. 판정은 파일 직접 대조 기준.
+
+| ID | 원문 주장 | HEAD 대조 결과 | 판정 | 근거 |
+|----|-----------|----------------|------|------|
+| F1 | md_candle/md_tick에 tenant_id 없음 | `md_candle`/`md_tick`에 tenant_id 추가 마이그레이션 존재, `upsert_batch(tenant_id=...)` 전파 | **해소** | `src/db/migrations/versions/f1_md_candle_tick_tenant_id.py`, commit e5cfc5416 |
+| F2 | backfill `ON CONFLICT DO UPDATE`가 실시간 데이터를 덮어씀 | candle 경로는 `DO NOTHING`(first writer wins). 원문 전제 틀림 | **전제 오류** (충돌 자체는 F8 경로로 관측됨) | `postgres_candle_store.py:135`, `backfill_job.py:47-48` |
+| F3 | ingest_ticks trade_id 중복 시 upsert 덮어쓰기 | 틱 경로는 `DO NOTHING`, content 불일치는 DUPLICATE_CONFLICT로 분리 | **해소** | `ingest_ticks.py:190`, commit 71c56d1fb |
+| F4 | `as_of_binding.py:21` `default_as_of()`가 `datetime.now` | 해당 함수 없음. `as_of_binding.bind_as_of`는 `bar_ts` 필수 입력. `query.py:_default_clock`은 `clock` 주입 가능 | **해소/위치 오류** | `research_data/domain/as_of_binding.py`, `research_data/application/query.py:33-40` |
+| F5 | `get_candles.py:123` `close_time <= as_of` | 해당 줄 없음. point-in-time은 `created_at <= as_of` 스냅샷 필터(WORM). 경계 주장 무효 | **전제 오류** | `postgres_candle_store.py:186,221`, 모듈 docstring 13-15행 |
+| F6 | `backfill_job.py:148` 파티션 중복 생성 | 해당 줄은 `run_backfill_job` 시그니처. 파티션 생성 코드는 다른 위치 | **위치 오류, 재현 미확인** | `backfill_job.py:146`, 파티션 DDL은 `migrations/versions/4a1d0c0de008_md_candles.py`(`CREATE TABLE IF NOT EXISTS ... PARTITION OF`) |
+| F7 | ingest_candles.py:66 `hash(json.dumps(...))` | `hash()` 없음. 전 경로 `batch_hash`(sha256) 사용. replay_candles의 `series_hash`도 결정적 | **재현 안 됨**(원문 §4와 동일 결론) | `domain/lineage.py:97-112`, `replay_candles.py:87` |
+| F8 | upsert conflict silent drop이 감사에 미반영 | `inserted_count != len(good)`일 때 2차 감사 이벤트 기록, 결과 정정 | **해소** | `ingest_candles.py:313-330`, commit d1cfc99ae |
+| F9 | 쓰기 전 상태 재확인 없음(TOCTOU) | 쓰기 트랜잭션 내 `get_instrument(conn, ...)` 재조회, NOT_TRADABLE이면 거부 | **해소** | `ingest_candles.py:238-246`, commit 60c1e93b6 |
+
+**QA 결론**
+- 원문 9건 중 **실제로 열려 있는 결함은 0건**으로 확인됨(F2·F5·F6은 전제/위치가 틀려 원문 그대로는 재현 불가, 나머지는 정정 커밋으로 해소).
+- 원문 §5의 "F1이 가장 심각" 및 "F8이 가장 중요" 결론은 현재 HEAD 기준으로 유효하지 않다.
+- 원문 §3 표(선례 미적용 항목)의 "X" 칸 중 tenant·감사·TOCTOU 항목은 정정 후 충족 상태다.
+- 같은 부류 점검(task-25409 요청 (4)): 제품 코드의 `hash()` 시드 의존은 `src/foundation/market_data`·`research_data` 범위에서 발견되지 않음. 결정적 해시는 `hashlib.sha256` 경유.
+- 미검증: F6의 파티션 중복 오버헤드는 이 QA에서 재현하지 않았다. 코드 변경·신규 테스트 없음. 실행한 테스트 없음(부모 커밋이 문서만 변경).
+- 실패 주입·동시성 재현(백필↔실시간 동시 쓰기)은 본 QA 범위 밖이며 기존 테스트 위치는 확인하지 않음 — 후속 리프 필요 시 CTO/PM 발행.
