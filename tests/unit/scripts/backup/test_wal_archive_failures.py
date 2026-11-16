@@ -134,6 +134,31 @@ def test_verify_raises_PermissionError_from_list_dir(monkeypatch, tmp_path):
         )
 
 
+# --- negative: 0-byte WAL file (content check not implemented) ----------------
+
+
+def test_verify_treats_zero_byte_wal_as_new_file_no_content_check():
+    """0바이트 WAL 이름 파일은 이름만 보는 현재 코드가 '새 파일'로 판정한다.
+
+    현재 verify_archiving_advances/list_dir는 파일 이름만 set에 담고
+    내용을 검사하지 않는다. 따라서 0바이트 파일이 아카이브 디렉터리에
+    있으면 glob("*")이 그 이름을 돌려 after-before가 비어 있지 않게 되고
+    check_archive_advanced()는 None(정상)을 반환한다.
+
+    내용 검사가 구현되지 않았음을 명시적으로 고정한다.
+    """
+    # check_archive_advanced는 이름만 비교 — 0바이트 파일 이름이
+    # after set에 있으면 새 파일로 판정(내용 검사는 하지 않음)
+    result = wal_archive.check_archive_advanced(
+        {"000000010000000000000001"},
+        {"000000010000000000000001", "000000010000000000000002"},
+    )
+    # 이름만 보면 새 파일이 있으므로 None(정상) — 내용 검사는 하지 않음
+    assert result is None, (
+        "0-byte WAL file is treated as new file (name-only check, no content validation)"
+    )
+
+
 # --- negative: archive_command whitespace-only -------------------------------
 
 
