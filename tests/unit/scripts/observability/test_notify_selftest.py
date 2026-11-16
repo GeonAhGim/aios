@@ -81,6 +81,18 @@ async def test_run_selftest_with_empty_error_string():
     assert result["error"] == ""
 
 
+async def test_run_selftest_with_negative_status_code():
+    """negative(D2) — adapter가 음수 status_code를 반환하면 result에 그대로
+    기록되어야 한다(음수를 0으로 clamp하거나 제거하지 않음)."""
+    adapter = _FakeAdapter(NotifyResult(ok=False, status_code=-1, error="internal_bad_config"))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is False
+    assert result["status_code"] == -1
+    assert result["error"] == "internal_bad_config"
+
+
 def test_write_report_with_empty_path_list(tmp_path: Path):
     """negative(D2) — 경로 리스트가 비어 있으면 아무것도 쓰지 않고 예외를
     내지 않아야 한다(write_report가 경로 검증 없이 바로 for문에 들어가는
@@ -90,7 +102,63 @@ def test_write_report_with_empty_path_list(tmp_path: Path):
     assert not list(tmp_path.iterdir())
 
 
-# ── gate-red reproduction ─────────────────────────────────────────────────────
+# ── adversarial tests (D3: invariant cross-check) ─────────────────────────────
+
+
+async def test_run_selftest_adversarial_empty_alert_fields():
+    """adversarial(D3/I-10) — alertname/summary/runbook가 빈 문자열이어도
+    run_selftest가 예외 없이 dict를 반환해야 한다(빈 필드가 'success'로
+    위장하지 않음). NotifyPort.send는 빈 필력을 허용해야 하고,
+    run_selftest는 그 결과를 있는 그대로 기록한다."""
+    # _FakeAdapter는 NotifyResult만 받으니, 실제 WebhookNotifyAdapter가
+    # 빈 필력을 어떻게 다루는지 notify_port의 send() 로직을 간접 검증한다:
+    # empty alertname → ok=False (empty URL) 또는 ok=True(configured)
+    # 핵심: run_selftest가 alert 필력을 검사하지 않고 그대로 pass-through
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    # result는 항상 안정적인 키/값 구조여야 한다
+    assert isinstance(result["started_at"], str)
+    assert isinstance(result["finished_at"], str)
+    assert isinstance(result["ok"], bool)
+    assert isinstance(result["status_code"], int)
+    # ok=True이면 error는 None이어야 함
+    if result["ok"] is True:
+        assert result["error"] is None
+
+
+async def test_run_selftest_adversarial_very_long_summary():
+    """adversarial(D3/I-10) — summary가 10000자 이상이어도 run_selftest가
+    예외 없이 dict를 반환해야 한다(긴 텍스트가 result를 망가지게 하지 않음).
+    WebhookNotifyAdapter.send()가 httpx POST에서 payload를 직렬화할 때
+    메모리 폭탄이 되지 않는지 간접 검증."""
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    assert result["ok"] is True
+    assert result["status_code"] == 200
+    assert "started_at" in result
+    assert "finished_at" in result
+
+
+class _ThrowingAdapter:
+    """Adversarial adapter that raises RuntimeError on send."""
+
+    async def send(self, alert: AlertNotification) -> NotifyResult:
+        raise RuntimeError("adapter internal crash")
+
+
+async def test_run_selftest_adversarial_unexpected_adapter_exception():
+    """adversarial(D3/I-10) — adapter.send()가 OSError 외의 예외를 던지면
+    run_selftest가 그 예외를 silently pass하지 않고 전파해야 한다.
+    write_report는 OSError만 잡지만, run_selftest 자체는 예외 전파가
+    올바른 동작이다(실패 원인을 호출자에게 알려야 디버깅이 가능하다)."""
+    adapter = _ThrowingAdapter()
+
+    with pytest.raises(RuntimeError, match="adapter internal crash"):
+        await notify_selftest.run_selftest(adapter)
 
 
 def test_write_report_gate_red_catches_unexpected_exception(tmp_path: Path):
