@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { NotificationHistoryEntry } from "@aios/shared-types";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 import { UNKNOWN_DATE_KEY, computeDailyDigest } from "./digest";
 
 /* ============================================================
@@ -132,13 +132,15 @@ describe("computeDailyDigest: 성능 단언 추가", () => {
     const input5k = makeInput(5000);
     const input10k = makeInput(10000);
 
-    const t5 = performance.now();
-    computeDailyDigest(input5k);
-    const ms5 = performance.now() - t5;
-
-    const t10 = performance.now();
-    computeDailyDigest(input10k);
-    const ms10 = performance.now() - t10;
+    // 각 입력을 최선 5회로 잰다 -- 단발 두 표본의 비율은 러너 지연 한 번에 뒤집힌다(Actions 22.42ms vs 22.30ms로 적색이던 적이 있다).
+    // 비율 상한(2.5배+1ms)과 예산 숫자는 그대로다.
+    const timeOnce = (input: ReturnType<typeof makeInput>) => () => {
+      const t = performance.now();
+      computeDailyDigest(input);
+      return performance.now() - t;
+    };
+    const ms5 = bestOfMs(timeOnce(input5k));
+    const ms10 = bestOfMs(timeOnce(input10k));
 
     // 10000이 5000의 2배 시간以内 → O(n) 선형
     expect(ms10).toBeLessThanOrEqual(ms5 * 2.5 + 1); // 1ms 오차 허용
