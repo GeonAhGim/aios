@@ -1,6 +1,6 @@
 """13 — Marketplace API router.
 
-Spec: 기능설계문서_v1.20.md#FD-13.1~FD-13.10, 16_backend_signatures.md
+Spec: FD-13.1~FD-13.10 (feature design v1.20), 16_backend_signatures.md
 
 Purchase is subject to §15.1 Idempotency-Key policy (monetary POST) —
 src/api/contracts/idempotency.py enforces four-way scoping
@@ -144,11 +144,11 @@ async def purchase_listing(
     service: PurchaseService = Depends(get_purchase_service),
 ) -> PurchaseResponse:
     async def compute() -> tuple[int, dict[str, object]]:
-        # PurchaseError/InsufficientWalletBalanceError는 여기서 잡지 않고
-        # 그대로 던진다 — run_idempotent(→with_idempotency)는 compute()가
-        # 예외를 던지면 선점 행을 지우고(캐시하지 않음) 그대로 재전파하므로
-        # (core/idempotency.py docstring), 전역 핸들러가 도메인 예외를
-        # 봉투로 변환하는 경로와 자연히 합쳐진다.
+        # PurchaseError / InsufficientWalletBalanceError propagate without
+        # being caught here — run_idempotent (→ with_idempotency) clears
+        # the claim row and re-raises when compute() throws (see
+        # core/idempotency.py docstring), so the path where a global
+        # handler wraps these domain errors merges naturally.
         result = await service.purchase(
             user.user_id,
             listing_id,
@@ -156,16 +156,16 @@ async def purchase_listing(
         )
         return status.HTTP_201_CREATED, to_purchase_response(result).model_dump(mode="json")
 
-    # I-03 4중 스코프(route+tenant_id+subject_id+header_key) + digest 대조는
-    # scope(require_idempotency_key)가 이미 다 계산해 왔다 — 여기서는
-    # storage_key를 다시 조립하지 않는다(전수감사 2026-09-06 P0-F).
+    # I-03 four-way scoping (route+tenant_id+subject_id+header_key) + digest
+    # comparison is already computed by scope(require_idempotency_key) —
+    # we do not reassemble storage_key here (full-audit 2026-09-06 P0-F).
     status_code, response_body = await run_idempotent(pool, scope, compute)
     if status_code != status.HTTP_201_CREATED:
-        # compute()는 이제 성공(201) 외에는 예외로만 실패하므로, 여기 남는
-        # 유일한 경로는 with_idempotency 자체가 만드는 409(동시 처리 중) —
-        # compute()를 아예 실행하지 않고 반환한 값이라 예외로 표현되지
-        # 않는다. STATE_CONCURRENCY_CONFLICT(409)는 이미 존재하는 코드라
-        # 재사용한다.
+        # compute() now fails only via exception on non-201, so the only
+        # path remaining here is the 409 (concurrent attempt) produced by
+        # with_idempotency itself — a value returned without executing
+        # compute(), thus never raised as an exception. Reuse the existing
+        # STATE_CONCURRENCY_CONFLICT(409) code.
         raise ConcurrencyConflictError(
             str(response_body.get("detail", "동시 처리 충돌이 발생했습니다."))
         )
