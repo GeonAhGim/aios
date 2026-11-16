@@ -282,18 +282,14 @@ def test_post_confirm_provider_error(client: TestClient, monkeypatch) -> None:
         client.post(f"/v1/foundation/connections/{cid}:confirm")
 
 
-def test_post_sync_repo_error(client: TestClient, monkeypatch) -> None:
-    """Failure injection: ConnectionRepository raises during sync."""
-
-    async def mock_sync_repo_error(repo: Any, provider: Any, **kwargs: Any):
-        raise RuntimeError("db connection lost")
-
-    from src.api.routers.foundation import connections
-
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_repo_error)
+def test_post_sync_repo_error(client: TestClient, connection_repo: Any) -> None:
+    """Repo get_connection raises during sync — error propagates to caller."""
+    connection_repo.get_connection.side_effect = RuntimeError("db connection lost")
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
     with pytest.raises(RuntimeError):
         client.post(f"/v1/foundation/connections/{cid}:sync")
+    connection_repo.persist_snapshot_if_syncable.assert_not_called()
+    connection_repo.insert_health_record.assert_not_called()
 
 
 def test_post_revoke_repo_error(client: TestClient, monkeypatch) -> None:
