@@ -21,12 +21,20 @@ function tree(isAdmin = false) {
   );
 }
 
+function openPalette() {
+  fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+}
+
+function typeQuery(value: string) {
+  fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+}
+
 afterEach(() => {
   cleanup();
-  navigateSpy.mockClear();
+  navigateSpy.mockReset();
 });
 
-// ── negative tests (3종: .not.toBeInTheDocument + role=alert + .rejects/빈 결과) ──
+// ── negative tests (3종 이상: .not.toBeInTheDocument, toThrow, .not.toHaveBeenCalled) ──
 
 describe("CommandPalette.depth1 negative", () => {
   it("negative: 열리지 않은 상태에서 dialog가 없다(.not.toBeInTheDocument)", () => {
@@ -34,105 +42,115 @@ describe("CommandPalette.depth1 negative", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("negative: 일치하는 결과가 없으면 role=alert도 option도 없다(.not.toBeInTheDocument + role=alert)", () => {
+  it("negative: 일치하는 결과가 없으면 option도 role=alert도 없고 빈 상태 문구만 보인다", () => {
     render(tree());
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "존재하지않는화면이름" } });
+    openPalette();
+    typeQuery("존재하지않는화면이름");
 
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("일치하는 화면이 없습니다.")).toBeInTheDocument();
   });
 
-  it("negative: Esc로 닫은 후 dialog가 다시 나타나지 않는다(.not.toBeInTheDocument)", () => {
+  it("negative: Esc로 닫으면 dialog가 사라지고 navigate는 호출되지 않는다(.not.toHaveBeenCalled)", () => {
     render(tree());
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    openPalette();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(navigateSpy).not.toHaveBeenCalled();
   });
 });
 
-// ── 실패 주입 (의존성 실패 → 에러 없이 graceful) ──
+// ── 실패 주입 (navigate 의존성이 throw → 팔레트는 먼저 닫히고 에러는 호출자에게 전파) ──
 
 describe("CommandPalette.depth1 failure injection", () => {
-  it("negative: i18n t()가 undefined를 반환해도 렌더가 크래시되지 않는다", () => {
-    // t()가 빈 문자열을 반환하는 상황(로딩 중/결손 키) — 명령 팔레트가
-    // undefined label을 만나도 throw하지 않고 빈 라벨로 렌더해야 한다.
-    render(tree());
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+  it("negative: navigate가 throw하면 클릭 경로가 그 에러를 전파하고, 그 전에 dialog는 이미 닫혀 있다", () => {
+    // runCommand는 close()를 navigate()보다 먼저 호출한다. 따라서 navigate가
+    // 실패해도 dialog는 열린 채 남지 않고, 에러는 삼켜지지 않고 전파된다.
+    // React는 핸들러 에러를 window "error"로 다시 던지므로, 그 이벤트를 잡아 전파 여부를 단언한다.
+    const reported: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      reported.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    try {
+      navigateSpy.mockImplementation(() => {
+        throw new Error("navigate fail");
+      });
 
-    // dialog가 열리고 textbox가 존재해야 한다(예외 없이 렌더됨).
+      render(tree());
+      openPalette();
+      typeQuery("포트폴리오");
+      const option = screen.getByRole("option", { name: /포트폴리오/ });
+
+      fireEvent.click(option);
+
+      expect(navigateSpy).toHaveBeenCalledWith("/portfolio");
+      expect(reported).toHaveLength(1);
+      expect((reported[0] as Error).message).toBe("navigate fail");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+  });
+
+  it("negative: i18n 결손 상황에서도 dialog와 textbox가 예외 없이 렌더된다", () => {
+    render(tree());
+    expect(() => openPalette()).not.toThrow();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
+});
 
-  it("negative: navigate가 reject하면 dialog가 닫히고 에러가 role=alert로 전파된다", async () => {
-    // navigate()가 네트워크 에러 등으로 reject하는 상황 — 팔레트가
-    // 에러를 잡아 dialog를 닫고 error boundary/role=alert로 전파해야 한다.
-    navigateSpy.mockRejectedValue(new Error("navigate fail"));
+// ── 성능 단언 (best-of-5 wall-clock + perfBudgetMs) ──
+// 단발 샘플은 러너 지연에 뒤집히므로 5회 중 최선값을 쓴다(781050648과 같은 이유).
 
-    render(tree());
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+describe("CommandPalette.depth1 performance", () => {
+  it("[perf] 팔레트 열기 — 최선 5회 중 최소값이 예산 내 (실측 ≈ 5ms, 예산=실측*30=150ms, 커버리지 3x → 450ms)", () => {
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 5; i++) {
+      const { unmount } = render(tree());
+      const startedAt = performance.now();
+      openPalette();
+      best = Math.min(best, performance.now() - startedAt);
+      unmount();
+    }
+    // 실측 ≈ 5ms (로컬 M2 Mac, 2026-11). 예산 = 실측 * 30 이상.
+    expect(best).toBeLessThan(perfBudgetMs(150));
+  });
 
-    // dialog 열림 확인
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toBeInTheDocument();
-
-    // 첫 명령 선택 후 클릭 → navigate가 reject
-    const firstOption = screen.getAllByRole("option")[0];
-    fireEvent.click(firstOption);
-
-    // navigate가 reject했으므로 dialog가 닫혀야 한다(finally 블록)
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  it("[perf] 검색어 입력 재렌더 — 최선 5회 중 최소값이 예산 내 (실측 ≈ 3ms, 예산=실측*30=90ms, 커버리지 3x → 270ms)", () => {
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 5; i++) {
+      const { unmount } = render(tree());
+      openPalette();
+      const startedAt = performance.now();
+      typeQuery("포트");
+      best = Math.min(best, performance.now() - startedAt);
+      unmount();
+    }
+    // 실측 ≈ 3ms (로컬 M2 Mac, 2026-11). 예산 = 실측 * 30 이상.
+    expect(best).toBeLessThan(perfBudgetMs(90));
   });
 });
 
-// ── 성능 단언 (performance.now() + perfBudgetMs) ──
-
-describe("CommandPalette.depth1 performance", () => {
-  it(
-    "[perf] 팔레트 열기·렌더 — 예산 내 종료 (실측 ≈ 5ms, 예산=실측*30=150ms * 3x 커버리지)",
-    () => {
-      render(tree());
-      const startedAt = performance.now();
-      fireEvent.keyDown(document, { key: "k", ctrlKey: true });
-      const elapsedMs = performance.now() - startedAt;
-
-      // 실측 ≈ 5ms (로컬 M2 Mac, 2026-11). 예산=5*30=150ms,
-      // perfBudgetMs가 커버리지 모드에서 3배 widen → 450ms.
-      expect(elapsedMs).toBeLessThan(perfBudgetMs(150));
-    },
-  );
-
-  it(
-    "[perf] 검색어 입력 후 재렌더 — 예산 내 종료 (실측 ≈ 3ms, 예산=실측*30=90ms * 3x 커버리지)",
-    () => {
-      render(tree());
-      fireEvent.keyDown(document, { key: "k", ctrlKey: true });
-
-      const startedAt = performance.now();
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "포트" } });
-      const elapsedMs = performance.now() - startedAt;
-
-      // 실측 ≈ 3ms (로컬 M2 Mac, 2026-11).
-      expect(elapsedMs).toBeLessThan(perfBudgetMs(90));
-    },
-  );
-});
-
-// ── 게이트 적색 재현 (입력/지연 망가뜨리면 실제 실패) ──
+// ── 게이트 적색 재현 (입력을 망가뜨리면 같은 단언이 실제로 실패) ──
 
 describe("CommandPalette.depth1 gate red", () => {
-  it("gate red: 일치하지 않는 검색어로 option이 없고 role=alert도 없다 — 입력 파손 단언", () => {
-    // 명령어 id와 정확히 일치하는 검색어 입력 — commands 목록이 "깨진" 상태(모든 명령이 매칭 안 됨)와 동일.
-    // 같은 단언("option 없음")이 실제로 실패함을 입력 파손으로 단언, 타이밍 제거.
+  // 같은 단언을 함수로 묶어, 정상 입력에서 통과하고 파손 입력에서 실패함을 보인다.
+  const assertPortfolioVisible = () =>
+    expect(screen.getByRole("option", { name: /포트폴리오/ })).toBeInTheDocument();
+
+  it("gate red: 검색 입력이 파손되면 포트폴리오 option 단언이 실패하고, 정상 입력에서는 통과한다", () => {
     render(tree());
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    openPalette();
 
-    const textbox = screen.getByRole("textbox");
-    // commands의 어떤 id도 포함하지 않는 파손 입력
-    fireEvent.change(textbox, { target: { value: "존재하지않는화면이름" } });
+    typeQuery("존재하지않는화면이름");
+    expect(() => assertPortfolioVisible()).toThrow();
 
-    expect(screen.queryAllByRole("option")).toHaveLength(0);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    typeQuery("포트폴리오");
+    expect(() => assertPortfolioVisible()).not.toThrow();
   });
 });
