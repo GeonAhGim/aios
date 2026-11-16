@@ -58,6 +58,7 @@ async def test_run_selftest_records_failure():
 # ── negative tests (D2: negative ≥ 3) ─────────────────────────────────────────
 
 
+@pytest.mark.negative
 async def test_run_selftest_with_none_error_field():
     """negative(D2) — adapter가 error=None, ok=False를 반환하면 result['error']
     이 None으로 그대로 기록된다(하나라도 None이 아닌 문자열로 뭉개지지 않음)."""
@@ -70,6 +71,7 @@ async def test_run_selftest_with_none_error_field():
     assert result["error"] is None
 
 
+@pytest.mark.negative
 async def test_run_selftest_with_empty_error_string():
     """negative(D2) — error가 빈 문자열("")이면 truthy로 평가되지 않고 그대로
     기록되어야 한다('' != 'success' 방어)."""
@@ -81,6 +83,7 @@ async def test_run_selftest_with_empty_error_string():
     assert result["error"] == ""
 
 
+@pytest.mark.negative
 def test_write_report_with_empty_path_list(tmp_path: Path):
     """negative(D2) — 경로 리스트가 비어 있으면 아무것도 쓰지 않고 예외를
     내지 않아야 한다(write_report가 경로 검증 없이 바로 for문에 들어가는
