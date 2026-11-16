@@ -292,15 +292,11 @@ def test_post_sync_repo_error(client: TestClient, connection_repo: Any) -> None:
     connection_repo.insert_health_record.assert_not_called()
 
 
-def test_post_revoke_repo_error(client: TestClient, monkeypatch) -> None:
-    """Failure injection: ConnectionRepository raises during revoke."""
+def test_post_revoke_repo_error(enveloped_client: TestClient, connection_repo: Any) -> None:
+    """Failure injection: ConnectionRepository raises during revoke — real service path."""
 
-    async def mock_revoke_repo_error(repo: Any, **kwargs: Any):
-        raise RuntimeError("db connection lost")
-
-    from src.api.routers.foundation import connections
-
-    monkeypatch.setattr(connections, "revoke_connection", mock_revoke_repo_error)
+    connection_repo.get_connection.side_effect = RuntimeError("db connection lost")
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-    with pytest.raises(RuntimeError):
-        client.post(f"/v1/foundation/connections/{cid}:revoke")
+    response = enveloped_client.post(f"/v1/foundation/connections/{cid}:revoke")
+    # enveloped_client: raise_server_exceptions=False → 500 envelope, not unhandled exception
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
