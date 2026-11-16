@@ -341,12 +341,14 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch, tmp_pa
     assert "새 파일" in capsys.readouterr().err
 
 
-def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
-    """쓰기 권한이 없는 디렉터리를 --verify-write로 지정하면 종료코드 1."""
-    import sys
-    import tempfile
-    from io import StringIO
+def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch, tmp_path, capsys):
+    """Windows에서는 디렉터리 쓰기권한을 안정적으로 제거할 수 없고,
+    main()은 쓰기권한을 검사하지 않는다.
 
+    대신 디렉터리가 아닌 경로(일반 파일)를 --verify-write로 지정하면,
+    verify_archiving_advances()가 list_dir에서 빈 집합을 받고
+    타임아웃 사유를 반환한다. 종료코드 1과 stderr의 위반 메시지를 단언한다.
+    """
     monkeypatch.setattr(
         wal_archive,
         "read_wal_settings",
@@ -357,34 +359,25 @@ def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch):
         },
     )
 
-    tmpdir = tempfile.mkdtemp()
-    old_argv = sys.argv
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    sys.argv = [
-        "wal_archive",
-        "--dsn",
-        "postgresql://x/y",
-        "--verify-write",
-        tmpdir,
-    ]
-    sys.stdout = StringIO()
-    sys.stderr = StringIO(
-        "stderr",
-    )  # noqa: DUPL125
-    try:
-        # list_dir를 monkeypatch하여 비어있도록 만들어 verify_archiving_advances가
-        # 타임아웃으로 실패하도록 유도 (verify_write 경로가 실패 경로를 타는지 확인)
-        monkeypatch.setattr(wal_archive, "verify_archiving_advances", lambda *a, **k: "타임아웃")
-        code = wal_archive.main()
-        assert code == 1
-    finally:
-        sys.argv = old_argv
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
-        import shutil
+    # 디렉터리가 아닌 일반 파일 경로 — list_dir가 빈 집합을 반환하고 타임아웃 사유 발생
+    file_path = tmp_path / "not_a_directory"
+    file_path.touch()
 
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    # verify_archiving_advances의 기본 인자를 조정:
+    # timeout=0.0 → 첫 판정에서 즉시 종료(sleep 안 함).
+    # switch_wal=noop → DB 연결 시도 안 함.
+    # list_dir는 기본값(_default_list_dir) 유지 — 파일 경로이므로 빈 집합 반환.
+    kw = wal_archive.verify_archiving_advances.__kwdefaults__
+    assert kw is not None
+    monkeypatch.setitem(kw, "timeout", 0.0)
+    monkeypatch.setitem(kw, "switch_wal", lambda dsn: None)
+
+    code = wal_archive.main(["--dsn", "postgresql://x/y", "--verify-write", str(file_path)])
+    assert code == 1
+
+    captured = capsys.readouterr()
+    assert "wal_archive 위반" in captured.err
+    assert "새 파일" in captured.err
 
 
 def test_evaluate_flags_missing_wal_level():
