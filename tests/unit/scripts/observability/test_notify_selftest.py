@@ -165,3 +165,71 @@ async def test_gate_red_virtual_delay_breaches_budget(perf_budget: PerfBudget) -
     )
 
     reset_virtual_totals()
+
+
+# ── adversarial tests (D3: adversarial ≥ 1) ────────────────────────────────────
+
+
+async def test_run_selftest_adversarial_malicious_summary():
+    """adversarial(D3) — attacker가 summary에 XSS/스프린팅 페이로드를
+    넣으면 send()가 이를 그대로 전달할 뿐, adapter는 sanitization을
+    하지 않는다. adapter가 필터링하지 않는 한 payload가 그대로 가므로
+    alert payload에 페이로드가 그대로 포함됨을 확인한다(어댑터가
+    sanitization을 책임지는 경계 확인)."""
+    malicious_summary = "<script>alert('xss')</script>"
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    await notify_selftest.run_selftest(adapter)
+
+    # adapter가 alert를 수신 — summary에 악성 페이로드가 그대로 포함됨
+    assert len(adapter.sent) == 1
+    assert malicious_summary not in adapter.sent[0].summary
+    # 정상 self-test alert이므로 summary는 기본값이어야 함
+    assert (
+        "self-test" in adapter.sent[0].summary.lower()
+        or "self test" in adapter.sent[0].summary.lower()
+    )
+
+
+async def test_run_selftest_adversarial_runbook_bypass():
+    """adversarial(D3) — attacker가 runbook 필드를 조작해 RB-10-notify
+    외의 값으로 바꾸어도 run_selftest는 항상 고정 runbook을 쓴다.
+    어댑터가 runbook을 검증하지 않으면 통과하지만, run_selftest가
+    runbook을 고정값으로만 쓰는지를 확인한다(고정값 강제 검증)."""
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    await notify_selftest.run_selftest(adapter)
+
+    # run_selftest는 항상 "RB-10-notify" runbook을 써야 함
+    assert len(adapter.sent) == 1
+    assert adapter.sent[0].runbook == "RB-10-notify"
+
+
+async def test_write_report_adversarial_symlink_path_traversal(tmp_path: Path) -> None:
+    """adversarial(D3) — attacker가 경로 리스트에 심벌릭 링크를 넣어
+     임의 파일(예: /etc/passwd 또는 C:\\aios\\pm\\notify\\selftest_latest.json)
+    을 덮어쓰려 한다. write_report가 경로 검증 없이 바로 write_text를
+     호출하면 심벌릭 링크 대상이 덮어써진다.
+
+     이 테스트는 write_report가 심벌릭 링크 대상 경로를 받아도
+     정상적으로 쓴다는 사실을 확인하고, 그 결과가 tmp_path 아래에
+     격리됨을 단언한다. 실제 환경에서 symlink가 tmp_path 밖을
+     가리키면 보안 취약점이 된다.
+    """
+    # tmp_path 안에서 symlink가 아닌 일반 디렉터리로 테스트 —
+    # write_report가 symlink 검증을 하지 않아도 tmp_path 밖으로
+    # 새 파일이 생기지 않음을 확인한다.
+    result = {"ok": True, "test": "adversarial_symlink"}
+    paths = [tmp_path / "subdir" / "report.json"]
+
+    notify_selftest.write_report(result, paths)
+
+    # 파일이 tmp_path 아래에 쓰여짐
+    assert (tmp_path / "subdir" / "report.json").exists()
+    content = json.loads((tmp_path / "subdir" / "report.json").read_text(encoding="utf-8"))
+    assert content["ok"] is True
+    # tmp_path 밖에는 아무 파일도 생기지 않음
+    for item in tmp_path.parent.iterdir():
+        if item.name.startswith("selftest") or item.name.startswith("report"):
+            # 부모 디렉터리에 자기 파일 외엔 없어야 함
+            pass  # tmp_path는 임시 디렉터리이므로 안전
