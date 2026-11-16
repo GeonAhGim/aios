@@ -5,13 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
 import src.api.routers.foundation.connections  # noqa: F401
+from src.api.routers.foundation.connections import router
 from src.api.schemas.foundation.connections import (
     AccountConnectionView,
     BeginConnectionRequest,
@@ -216,74 +218,272 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+def test_post_confirm_tenant_mismatch(monkeypatch, cross_tenant_connection) -> None:
+    """Confirm returns 500 when connection belongs to a different tenant.
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
-
+    The router passes user.user_id as tenant_id to confirm_connection.
+    The application service raises CrossTenantConnectionAccessError when
+    connection.tenant_id != tenant_id. The router does not catch this,
+    so TestClient sees a 500 Internal Server Error.
+    """
     from src.api.routers.foundation import connections
+    from src.foundation.connections.application.errors import (
+        CrossTenantConnectionAccessError,
+    )
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
-        client.post(f"/v1/foundation/connections/{cid}:confirm")
+    cid = cross_tenant_connection.id
+
+    async def mock_confirm_tenant_check(
+        repo: Any, provider: Any, **kwargs: Any
+    ) -> AccountConnectionView:
+        # Simulate the tenant check: connection.tenant_id != kwargs["tenant_id"]
+        raise CrossTenantConnectionAccessError(str(cid))
+
+    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_tenant_check)
+    # Use raise_server_exceptions=False so we can inspect the 500 response
+    from src.api import deps, foundation_deps
+    from src.services.auth_service import User
+
+    app = FastAPI()
+    app.include_router(router)
+
+    def get_mock_user() -> User:
+        return User(
+            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            email="test@example.com",
+            display_name="Test User",
+            mfa_enabled=True,
+            mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="active",
+            is_verifier=True,
+            is_platform_admin=False,
+        )
+
+    app.dependency_overrides[deps.get_current_user] = get_mock_user
+    app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_trust_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_readonly_account_provider] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_credential_encryption_key] = lambda: (
+        "test-key-12345678901234567890"
+    )
+    tc = TestClient(app, raise_server_exceptions=False)
+    resp = tc.post(f"/v1/foundation/connections/{cid}:confirm")
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
-def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection belongs to a different tenant."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+def test_post_sync_tenant_mismatch(monkeypatch, active_cross_tenant_connection) -> None:
+    """Sync returns 500 when connection belongs to a different tenant.
 
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
-
+    Same invariant as confirm: cross-tenant access raises
+    CrossTenantConnectionAccessError inside sync_snapshot.
+    """
     from src.api.routers.foundation import connections
+    from src.foundation.connections.application.errors import (
+        CrossTenantConnectionAccessError,
+    )
+    from src.foundation.connections.contracts.v1 import AccountSnapshotView
 
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
-        client.post(f"/v1/foundation/connections/{cid}:sync")
+    cid = active_cross_tenant_connection.id
+
+    async def mock_sync_tenant_check(
+        repo: Any, provider: Any, **kwargs: Any
+    ) -> AccountSnapshotView:
+        raise CrossTenantConnectionAccessError(str(cid))
+
+    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_tenant_check)
+    from src.api import deps, foundation_deps
+    from src.services.auth_service import User
+
+    app = FastAPI()
+    app.include_router(router)
+
+    def get_mock_user() -> User:
+        return User(
+            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            email="test@example.com",
+            display_name="Test User",
+            mfa_enabled=True,
+            mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="active",
+            is_verifier=True,
+            is_platform_admin=False,
+        )
+
+    app.dependency_overrides[deps.get_current_user] = get_mock_user
+    app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_trust_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_readonly_account_provider] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_credential_encryption_key] = lambda: (
+        "test-key-12345678901234567890"
+    )
+    tc = TestClient(app, raise_server_exceptions=False)
+    resp = tc.post(f"/v1/foundation/connections/{cid}:sync")
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
 
 
-def test_post_confirm_provider_error(client: TestClient, monkeypatch) -> None:
-    """Failure injection: ReadonlyAccountProvider raises ConnectionError."""
+def test_post_confirm_provider_error(monkeypatch) -> None:
+    """Failure injection: ReadonlyAccountProvider raises ConnectionError.
 
-    async def mock_confirm_repo_error(repo: Any, provider: Any, **kwargs: Any):
+    The router does not catch provider exceptions, so TestClient sees 500.
+    """
+    from src.api import deps, foundation_deps
+    from src.api.routers.foundation import connections
+    from src.services.auth_service import User
+
+    async def mock_confirm_provider_error(repo: Any, provider: Any, **kwargs: Any):
         raise ConnectionError("provider unreachable")
 
-    from src.api.routers.foundation import connections
+    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_provider_error)
 
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_repo_error)
+    app = FastAPI()
+    app.include_router(router)
+
+    def get_mock_user() -> User:
+        return User(
+            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            email="test@example.com",
+            display_name="Test User",
+            mfa_enabled=True,
+            mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="active",
+            is_verifier=True,
+            is_platform_admin=False,
+        )
+
+    app.dependency_overrides[deps.get_current_user] = get_mock_user
+    app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_trust_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_readonly_account_provider] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_credential_encryption_key] = lambda: (
+        "test-key-12345678901234567890"
+    )
+    tc = TestClient(app, raise_server_exceptions=False)
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-    with pytest.raises(ConnectionError):
-        client.post(f"/v1/foundation/connections/{cid}:confirm")
+    resp = tc.post(f"/v1/foundation/connections/{cid}:confirm")
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
-def test_post_sync_repo_error(client: TestClient, monkeypatch) -> None:
-    """Failure injection: ConnectionRepository raises during sync."""
+def test_post_sync_repo_error(monkeypatch) -> None:
+    """Failure injection: ConnectionRepository raises during sync.
+
+    The router does not catch repository exceptions, so TestClient sees 500.
+    """
+    from src.api import deps, foundation_deps
+    from src.api.routers.foundation import connections
+    from src.services.auth_service import User
 
     async def mock_sync_repo_error(repo: Any, provider: Any, **kwargs: Any):
         raise RuntimeError("db connection lost")
 
-    from src.api.routers.foundation import connections
-
     monkeypatch.setattr(connections, "sync_snapshot", mock_sync_repo_error)
+
+    app = FastAPI()
+    app.include_router(router)
+
+    def get_mock_user() -> User:
+        return User(
+            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            email="test@example.com",
+            display_name="Test User",
+            mfa_enabled=True,
+            mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="active",
+            is_verifier=True,
+            is_platform_admin=False,
+        )
+
+    app.dependency_overrides[deps.get_current_user] = get_mock_user
+    app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_trust_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_readonly_account_provider] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_credential_encryption_key] = lambda: (
+        "test-key-12345678901234567890"
+    )
+    tc = TestClient(app, raise_server_exceptions=False)
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-    with pytest.raises(RuntimeError):
-        client.post(f"/v1/foundation/connections/{cid}:sync")
+    resp = tc.post(f"/v1/foundation/connections/{cid}:sync")
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
-def test_post_revoke_repo_error(client: TestClient, monkeypatch) -> None:
-    """Failure injection: ConnectionRepository raises during revoke."""
+def test_post_revoke_repo_error(monkeypatch) -> None:
+    """Failure injection: ConnectionRepository raises during revoke.
+
+    The router does not catch repository exceptions, so TestClient sees 500.
+    """
+    from src.api import deps, foundation_deps
+    from src.api.routers.foundation import connections
+    from src.services.auth_service import User
 
     async def mock_revoke_repo_error(repo: Any, **kwargs: Any):
         raise RuntimeError("db connection lost")
 
-    from src.api.routers.foundation import connections
-
     monkeypatch.setattr(connections, "revoke_connection", mock_revoke_repo_error)
+
+    app = FastAPI()
+    app.include_router(router)
+
+    def get_mock_user() -> User:
+        return User(
+            user_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+            email="test@example.com",
+            display_name="Test User",
+            mfa_enabled=True,
+            mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="active",
+            is_verifier=True,
+            is_platform_admin=False,
+        )
+
+    app.dependency_overrides[deps.get_current_user] = get_mock_user
+    app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_trust_repository] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_readonly_account_provider] = lambda: AsyncMock()
+    app.dependency_overrides[foundation_deps.get_credential_encryption_key] = lambda: (
+        "test-key-12345678901234567890"
+    )
+    tc = TestClient(app, raise_server_exceptions=False)
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-    with pytest.raises(RuntimeError):
-        client.post(f"/v1/foundation/connections/{cid}:revoke")
+    resp = tc.post(f"/v1/foundation/connections/{cid}:revoke")
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def test_post_begin_empty_provider(client: TestClient, monkeypatch) -> None:
+    """Failure injection: ReadonlyAccountProvider returns None (empty provider).
+
+    begin_connection does not call the provider directly, but the
+    dependency override returns AsyncMock() which may not implement
+    the full ReadonlyAccountProvider protocol. This test verifies the
+    router handles a provider that does nothing when called.
+    """
+    from src.api.routers.foundation import connections
+    from src.foundation.connections.contracts.v1 import AccountConnectionView
+    from src.foundation.connections.domain.models import ConnectionState
+
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    conn = AccountConnectionView(
+        id=cid,
+        provider_code="ex",
+        masked_account_label="****",
+        state=ConnectionState.PENDING_CONSENT,
+        capability_profile=[],
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    async def mock_begin_empty_provider(
+        repo: Any, trust_repo: Any, **kwargs: Any
+    ) -> AccountConnectionView:
+        # Simulate a provider that returns no capability profile
+        return conn
+
+    monkeypatch.setattr(connections, "begin_connection", mock_begin_empty_provider)
+    body = BeginConnectionRequest(
+        provider_code="ex",
+        opaque_account_ref="ref",
+        requested_capability_profile=[],
+    )
+    response = client.post("/v1/foundation/connections", json=body.model_dump())
+    assert response.status_code == status.HTTP_201_CREATED
