@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from fastapi import status
@@ -19,10 +18,6 @@ from src.api.schemas.foundation.connections import (
     CapabilityScope,
     ConnectionState,
 )
-from src.foundation.connections.application.errors import (
-    CrossTenantConnectionAccessError,
-)
-from src.foundation.connections.domain.models import AccountConnection, ScopeProof
 
 
 def test_list_connections(client: TestClient, monkeypatch) -> None:
@@ -221,111 +216,40 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Confirm rejects when connection.tenant_id != request tenant_id (I-03).
-
-    Uses a fake repo that returns a connection owned by another tenant so the
-    real confirm_connection() path raises CrossTenantConnectionAccessError.
-    """
-    owner_tenant_id = uuid4()
-    cid = uuid4()
-    fake_conn = AccountConnection(
-        id=cid,
-        tenant_id=owner_tenant_id,
-        owner_subject_id=owner_tenant_id,
-        provider_code="BITGET",
-        opaque_account_ref="ACCT1234567890",
-        state=ConnectionState.PENDING_CONSENT,
-        capability_profile=(CapabilityScope.READ_BALANCE,),
-        revision=1,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+def test_post_confirm_tenant_mismatch(
+    enveloped_client: TestClient, connection_repo: Any, other_tenant_connection: Any
+) -> None:
+    """Reject confirm of another tenant's connection as 404 without any write (I-03)."""
+    connection_repo.get_connection.return_value = other_tenant_connection
+    response = enveloped_client.post(
+        f"/v1/foundation/connections/{other_tenant_connection.id}:confirm"
     )
-
-    async def fake_get_connection(connection_id: UUID) -> AccountConnection | None:
-        return fake_conn
-
-    async def fake_transition(
-        connection_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
-    ) -> AccountConnection:
-        raise AssertionError("transition_connection_state must not be called on tenant mismatch")
-
-    async def fake_get_provider_proof(lease: Any) -> ScopeProof:
-        raise AssertionError("provider must not be called on tenant mismatch")
-
-    from src.api import foundation_deps
-
-    mock_repo = AsyncMock()
-    mock_repo.get_connection = fake_get_connection
-    mock_repo.transition_connection_state = fake_transition
-    mock_repo.insert_credential_binding = AsyncMock()
-    mock_repo.list_connections = AsyncMock(return_value=[])
-    mock_repo.insert_pending_connection = AsyncMock()
-    mock_repo.insert_consent_link = AsyncMock()
-    mock_repo.get_credential_binding = AsyncMock()
-    mock_repo.revoke_credential_binding = AsyncMock()
-    mock_repo.persist_snapshot_if_syncable = AsyncMock()
-    mock_repo.get_latest_snapshot = AsyncMock()
-    mock_repo.insert_health_record = AsyncMock()
-    mock_repo.get_latest_health = AsyncMock()
-
-    mock_provider = AsyncMock()
-    mock_provider.verify_readonly_scope = fake_get_provider_proof
-
-    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: mock_repo)
-    monkeypatch.setattr(foundation_deps, "get_readonly_account_provider", lambda: mock_provider)
-
-    with pytest.raises(CrossTenantConnectionAccessError):
-        client.post(f"/v1/foundation/connections/{cid}:confirm")
-
-    # Repo state unchanged — no transition, no credential insert
-    mock_repo.insert_credential_binding.assert_not_called()
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    connection_repo.transition_connection_state.assert_not_called()
+    connection_repo.insert_credential_binding.assert_not_called()
 
 
-def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection.tenant_id != request tenant_id (I-03)."""
-    owner_tenant_id = uuid4()
-    cid = uuid4()
-    fake_conn = AccountConnection(
-        id=cid,
-        tenant_id=owner_tenant_id,
-        owner_subject_id=owner_tenant_id,
-        provider_code="BITGET",
-        opaque_account_ref="ACCT1234567890",
-        state=ConnectionState.ACTIVE_READONLY,
-        capability_profile=(CapabilityScope.READ_BALANCE,),
-        revision=1,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+def test_post_sync_tenant_mismatch(
+    enveloped_client: TestClient, connection_repo: Any, other_tenant_connection: Any
+) -> None:
+    """Reject sync of another tenant's connection as 404 without any write."""
+    connection_repo.get_connection.return_value = other_tenant_connection
+    response = enveloped_client.post(
+        f"/v1/foundation/connections/{other_tenant_connection.id}:sync"
     )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    connection_repo.persist_snapshot_if_syncable.assert_not_called()
+    connection_repo.insert_health_record.assert_not_called()
 
-    async def fake_get_connection(connection_id: UUID) -> AccountConnection | None:
-        return fake_conn
 
-    from src.api import foundation_deps
-
-    mock_repo = AsyncMock()
-    mock_repo.get_connection = fake_get_connection
-    mock_repo.list_connections = AsyncMock(return_value=[])
-    mock_repo.insert_pending_connection = AsyncMock()
-    mock_repo.transition_connection_state = AsyncMock()
-    mock_repo.insert_consent_link = AsyncMock()
-    mock_repo.get_credential_binding = AsyncMock()
-    mock_repo.revoke_credential_binding = AsyncMock()
-    mock_repo.insert_credential_binding = AsyncMock()
-    mock_repo.persist_snapshot_if_syncable = AsyncMock()
-    mock_repo.get_latest_snapshot = AsyncMock()
-    mock_repo.insert_health_record = AsyncMock()
-    mock_repo.get_latest_health = AsyncMock()
-
-    mock_provider = AsyncMock()
-
-    monkeypatch.setattr(foundation_deps, "get_connection_repository", lambda: mock_repo)
-    monkeypatch.setattr(foundation_deps, "get_readonly_account_provider", lambda: mock_provider)
-
-    with pytest.raises(CrossTenantConnectionAccessError):
-        client.post(f"/v1/foundation/connections/{cid}:sync")
-
-    # Repo state unchanged — no snapshot persisted
-    mock_repo.persist_snapshot_if_syncable.assert_not_called()
+def test_post_confirm_unknown_connection(
+    enveloped_client: TestClient, connection_repo: Any
+) -> None:
+    """Missing connection and cross-tenant connection are indistinguishable (404)."""
+    connection_repo.get_connection.return_value = None
+    cid = UUID("550e8400-e29b-41d4-a716-446655440009")
+    response = enveloped_client.post(f"/v1/foundation/connections/{cid}:confirm")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
