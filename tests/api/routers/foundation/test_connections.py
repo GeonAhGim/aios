@@ -155,27 +155,40 @@ def test_post_sync_invalid_uuid(client: TestClient) -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def test_post_revoke_connection(client: TestClient, monkeypatch) -> None:
-    """Test POST /{connection_id}:revoke."""
-    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-    conn = AccountConnectionView(
-        id=cid,
-        provider_code="ex",
-        masked_account_label="****",
-        state=ConnectionState.REVOKED,
-        capability_profile=[CapabilityScope.READ_BALANCE],
-        revision=2,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+def test_post_revoke_connection(enveloped_client: TestClient, connection_repo: Any) -> None:
+    """Test POST /{connection_id}:revoke via real service path."""
+    from uuid import UUID
+
+    from src.foundation.connections.domain.models import (
+        AccountConnection,
+        ConnectionState,
     )
 
-    async def mock_revoke(repo: Any, **kwargs: Any):
-        return conn
-
-    from src.api.routers.foundation import connections
-
-    monkeypatch.setattr(connections, "revoke_connection", mock_revoke)
-    response = client.post(f"/v1/foundation/connections/{cid}:revoke")
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    revoked = AccountConnection(
+        id=cid,
+        tenant_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        owner_subject_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.REVOKED,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=2,
+    )
+    connection_repo.get_connection.return_value = AccountConnection(
+        id=cid,
+        tenant_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        owner_subject_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.ACTIVE_READONLY,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+    )
+    connection_repo.transition_connection_state.return_value = revoked
+    response = enveloped_client.post(f"/v1/foundation/connections/{cid}:revoke")
     assert response.status_code == status.HTTP_200_OK
+    connection_repo.transition_connection_state.assert_called_once()
 
 
 def test_post_revoke_invalid_uuid(client: TestClient) -> None:
