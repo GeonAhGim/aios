@@ -5,19 +5,23 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from fastapi import status
+from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
 import src.api.routers.foundation.connections  # noqa: F401
+from src.api import foundation_deps
 from src.api.schemas.foundation.connections import (
     AccountConnectionView,
     BeginConnectionRequest,
     CapabilityScope,
     ConnectionState,
 )
+from src.foundation.connections.application.errors import CrossTenantConnectionAccessError
+from src.foundation.connections.domain.models import AccountConnection
 
 
 def test_list_connections(client: TestClient, monkeypatch) -> None:
@@ -216,32 +220,74 @@ def test_post_begin_invalid_capability(client: TestClient) -> None:
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
+_OTHER_TENANT = UUID("660e8400-e29b-41d4-a716-446655440999")
+_MUTATORS = (
+    "transition_connection_state",
+    "insert_credential_binding",
+    "persist_snapshot_if_syncable",
+    "insert_health_record",
+    "insert_consent_link",
+    "insert_pending_connection",
+    "revoke_credential_binding",
+)
+
+
+def _install_foreign_repo(test_app: FastAPI, cid: UUID) -> AsyncMock:
+    """Fake repo holding a connection owned by a tenant other than the caller."""
+    foreign = AccountConnection(
+        id=cid,
+        tenant_id=_OTHER_TENANT,
+        owner_subject_id=_OTHER_TENANT,
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.PENDING_CONSENT,
+        capability_profile=(CapabilityScope.READ_BALANCE,),
+        revision=1,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    repo = AsyncMock()
+    repo.get_connection.return_value = foreign
+    test_app.dependency_overrides[foundation_deps.get_connection_repository] = lambda: repo
+    return repo
+
+
+def _assert_repo_untouched(repo: AsyncMock) -> None:
+    for name in _MUTATORS:
+        getattr(repo, name).assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["confirm", "sync"])
+def test_post_tenant_mismatch_rejected_by_real_service(
+    action: str, test_app: FastAPI, client: TestClient
+) -> None:
+    """Real service rejects another tenant's connection and leaves repo state untouched (I-03)."""
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    repo = _install_foreign_repo(test_app, cid)
+    with pytest.raises(CrossTenantConnectionAccessError):
+        client.post(f"/v1/foundation/connections/{cid}:{action}")
+    repo.get_connection.assert_awaited_once_with(cid)
+    _assert_repo_untouched(repo)
 
-    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
 
-    from src.api.routers.foundation import connections
-
-    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+def test_post_confirm_tenant_mismatch(test_app: FastAPI, client: TestClient) -> None:
+    """Confirm on a foreign-tenant connection is rejected without state transition or binding."""
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    repo = _install_foreign_repo(test_app, cid)
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:confirm")
+    assert repo.get_connection.return_value.state == ConnectionState.PENDING_CONSENT
+    repo.transition_connection_state.assert_not_awaited()
+    repo.insert_credential_binding.assert_not_awaited()
 
 
-def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
-    """Reject sync when connection belongs to a different tenant."""
+def test_post_sync_tenant_mismatch(test_app: FastAPI, client: TestClient) -> None:
+    """Sync on a foreign-tenant connection is rejected without persisting snapshot/health."""
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
-
-    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
-        raise ValueError("tenant_mismatch")
-
-    from src.api.routers.foundation import connections
-
-    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
-    with pytest.raises(ValueError, match="tenant_mismatch"):
+    repo = _install_foreign_repo(test_app, cid)
+    with pytest.raises(CrossTenantConnectionAccessError):
         client.post(f"/v1/foundation/connections/{cid}:sync")
+    repo.persist_snapshot_if_syncable.assert_not_awaited()
+    repo.insert_health_record.assert_not_awaited()
 
 
 # ── failure injection: dependency exceptions ────────────────────────────
