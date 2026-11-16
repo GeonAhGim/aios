@@ -345,13 +345,12 @@ def test_main_returns_1_when_verify_write_dir_does_not_exist(monkeypatch, tmp_pa
     assert "새 파일" in capsys.readouterr().err
 
 
-def test_main_returns_1_when_verify_write_dir_not_writable(monkeypatch, tmp_path, capsys):
-    """Windows에서는 디렉터리 쓰기권한을 안정적으로 제거할 수 없고,
-    main()은 쓰기권한을 검사하지 않는다.
+def test_main_returns_1_when_verify_write_path_is_not_a_directory(monkeypatch, tmp_path, capsys):
+    """--verify-write에 파일 경로를 지정하면 list_dir가 빈 집합을 돌려 타임아웃 사유 발생.
 
-    대신 디렉터리가 아닌 경로(일반 파일)를 --verify-write로 지정하면,
-    verify_archiving_advances()가 list_dir에서 빈 집합을 받고
-    타임아웃 사유를 반환한다. 종료코드 1과 stderr의 위반 메시지를 단언한다.
+    Windows에서는 디렉터리 쓰기 권한을 안정적으로 제거할 수 없고,
+    main()은 쓰기 권한을 검사하지 않는다.
+    파일 경로를 넘기면 glob("*")이 빈 집합을 돌려 새 파일이 나타나지 않는 결과와 같다.
     """
     monkeypatch.setattr(
         wal_archive,
