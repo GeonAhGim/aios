@@ -68,6 +68,37 @@ def test_find_bom_files_skips_binary_and_non_text_dirs(tmp_path):
     assert found == []
 
 
+def test_negative_has_bom_false_for_partial_bom_prefix(tmp_path):
+    """음성: BOM 접두사 \xef\xbb (3바이트 BOM의 2바이트만)가 파일 시작에 있으면
+    has_bom은 False를 반환해야 한다. 완전한 BOM 3바이트가 아니므로 오검출되지 않는다.
+    """
+    p = _write_bytes(tmp_path / "partial_bom.py", b"\xef\xbb")
+    assert check_no_bom.has_bom(p) is False
+
+
+def test_negative_find_bom_files_empty_repo_returns_empty(tmp_path):
+    """음성: 스캔 루트에 해당 디렉터리가 아예 없으면 find_bom_files는 빈 리스트를
+    반환해야 한다. 없는 경로를 스캔한다고 에러를 내지 않는다.
+    """
+    # tmp_path는 비어 있음 — src/tests/scripts/docs가 없음
+    found = check_no_bom.find_bom_files(tmp_path)
+    assert found == []
+
+
+def test_negative_main_rc0_on_clean_tree(tmp_path, capsys):
+    """음성: BOM 파일이 하나도 없는 트리에서 main()은 종료코드 0을 반환하고
+    stdout에 'OK'를 출력해야 한다. 게이트가 거짓 적색을 띄지 않는다.
+    """
+    _write_bytes(tmp_path / "src" / "clean.py", b"x = 1\n")
+    _write_bytes(tmp_path / "tests" / "test_clean.py", b"assert True\n")
+
+    rc = check_no_bom.main(["--repo", str(tmp_path)])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "OK" in output
+
+
 # ── failure-injection test ─────────────────────────────────────────────
 
 
