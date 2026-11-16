@@ -275,6 +275,22 @@ def test_role_can_rejects_unknown_action():
     assert role_can(MembershipRole.MEMBER, "escalate") is False
 
 
+@pytest.mark.failure_injection
+def test_transition_table_failure_propagates_not_allowed(monkeypatch):
+    """실패주입: 전이 테이블 조회가 예외를 던지면 예외가 전파되어야 하며,
+    결과가 True(허용)로 새지 않아야 한다(fail-closed)."""
+
+    class _BrokenTable:
+        def get(self, key, default=None):
+            raise RuntimeError("transition table unavailable")
+
+    monkeypatch.setattr("src.foundation.trust.domain.rules._MEMBERSHIP_TRANSITIONS", _BrokenTable())
+    with pytest.raises(RuntimeError, match="transition table unavailable"):
+        is_membership_transition_allowed(
+            MembershipState.SUSPENDED, MembershipState.ACTIVE, actor_role=MembershipRole.OWNER
+        )
+
+
 # ----------------------------------------------------------------------
 # performance assertion — 순수 함수 오버헤드 검증
 # ----------------------------------------------------------------------
