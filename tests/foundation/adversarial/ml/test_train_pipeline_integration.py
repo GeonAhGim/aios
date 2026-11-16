@@ -263,7 +263,7 @@ async def test_train_job_leaves_resumable_state_after_trainer_failure(
             raise RuntimeError("simulated trainer crash")
         return original_train_step(*args, **kwargs)
 
-    trainer.train_step = failing_train_step  # type: ignore[assignment]
+    trainer.train_step = failing_train_step  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="simulated trainer crash"):
         await run_train_job(
