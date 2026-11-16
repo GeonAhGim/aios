@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 
 # Import to ensure module is loaded for coverage
 import src.api.routers.foundation.connections  # noqa: F401
+from src.api.contracts.handlers import install_exception_handlers
 from src.api.routers.foundation.connections import router
+from src.foundation.connections.domain.models import AccountConnection, ConnectionState
 from src.services.auth_service import User
 
 
@@ -32,13 +34,45 @@ def mock_user() -> User:
 
 
 @pytest.fixture
+def connection_repo() -> AsyncMock:
+    """Single repository mock shared by the app override and the test body.
+
+    Tests can configure `get_connection` and assert that no write method was hit.
+    """
+    return AsyncMock()
+
+
+@pytest.fixture
+def other_tenant_connection() -> AccountConnection:
+    """Connection owned by a tenant different from `mock_user` (cross-tenant probe)."""
+    other = UUID("00000000-0000-0000-0000-000000000002")
+    return AccountConnection(
+        id=UUID("550e8400-e29b-41d4-a716-446655440001"),
+        tenant_id=other,
+        owner_subject_id=other,
+        provider_code="ex",
+        opaque_account_ref="ref",
+        state=ConnectionState.ACTIVE_READONLY,
+        capability_profile=(),
+        revision=1,
+    )
+
+
+@pytest.fixture
 def client(test_app: FastAPI) -> TestClient:
-    """TestClient for the test app."""
+    """TestClient for the test app (unhandled exceptions propagate)."""
     return TestClient(test_app)
 
 
 @pytest.fixture
-def test_app(mock_user: User) -> FastAPI:
+def enveloped_client(test_app: FastAPI) -> TestClient:
+    """TestClient that exercises the real exception-handler chain (HTTP envelopes)."""
+    install_exception_handlers(test_app)
+    return TestClient(test_app, raise_server_exceptions=False)
+
+
+@pytest.fixture
+def test_app(mock_user: User, connection_repo: AsyncMock) -> FastAPI:
     """Create a test FastAPI application with mocked dependencies."""
     app = FastAPI()
     app.include_router(router)
@@ -47,7 +81,7 @@ def test_app(mock_user: User) -> FastAPI:
         return mock_user
 
     def get_mock_connection_repo() -> AsyncMock:
-        return AsyncMock()
+        return connection_repo
 
     def get_mock_trust_repo() -> AsyncMock:
         return AsyncMock()
