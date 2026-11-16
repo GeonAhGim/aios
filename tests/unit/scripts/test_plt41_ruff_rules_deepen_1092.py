@@ -178,6 +178,37 @@ def test_ruff_catches_T203_pprint(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# negative (>= 3) -- S607(subprocess Popen shell=True)와 S314(hardcoded
+# password imports)도 PLT-41 확장이 잡는지 개별 함수로 확인 (parametric
+# 테스트와 독립).
+# ---------------------------------------------------------------------------
+
+
+def test_ruff_catches_S607_popen_shell(tmp_path: Path) -> None:
+    """S(security) 그룹: subprocess.Popen(shell=True)를 S607로 탐지한다."""
+    content = "import subprocess\nsubprocess.Popen('ls', shell=True)\n"
+    _write(tmp_path, "pyproject.toml", _REPO_SHAPED_CONFIG)
+    _write(tmp_path, "src/popen_shell.py", content)
+
+    result = _run_ruff(tmp_path, "src/popen_shell.py")
+
+    assert result.returncode == 1, result.stdout
+    assert "S607" in result.stdout
+
+
+def test_ruff_catches_S314_insecure_xml_parse(tmp_path: Path) -> None:
+    """S(security) 그룹: xml.etree.ElementTree.parse()는 S314로 탐지한다."""
+    content = "from xml.etree.ElementTree import parse\nparse('untrusted.xml')\n"
+    _write(tmp_path, "pyproject.toml", _REPO_SHAPED_CONFIG)
+    _write(tmp_path, "src/xml_parse.py", content)
+
+    result = _run_ruff(tmp_path, "src/xml_parse.py")
+
+    assert result.returncode == 1, result.stdout
+    assert "S314" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # failure injection (1) -- tests/** 블랭킷 무시가 새 규칙군까지 과잉 억제하면
 # 회귀다. task-1092가 tests/**에 넣은 건 S101/ARG001/ARG002/ARG005/S105/S106/
 # S311/T201/S603/S607뿐이고 BLE001은 없다 -- 실제로 새지 않는지 주입해 확인.
