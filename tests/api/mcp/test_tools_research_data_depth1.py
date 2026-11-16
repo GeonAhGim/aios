@@ -1,6 +1,6 @@
 """RD-16 depth-1 supplement for `research_data_search` (D2 floor).
 
-Adds negative tests x7 (3 domain-level + 4 auth/validation), failure injection x1,
+Adds negative tests x10 (6 domain-level + 4 auth/validation), failure injection x1,
 gate-red reproduction x1 and a best-of perf assertion x1 on top of
 `test_tools_research_data.py` (unchanged).
 Fixtures/helpers are reused from that module.
@@ -16,6 +16,7 @@ the same budget assertion goes red.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 import pytest
 
@@ -25,8 +26,10 @@ from src.foundation.ai.gateway.adapters.postgres_token_repository import (
 )
 from src.foundation.ai.gateway.domain.token_rules import Scope
 from src.foundation.research_data.adapters.postgres_repository import PostgresResearchRepository
+from src.foundation.research_data.contracts.v1 import ResearchItem
 from tests.api.mcp.conftest import issue
 from tests.api.mcp.test_tools_research_data import (
+    _NOW,
     SOURCE_ID,
     _insert_source_contract,
     _item,
@@ -136,6 +139,132 @@ async def test_search_cross_tenant_isolation(
     )
     assert response.status_code == 200, response.text
     assert response.json() == [], "tenant B의 토큰으로 tenant A의 항목이 조회되어서는 안 된다"
+
+
+# -- domain-level negative (additional D2 coverage) -----------------------------
+
+
+async def test_search_instruments_filter_excludes_non_matching(
+    client, pool, token_repo: PostgresAgentTokenRepository, research_repo
+):
+    """Items whose instruments do not match the filter must be excluded."""
+    await _insert_source_contract(pool)
+    tenant_id = await _make_tenant(pool)
+    await _register_source(research_repo)
+    # seed items for two different instruments (directly construct ResearchItem)
+    item_a = ResearchItem(
+        item_id=uuid.uuid4(),
+        source_id=SOURCE_ID,
+        kind="filing",
+        published_at=_NOW,
+        known_at=_NOW,
+        instruments=("005930",),
+        title="Test filing A",
+        body_ref=None,
+        url="https://example.invalid/filing/a",
+        language="ko",
+        hash="a" * 64,
+        revision_of=None,
+    )
+    item_b = ResearchItem(
+        item_id=uuid.uuid4(),
+        source_id=SOURCE_ID,
+        kind="filing",
+        published_at=_NOW,
+        known_at=_NOW,
+        instruments=("000660",),
+        title="Test filing B",
+        body_ref=None,
+        url="https://example.invalid/filing/b",
+        language="ko",
+        hash="b" * 64,
+        revision_of=None,
+    )
+    await research_repo.append_item(tenant_id, item_a, external_id=f"ext-{uuid.uuid4().hex}")
+    await research_repo.append_item(tenant_id, item_b, external_id=f"ext-{uuid.uuid4().hex}")
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
+    response = await client.post(
+        _URL,
+        json={"source_id": SOURCE_ID, "instruments": ["005930"]},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 200, response.text
+    ids = {row["item_id"] for row in response.json()}
+    assert len(ids) == 1, "instruments 필터가 적용되면 매칭되지 않는 항목은 반환되지 않아야 한다"
+
+
+async def test_search_published_date_range_filters_items(
+    client, pool, token_repo: PostgresAgentTokenRepository, research_repo
+):
+    """published_from/published_to must restrict results to the given window."""
+    await _insert_source_contract(pool)
+    tenant_id = await _make_tenant(pool)
+    await _register_source(research_repo)
+    # Directly construct ResearchItem to control published_at
+    old_item = ResearchItem(
+        item_id=uuid.uuid4(),
+        source_id=SOURCE_ID,
+        kind="filing",
+        published_at=_NOW - timedelta(days=365),
+        known_at=_NOW - timedelta(days=365),
+        instruments=("005930",),
+        title="Old filing",
+        body_ref=None,
+        url="https://example.invalid/filing/old",
+        language="ko",
+        hash="c" * 64,
+        revision_of=None,
+    )
+    recent_item = ResearchItem(
+        item_id=uuid.uuid4(),
+        source_id=SOURCE_ID,
+        kind="filing",
+        published_at=_NOW,
+        known_at=_NOW,
+        instruments=("005930",),
+        title="Recent filing",
+        body_ref=None,
+        url="https://example.invalid/filing/recent",
+        language="ko",
+        hash="d" * 64,
+        revision_of=None,
+    )
+    await research_repo.append_item(tenant_id, old_item, external_id=f"ext-{uuid.uuid4().hex}")
+    await research_repo.append_item(tenant_id, recent_item, external_id=f"ext-{uuid.uuid4().hex}")
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
+    response = await client.post(
+        _URL,
+        json={
+            "source_id": SOURCE_ID,
+            "published_from": (_NOW - timedelta(days=30)).isoformat(),
+            "published_to": _NOW.isoformat(),
+        },
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 200, response.text
+    ids = {row["item_id"] for row in response.json()}
+    assert str(recent_item.item_id) in ids, "published_date range 내에 있는 항목은 반환되어야 한다"
+    assert str(old_item.item_id) not in ids, "published_date range 외부 항목은 반환되면 안 된다"
+
+
+async def test_search_empty_kinds_returns_all_items(
+    client, pool, token_repo: PostgresAgentTokenRepository, research_repo
+):
+    """An empty kinds filter (not None) must not exclude any items."""
+    await _insert_source_contract(pool)
+    tenant_id = await _make_tenant(pool)
+    await _register_source(research_repo)
+    for _i in range(3):
+        await research_repo.append_item(tenant_id, _item(), external_id=f"ext-{uuid.uuid4().hex}")
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
+    response = await client.post(
+        _URL,
+        json={"source_id": SOURCE_ID, "kinds": []},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 3, "kinds가 빈 배열이면 모든 항목이 반환되어야 한다 (0건이 아니어야 한다)"
 
 
 # -- failure injection ----------------------------------------------------------
