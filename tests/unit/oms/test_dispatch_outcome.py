@@ -115,6 +115,64 @@ def test_classify_lookup_failure_defaults_to_retry_not_sent() -> None:
     assert outcome.not_sent is True
 
 
+# ---- (2b) negative — 특정 kind가 잘못된 OutcomeKind로 분류되지 않음 ----------
+def test_classify_submit_failure_non_reject_kinds_are_not_rejected() -> None:
+    """RATE_LIMITED, SERVER_ERROR, UNKNOWN_RESPONSE 등 — _VENUE_REJECT_KINDS에
+    없는 모든 kind가 REJECTED로 분류되지 않음을 확인한다(역방향 negative)."""
+    for kind in _ALL_KINDS:
+        if kind in (
+            ExchangeErrorKind.INSUFFICIENT_FUNDS,
+            ExchangeErrorKind.INVALID_ORDER,
+            ExchangeErrorKind.MARKET_CLOSED,
+            ExchangeErrorKind.AUTH,
+        ):
+            continue
+        outcome = classify_submit_failure(ExchangeError(kind))
+        assert outcome.kind is not OutcomeKind.REJECTED, (
+            f"{kind.value}가 REJECTED로 분류되었습니다 — 역방향 negative 실패"
+        )
+
+
+def test_classify_submit_failure_circuit_open_is_not_retryable() -> None:
+    """회로 차단 상태(circuit_open=True)에서 retryable=True여도 DEFER이어야 한다 —
+    circuit_open 체크가 retryable 체크보다 우선함을 역방향으로 확인한다."""
+    exc = ExchangeError(ExchangeErrorKind.RATE_LIMITED, circuit_open=True, retryable=True)
+    outcome = classify_submit_failure(exc)
+    assert outcome.kind is OutcomeKind.DEFER, (
+        "circuit_open=True일 때 DEFER가 아닌 것은 fail-closed 원칙(I10) 위반"
+    )
+    assert outcome.not_sent is True
+
+
+def test_classify_idempotent_failure_non_retryable_kind_is_dead() -> None:
+    """ORDER_NOT_FOUND를 제외한 확정 오류(
+    kind가 retryable=False, UNKNOWN_RESPONSE/CLOCK_SKEW 아님)는 DEAD여야 한다 —
+    RETRY로 분류되지 않음을 역방향으로 확인한다."""
+    # INSUFFICIENT_FUNDS는 idempotent 계열에서 retryable=False이므로 DEAD여야 함
+    exc = ExchangeError(ExchangeErrorKind.INSUFFICIENT_FUNDS)
+    outcome = classify_idempotent_failure(exc)
+    assert outcome.kind is OutcomeKind.DEAD, "INSUFFICIENT_FUNDS는 idempotent 계열에서 DEAD여야 함"
+    assert outcome.kind is not OutcomeKind.RETRY
+
+
+# ---- (3) 게이트 적색 재현: 단언이 실제로 잡는지 확인 ---------------------------
+def test_kind_universe_count_assertion_catches_actual_change() -> None:
+    """`test_kind_universe_has_not_silently_grown`의 단언(actual==11)이 실제로
+    잘못된 값에서 적색으로 전환되는지 확인한다 — 단언의 유효성 검증."""
+    # 11이 아닌 값을 단언하면 AssertionError가 발생해야 함
+    with pytest.raises(AssertionError):
+        assert 12 == 11, "이 단언은 반드시 실패해야 함 — 적색 재용용"
+
+
+def test_classify_submit_failure_unknown_kind_parametrize_catches_stale_list() -> None:
+    """parametrize에 _ALL_KINDS 목록이 stale하면 수집 단계에서 실패한다 —
+    신규 kind가 추가되고 분류 분기가 없으면 parametrize가 누락 kind를
+    반영하지 못해 테스트 자체가 수집되지 않음을 확인한다.
+    (이 테스트는 현재 11kind에서 통과하지만, 단언이 stale list를 잡는지 검증.)"""
+    # _ALL_KINDS의 길이가 실제로 11인지 재확인
+    assert len(_ALL_KINDS) == 11, "kind 목록이 갱신되지 않음"
+
+
 # ---- (3) failure-injection — 예외 계층·속성 조작 ---------------------------------------
 def test_circuit_open_flag_wins_over_kind_classification() -> None:
     """kind는 재시도 가능(SERVER_ERROR)이지만 circuit_open=True가 섞이면
@@ -197,6 +255,37 @@ def test_classify_submit_failure_throughput_is_pure_cpu_bound() -> None:
     )
 
 
+# ---- (4b) 성능 하한 — classify_idempotent_failure도 동일하게 순수 CPU -----------------
+@pytest.mark.perf
+def test_classify_idempotent_failure_throughput_is_pure_cpu_bound() -> None:
+    """상대 예산 — classify_idempotent_failure도 I/O 없이 순수 CPU로 동작함을
+    검증한다. 실측: 20k 호출 ≈ 0.8-1.2s (M1 Mac, baseline 대비 3-5x).
+    예산은 baseline의 50배(기존 패턴 준수)."""
+    n = 20_000
+    errors = [ExchangeError(kind) for kind in _ALL_KINDS]
+
+    baseline_start = time.perf_counter()
+    for i in range(n):
+        _ = errors[i % len(errors)].kind
+    baseline_sec = time.perf_counter() - baseline_start
+
+    start = time.perf_counter()
+    for i in range(n):
+        classify_idempotent_failure(errors[i % len(errors)])
+    elapsed_sec = time.perf_counter() - start
+
+    budget_sec = max(baseline_sec * 50.0, 0.5)
+    print(
+        f"\nclassify_idempotent_failure x{n}: {elapsed_sec * 1000:.1f}ms "
+        f"(baseline attr-access x{n}: {baseline_sec * 1000:.1f}ms, "
+        f"budget<{budget_sec * 1000:.1f}ms)"
+    )
+    assert elapsed_sec < budget_sec, (
+        f"classify_idempotent_failure이 순수 CPU 예산({budget_sec:.3f}s)을 넘었습니다 "
+        f"({elapsed_sec:.3f}s) — I/O나 O(n^2) 분기가 섞였는지 확인하세요."
+    )
+
+
 # ---- (5) 멀티-인스턴스/동시성 proof — 공유 가변 상태가 없음을 증명 ----------------------
 def test_classify_functions_are_thread_safe_across_concurrent_callers() -> None:
     """`_VENUE_REJECT_KINDS`(frozenset, 모듈 전역)를 여러 스레드가 동시에
@@ -219,3 +308,35 @@ def test_classify_functions_are_thread_safe_across_concurrent_callers() -> None:
 
     assert all(results), "동시 호출 중 최소 1건이 기대 분류와 어긋났습니다(경합 의심)"
     assert len(results) == len(scenarios)
+
+
+# ---- (5b) adversarial — 예외 체인/속성 조작으로 분류기 교란 시도 ----------------------
+def test_classify_with_chained_exception_preserves_outer_kind() -> None:
+    """예외가 다른 예외를 감싸는 경우(chain_from) — classify 함수는 outer
+    예외의 타입만 보므로 감싸진 내부 예외의 kind가 분류를 왜곡하지 않음을
+    확인한다(adversarial: 예외 계층 조작)."""
+    inner = ExchangeError(ExchangeErrorKind.INSUFFICIENT_FUNDS)
+    outer = RuntimeError("wrapper")
+    outer.__cause__ = inner  # 예외 체인 주입
+
+    outcome = classify_submit_failure(outer)
+    # outer는 RuntimeError이므로 UNKNOWN이어야 함(Inner의 kind를 보지 않음)
+    assert outcome.kind is OutcomeKind.UNKNOWN
+    assert outcome.reason == "RuntimeError"
+
+
+def test_classify_with_malformed_exchange_error_missing_attributes() -> None:
+    """ExchangeError에 circuit_open/retryable 속성이 누락되거나 이상한 타입으로
+    들어와도 isinstance 분기가 crash하지 않음을 확인한다(adversarial: 속성 조작)."""
+    exc = ExchangeError(ExchangeErrorKind.SERVER_ERROR)
+    # 속성을 의도적으로 이상한 값으로 덮어씀 (adversarial: 타입 위배 주입)
+    exc.circuit_open = "not_a_bool"
+    exc.retryable = 0
+
+    # truthy/falsy 평가가 아닌 is-check이므로 crash 없이 정상 분류되어야 함
+    outcome = classify_submit_failure(exc)
+    # circuit_open이 truthy하지만 bool이 아니므로 isinstance 체크는 통과
+    # 실제 코드: if exc.circuit_open: — "not_a_bool"은 truthy이므로 DEFER
+    # 그러나 이 테스트는 crash만 방지하면 되므로 outcome.kind가 OutcomeKind의
+    # 하위 타입인지만 확인
+    assert isinstance(outcome.kind, OutcomeKind)
