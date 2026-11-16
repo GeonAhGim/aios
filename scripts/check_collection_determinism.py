@@ -80,14 +80,34 @@ def collected_ids(files: list[str], seed: str, root: Path = ROOT) -> list[str] |
 
 def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
     first, second = (collected_ids(files, seed, root) for seed in SEEDS)
-    if first is None or second is None or first == second:
+    # 수집 자체가 실패한 시드가 있으면 — 해시 시드에 따라 수명이 달라진다는 뜻
+    if first is None and second is None:
+        return []
+    if first is None or second is None:
+        # 한쪽 시드에서만 수집이 실패하면 해당 파일 전체를 불안정으로标记
+        return list(files)
+    if first == second:
         return []
     by_file: dict[str, tuple[list[str], list[str]]] = {f: ([], []) for f in files}
     for ids, slot in ((first, 0), (second, 1)):
         for nodeid in ids:
             path = nodeid.split("::")[0].replace("\\", "/")
-            if path in by_file:
-                by_file[path][slot].append(nodeid)
+            # tmp_path 기반 테스트에서 pytest가 temp 디렉터리 이름을
+            # 경로 앞에 붙이는 경우를 위해 끝부분 일치로 매칭
+            matched = False
+            for f in files:
+                if path == f or path.endswith("/" + f):
+                    by_file[f][slot].append(nodeid)
+                    matched = True
+                    break
+            if not matched:
+                # 마지막 컴포넌트basename만으로 매칭 시도
+                basename = path.rsplit("/", 1)[-1]
+                for f in files:
+                    if f.split("/")[-1] == basename:
+                        by_file[f][slot].append(nodeid)
+                        matched = True
+                        break
     return [f for f, (a, b) in by_file.items() if a != b]
 
 
