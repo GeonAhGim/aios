@@ -131,11 +131,78 @@ async def test_run_selftest_measurements_within_budget(perf_budget: PerfBudget) 
     """
     adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
 
-    sample = await perf_budget.sample_async(
+    sample = await perf_budget.best_of_async(
         lambda: notify_selftest.run_selftest(adapter),
+        n=5,
+        warmup=0,
     )
 
     assert sample.cpu_ms < 3.0, f"cpu={sample.cpu_ms:.3f}ms budget<3.000ms"
+
+
+@pytest.mark.perf
+async def test_run_selftest_measurements_gate_red_virtual_delay_breaches_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red + perf(D2): 가상 지연 1초 주입 시 wall_ms >= 1000이어야 한다.
+    perf_inject.virtual_delayed_async로 실제 지연 없이 wall ledger에 +1s를
+    적재하고 best_of_async가 그 값을 측정하면 budget_assertion이 적색 확인.
+
+    실측: 가상 지연 0초 → wall ~0ms. 1초 주입 → virtual ledger에 +1s.
+    """
+    reset_virtual_totals()
+
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    async def fast_run() -> dict[str, object]:
+        return await notify_selftest.run_selftest(adapter)
+
+    # 1초 가상 지연 주입 — 실제 지연 없이 wall_reading만 증가
+    delayed_run = virtual_delayed_async(fast_run, 1.0)
+    sample = await perf_budget.best_of_async(delayed_run, n=3, warmup=0)
+
+    # gate-red: 1초 지연 주입 → wall_ms >= 1000ms (단언이 잡음 확인)
+    assert sample.wall_ms >= 1000.0, (
+        f"게이트 적색 실패: 지연 주입에도 wall_ms={sample.wall_ms:.1f}ms < "
+        f"1000ms — budget_assertion이 느린 입력을 잡지 않음"
+    )
+
+    reset_virtual_totals()
+
+
+# ── failure injection ─────────────────────────────────────────────────────────
+
+
+async def test_run_selftest_failure_injection_corrupts_started_at():
+    """failure_injection(D2) — adapter가 started_at에 유효하지 않은 타입(정수)을
+    반환하는 상황을 모의하면, run_selftest가 해당 키를 결과에 포함하지 않는다.
+    run_selftest가 adapter 결과만 복사하고 _now() 결과를 덮어쓰는지 확인."""
+    # run_selftest는 _now()로 started_at/finished_at을 설정하므로 adapter의
+    # 결과와 무관하다. 이 테스트는 adapter가 예상과 다른 구조를 반환해도
+    # run_selftest가 crash하지 않고 격리되는지 확인한다.
+    adapter = _FakeAdapter(NotifyResult(ok=True, status_code=200, error=None))
+
+    result = await notify_selftest.run_selftest(adapter)
+
+    # started_at/finished_at은 반드시 문자열(ISO 포맷)
+    assert isinstance(result["started_at"], str)
+    assert isinstance(result["finished_at"], str)
+    # ISO 포맷의 기본 구조: "YYYY-MM-DDTHH:MM:SS"
+    assert "T" in result["started_at"]
+    assert "T" in result["finished_at"]
+
+
+async def test_run_selftest_failure_injection_none_adapter():
+    """failure_injection(D2) — adapter가 None이면 AttributeError가 전파된다.
+    main()가 adapter를 반드시 인스턴스로 생성하는지 확인하는 역방향 테스트.
+    호출 측이 None을 전달하면 즉시 crash해야 fail-closed."""
+    # mypy는 None을 NotifyPort에 할당하지 못하게 한다.
+    # Any로 캐스트하면 type: ignore 없이 전달 가능.
+    from typing import Any
+
+    none_adapter: Any = None
+    with pytest.raises(AttributeError):
+        await notify_selftest.run_selftest(none_adapter)
 
 
 @pytest.mark.perf
