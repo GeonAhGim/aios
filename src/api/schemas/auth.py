@@ -14,7 +14,14 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from src.api.schemas._email_type import ValidEmailType
+from src.api.schemas.foundation.mandates import (
+    ActivateRevisionRequest as MfaSetupRequest,
+)
 from src.services.auth_service import User
+
+__all__ = [
+    "MfaSetupRequest",  # re-export from mandates — identical DTO (password+totp_code)
+]
 
 
 class SignupRequest(BaseModel):
@@ -53,17 +60,6 @@ class TokenResponse(BaseModel):
 
 class MfaVerifyRequest(BaseModel):
     totp_code: str
-
-
-class MfaSetupRequest(BaseModel):
-    """Initial setup (mfa_enabled=false) is allowed without re-authentication —
-    the login itself already serves as proof of identity. password is only
-    required when reconfiguring (reissuing) an already-enabled MFA
-    (Red Team audit #11 — prevents an attacker who stole a Bearer token from
-    overwriting the existing secret and hijacking 2FA)."""
-
-    password: str | None = None
-    totp_code: str | None = None
 
 
 class UserResponse(BaseModel):
