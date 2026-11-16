@@ -190,6 +190,26 @@ def test_loc_over_1000_file_counts_toward_500_and_800(tmp_path: Path) -> None:
     assert _run(tmp_path, baseline) == 2
 
 
+def test_shrinking_below_baseline_exits_zero(tmp_path: Path) -> None:
+    """Negative: baseline loc_over_500=3 but only 2 over-threshold files -> exit 0."""
+    _write_src(tmp_path, "a_over.py", 501)
+    _write_src(tmp_path, "b_over.py", 501)
+
+    baseline = _empty_baseline()
+    baseline["loc_over_500"] = 3
+
+    assert _run(tmp_path, baseline) == 0
+
+
+def test_exactly_500_lines_is_not_a_loc_over_500_hit(tmp_path: Path) -> None:
+    """Negative: a file with exactly 500 lines does NOT trigger loc_over_500 (threshold is >)."""
+    _write_src(tmp_path, "exact500.py", 500)
+
+    baseline = _empty_baseline()
+    # baseline says 0 hits; if 500-line file counted, current would be 1 > 0 -> exit 2
+    assert _run(tmp_path, baseline) == 0
+
+
 @pytest.mark.perf
 def test_perf_scan_file_within_budget(perf_budget: PerfBudget) -> None:
     """Perf: ``_scan_file`` on a 501-line module stays under 60 ms (best of 7).
