@@ -5,6 +5,8 @@ subprocess는 주입해서 실제 프로세스 없이 검증한다."""
 from __future__ import annotations
 
 import importlib.util
+import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -75,6 +77,24 @@ def test_exhausted_budget_or_timeout_stops_verifying_without_failing() -> None:
     assert (
         m.check(["tests/unit/test_a.py"], [], run=lambda *a: 124, repeats=3) == []
     )  # 시간 초과 = 검증 불가
+
+
+def test_a_launcher_that_cannot_start_is_unverifiable_not_a_failure(tmp_path) -> None:
+    """실행 파일을 못 찾는 환경(OSError)을 flaky로 오판해 push를 영구 거부하면 안 된다."""
+    m = _load()
+    rc = m._run(["definitely-not-a-real-executable-xyz"], {"PATH": ""}, tmp_path, 5)
+    assert rc == 124
+
+
+def test_runner_resolves_the_launcher_through_path(tmp_path) -> None:
+    """Windows의 npx.cmd처럼 확장자가 붙은 실행 파일도 PATH 해석으로 실행된다."""
+    m = _load()
+    assert (
+        m._run([sys.executable, "-c", "raise SystemExit(0)"], dict(os.environ), tmp_path, 30) == 0
+    )
+    assert (
+        m._run([sys.executable, "-c", "raise SystemExit(3)"], dict(os.environ), tmp_path, 30) == 3
+    )
 
 
 def test_no_added_test_files_is_a_pass() -> None:

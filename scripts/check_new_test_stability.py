@@ -62,11 +62,18 @@ Runner = Callable[[list[str], dict[str, str], Path, float], int]
 
 
 def _run(cmd: list[str], env: dict[str, str], cwd: Path, timeout: float) -> int:
+    """종료 코드. 시간 초과·실행 파일 없음 등 *검증 자체를 못 한* 경우는 124(검증 불가)."""
+    exe = shutil.which(cmd[0], path=env.get("PATH")) or cmd[0]  # Windows의 npx는 npx.cmd
     try:
         return subprocess.run(
-            cmd, cwd=cwd, env=env, capture_output=True, timeout=timeout, check=False
+            [exe, *cmd[1:]],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
         ).returncode
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError):
         return 124
 
 
