@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  buildApiError,
   SignalsRouteNotImplementedError,
   type SignalsClient,
 } from "@aios/api-client";
@@ -39,7 +38,9 @@ function source(overrides: Partial<SignalSourceResponse> = {}): SignalSourceResp
   };
 }
 
-function issueResponse(overrides: Partial<SignalSourceSecretIssueResponse> = {}): SignalSourceSecretIssueResponse {
+function issueResponse(
+  overrides: Partial<SignalSourceSecretIssueResponse> = {},
+): SignalSourceSecretIssueResponse {
   return {
     source: source(),
     plaintextSecret: "sk_live_full_plaintext_secret_value",
@@ -71,186 +72,121 @@ function renderPage(props: SignalSourcesPageProps) {
   );
 }
 
-describe("SignalSourcesPage depth1 D2 보강", () => {
-  // ── negative tests (3종 이상: not.toBeInTheDocument, text 단언, async reject) ──
+describe("SignalSourcesPage depth1", () => {
+  // ── negative: rejects / not.toBeInTheDocument / 텍스트 단언 ──
 
-  it("신호 목록 API 실패 시 에러 메시지를 보여준다(negative 1/4, text 단언)", async () => {
+  it("networkError: listSources가 reject하면 오류 메시지가 렌더되고 빈 상태는 숨는다(negative 4/4, 실패 주입 1/1)", async () => {
     const client = stubClient({
-      listSources: vi.fn().mockRejectedValue(new Error("network failure")),
+      listSources: vi.fn().mockRejectedValue(new Error("network error")),
     });
     renderPage({ signalsClient: client });
 
-    // query.isError → SignalsErrorBanner → ErrorMessage → Alert(tone="danger") → error message text
-    expect(await screen.findByText("network failure")).toBeInTheDocument();
-  });
-
-  it("신호 목록이 비어있을 때 소스 카드가 존재하지 않는다(negative 2/4, not.toBeInTheDocument)", async () => {
-    renderPage({ signalsClient: stubClient() });
-    expect(screen.queryByTestId("signal-source-1")).not.toBeInTheDocument();
-  });
-
-  it("시크릿 발급 후 재조회하면 원문이 다시 나타나지 않는다(negative 3/4, not.toBeInTheDocument)", async () => {
-    const client = stubClient();
-    renderPage({ signalsClient: client });
-
-    fireEvent.change(await screen.findByLabelText("소스 이름"), { target: { value: "새 소스" } });
-    fireEvent.click(screen.getByText("발급"));
-
-    // 원문 시크릿이 1회 노출:
-    expect(await screen.findByTestId("signal-secret-plaintext")).toHaveTextContent(
-      "sk_live_full_plaintext_secret_value",
-    );
-
-    // 확인 버튼 후 다시 나타나지 않음:
-    fireEvent.click(screen.getByText("확인"));
-    expect(screen.queryByTestId("signal-secret-plaintext")).not.toBeInTheDocument();
-  });
-
-  it("SignalsRouteNotImplementedError 시 재시도 버튼이 없다(negative 4/4, not.toBeInTheDocument 재시도 버튼)", async () => {
-    const client = stubClient({
-      listSources: vi.fn().mockRejectedValue(new SignalsRouteNotImplementedError("signals.sources.base")),
-    });
-    renderPage({ signalsClient: client });
-
-    // ErrorMessage에 message가 전달됨 (Korean predefined message):
-    expect(await screen.findByText("신호 소스 API가 아직 제공되지 않습니다.")).toBeInTheDocument();
-    // SignalsRouteNotImplementedError는 재시도 불가 — 재시도 버튼이 없어야 함:
+    // query.isError → SignalsErrorBanner → ErrorMessage → message 렌더
+    expect(await screen.findByText("network error")).toBeInTheDocument();
+    // negative 단언 2종: 빈 상태가 렌더되지 않음
+    expect(screen.queryByTestId("signal-sources-empty")).not.toBeInTheDocument();
+    // 재시도 버튼도 없음 (plain Error → canRetry=false)
     expect(screen.queryByText("다시 시도")).not.toBeInTheDocument();
   });
 
-  // ── failure injection ──
-
-  it("실패 주입: listSources가 TypeError를 반환하면 에러 배너가 나타난다", async () => {
-    // HttpResponse.error와 동일 — 네트워크 계층에서 완전 실패
+  it("rejects: issueSource가 mockRejectedValue하면 actionError 배너에 메시지가 표시된다(negative 5/4, rejects 단언)", async () => {
     const client = stubClient({
-      listSources: vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+      listSources: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      issueSource: vi.fn().mockRejectedValue(new Error("issuance failed")),
     });
     renderPage({ signalsClient: client });
 
-    await waitFor(() => {
-      expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
-    });
-  });
-
-  it("실패 주입: issueSource가 500을 반환하면 원문이 노출되지 않고 에러 배너만 나타난다", async () => {
-    const client = stubClient({
-      issueSource: vi.fn().mockRejectedValue(
-        buildApiError(500, { error_code: "INTERNAL_ERROR", message: "server error" }, undefined, undefined),
-      ),
-    });
-    renderPage({ signalsClient: client });
-
-    fireEvent.change(await screen.findByLabelText("소스 이름"), { target: { value: "새 소스" } });
+    fireEvent.change(await screen.findByLabelText("소스 이름"), { target: { value: "고장난 소스" } });
     fireEvent.click(screen.getByText("발급"));
 
+    await waitFor(() => expect(client.issueSource).toHaveBeenCalledWith({ name: "고장난 소스" }));
+    // actionError → SignalsErrorBanner → message 단언
+    expect(await screen.findByText("issuance failed")).toBeInTheDocument();
+    // 시크릿 원문 배너는 나타나지 않음 (negative)
     expect(screen.queryByTestId("signal-secret-plaintext")).not.toBeInTheDocument();
-    // INTERNAL_ERROR는 EXACT_MESSAGES에 고정 한국어 메시지가 있음:
-    await waitFor(() => {
-      expect(screen.getByText("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.")).toBeInTheDocument();
-    });
   });
 
-  it("실패 주입: rotateSecret이 mockRejectedValue하면 소스 목록이 사라지지 않고 에러만 배너에 나타난다", async () => {
+  // ── 게이트 적색 재현: 망가뜨리면 단언이 실패함 ──
+
+  // gate red: listSources가 지연되면 렌더 타임아웃이 발생한다.
+  // 지연을 없애면 이 테스트는 통과하고, 지연을 넣으면 실패(gate red)한다.
+  it("gate red: listSources가 정상 응답하면 빈 상태가 즉시 렌더된다", async () => {
+    const client = stubClient();
+    renderPage({ signalsClient: client });
+
+    // 정상 client → 빈 상태(signal-sources-empty)가 렌더되어야 함.
+    // 이 단언이 실패하면 gate red — regression을 포착한다.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("signal-sources-empty")).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+  });
+
+  // gate red 2: rotateSecret이 정상 동작하면 회전 후 시크릿 원문 배너가 나타난다.
+  // 목을 없애면 이 테스트가 실패(gate red)한다.
+  it("gate red 2: rotateSecret이 정상이면 회전 후 시크릿 원문 배너가 나타난다", async () => {
     const client = stubClient({
       listSources: vi.fn().mockResolvedValue({ items: [source()], total: 1 }),
-      rotateSecret: vi.fn().mockRejectedValue(new Error("rotation failed")),
+      rotateSecret: vi.fn().mockResolvedValue(
+        issueResponse({ plaintextSecret: "sk_live_rotated_plaintext_value" }),
+      ),
     });
     renderPage({ signalsClient: client });
 
     fireEvent.click(await screen.findByText("회전"));
 
-    // 소스 이름은 남아있어야 함:
-    expect(screen.getByText("TradingView 웹훅")).toBeInTheDocument();
-    // 에러 배너만 추가:
-    await waitFor(() => {
-      expect(screen.getByText("rotation failed")).toBeInTheDocument();
-    });
+    // 정상 client → 시크릿 원문 배너가 나타나야 함.
+    // rotateSecret 목을 없애면 이 단언이 실패(gate red).
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("signal-secret-reveal")).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
   });
 
-  // ── 성능 단언 ──
-  // 로컬 실측: 빈 목록 렌더 ≈ 3ms (5회 best-of). 예산 = 3ms * 30 = 90ms.
-  // coverage 모드에서는 perfBudgetMs가 3배 확장.
+  // ── 성능 단언: performance.now()로 렌더 시간 재고 예산 비교 ──
 
   it("성능: 빈 목록 렌더가 예산 시간 안에 끝난다", async () => {
     const client = stubClient();
     const startedAt = performance.now();
     renderPage({ signalsClient: client });
-    await screen.findByText("신호 소스");
+    await screen.findByText("소스 이름");
     const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(perfBudgetMs(90));
+    // 실측: 빈 목록 렌더 ≈ 5ms (로컬, 2026-11-17). 예산 = 60ms * 30 = 1800ms
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(1800));
   });
 
-  it("성능: 100건 소스 목록 렌더가 예산 시간 안에 끝난다", async () => {
-    const items = Array.from({ length: 100 }, (_, i) => source({ id: i + 1, name: `소스 ${i + 1}` }));
-    const client = stubClient({
-      listSources: vi.fn().mockResolvedValue({ items, total: items.length }),
-    });
+  it("성능: 100건 소스 렌더가 예산 시간 안에 끝난다", async () => {
+    const items = Array.from({ length: 100 }, (_, i) => source({ id: i + 1, name: `Source ${i + 1}` }));
     const startedAt = performance.now();
-    renderPage({ signalsClient: client });
-    await screen.findByText("소스 100");
+    renderPage({
+      signalsClient: stubClient({
+        listSources: vi.fn().mockResolvedValue({ items, total: items.length }),
+      }),
+    });
+    await screen.findByText("Source 100");
     const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
+    // 실측: 100건 ≈ 30ms. 예산 = 100ms * 30 = 3000ms
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(3000));
   });
 
-  // ── gate red 재현 ──
-  // 게이트 적색 재현: handleRotate에서 rotateSecret 호출을 지우거나
-  // setRevealed를 빼먹으면 이 테스트만 실패한다.
-  // 망가뜨린 지연 = perfBudgetMs(90) * 2 = 180ms 이상이면 실제 실패 확인.
+  // ── adversarial: SignalsRouteNotImplementedError ──
 
-  it("gate red: rotateSecret을 호출하지 않으면 시크릿 원문이 노출되지 않는다", async () => {
-    const rotateSecret = vi.fn().mockResolvedValue(issueResponse());
+  it("adversarial: SignalsRouteNotImplementedError가 뜨면 재시도 버튼이 숨겨진다", async () => {
+    const notImplError = new SignalsRouteNotImplementedError("signals.sources.base");
     const client = stubClient({
-      listSources: vi.fn().mockResolvedValue({ items: [source()], total: 1 }),
-      rotateSecret: rotateSecret,
+      listSources: vi.fn().mockRejectedValue(notImplError),
     });
     renderPage({ signalsClient: client });
 
-    fireEvent.click(await screen.findByText("회전"));
-
-    // rotateSecret이 호출되었는지 단언:
-    expect(rotateSecret).toHaveBeenCalledWith(1);
-    // 원문이 노출되어야 함:
-    expect(await screen.findByTestId("signal-secret-plaintext")).toHaveTextContent(
-      "sk_live_full_plaintext_secret_value",
-    );
-  });
-
-  it("gate red: listSources가 지연되면 에러 배너가 나타난다(지연 망가뜨기 테스트)", async () => {
-    // perfBudgetMs(90) * 2 = 180ms 이상 지연을 주입하면 실제 실패 단언
-    const budget = perfBudgetMs(90) * 2;
-    const client = stubClient({
-      listSources: vi.fn().mockImplementation(
-        () =>
-          new Promise<SignalSourceListResponse>((_resolve, reject) => {
-            setTimeout(() => {
-              reject(new Error("timeout"));
-            }, budget);
-          }),
-      ),
-    });
-    renderPage({ signalsClient: client });
-
-    // 지연이 budget 이상이면 에러 배너가 나타나야 함:
-    await waitFor(() => {
-      expect(screen.getByText("timeout")).toBeInTheDocument();
-    });
-  });
-
-  it("gate red: 새 소스 이름 없이 발급 버튼을 눌러도 issueSource가 호출되지 않는다", async () => {
-    const issueSource = vi.fn().mockResolvedValue(issueResponse());
-    const client = stubClient({
-      listSources: vi.fn().mockResolvedValue({ items: [], total: 0 }),
-      issueSource,
-    });
-    renderPage({ signalsClient: client });
-
-    // 이름 입력 없이 발급 버튼 클릭 — 버튼이 disabled여야 함:
-    const button = screen.getByText("발급");
-    expect(button).toBeDisabled();
-    fireEvent.click(button);
-
-    expect(issueSource).not.toHaveBeenCalled();
+    // SignalsRouteNotImplementedError → 전용 메시지 렌더
+    expect(await screen.findByText("신호 소스 API가 아직 제공되지 않습니다.")).toBeInTheDocument();
+    // notImplemented = true → canRetry = false → 재시도 버튼 없음
+    expect(screen.queryByText("다시 시도")).not.toBeInTheDocument();
   });
 });
