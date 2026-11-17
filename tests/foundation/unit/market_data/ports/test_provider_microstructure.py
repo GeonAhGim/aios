@@ -13,6 +13,7 @@ base_adapter.py::NormalizationNotImplementedError`와 같은 전례.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -315,3 +316,37 @@ async def test_adversarial_fetch_quotes_all_prices_are_decimal() -> None:
         assert isinstance(q.bid_size, Decimal)
         assert isinstance(q.ask_price, Decimal)
         assert isinstance(q.ask_size, Decimal)
+
+
+# ---------------------------------------------------------------------------
+# D3 axis: concurrency / replay
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_require_microstructure_gates_all_resolve_same_provider() -> None:
+    """동시성: 여러 코루틴이 같은 provider를 동시에 게이트해도 모두 같은
+    객체를 돌려받고 미지원 provider는 전부 명시적 예외를 내는지 확인한다
+    (공유 상태 없는 순수 게이트여야 한다)."""
+    supported = _MicrostructureCapableProvider()
+    unsupported = _CandleOnlyProvider()
+
+    async def _gate(provider):
+        return require_microstructure(provider, "fetch_trades")
+
+    results = await asyncio.gather(*(_gate(supported) for _ in range(50)))
+    assert all(r is supported for r in results)
+
+    outcomes = await asyncio.gather(
+        *(_gate(unsupported) for _ in range(50)), return_exceptions=True
+    )
+    assert all(isinstance(o, MicrostructureNotSupportedError) for o in outcomes)
+
+
+async def test_replay_fetch_trades_is_deterministic_across_repeated_calls() -> None:
+    """리플레이: 같은 listing·span으로 반복 호출한 결과가 항상 동일해야
+    백테스트 재현이 성립한다(시계·난수 비의존, 동일 DTO 동등성 비교)."""
+    provider = require_microstructure(_MicrostructureCapableProvider(), "fetch_trades")
+    span = TimeSpan(start=_now(), end=_now())
+    first = await provider.fetch_trades(_listing(), span)
+    for _ in range(3):
+        assert await provider.fetch_trades(_listing(), span) == first
