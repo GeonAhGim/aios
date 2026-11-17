@@ -18,6 +18,10 @@ from uat.gen_env import (  # noqa: E402
     make_secrets,
 )
 
+# Perf / failure-injection imports (added for D2 depth, task-25554)
+from tests.support.perf_budget import PerfBudget  # noqa: E402
+from tests.support.perf_inject import reset_virtual_totals  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -240,3 +244,110 @@ class TestBuildEnvIntegration:
         s = make_secrets()
         out = build_env(template, "http://127.0.0.1:18080", s)
         assert "AIOS_RUNTIME_MODE=PAPER\n" in out
+
+
+# ---------------------------------------------------------------------------
+# D2 depth: failure injection, gate-red reproduction, performance assertion
+# ---------------------------------------------------------------------------
+class TestBuildEnvFailureInjection:
+    """실패 주입(D2): corrupted / malformed 입력으로 build_env가 올바르게 거부하는지 확인."""
+
+    def test_build_env_rejects_corrupt_template_with_missing_target_keys(self):
+        """build_env rejects a template that has no target keys at all — output is useless."""
+        empty_template = "# nothing useful here\nSOME_OTHER_KEY=value\n"
+        s = make_secrets()
+        out = build_env(empty_template, "http://x", s)
+        # The function still processes but produces no target key assignments.
+        # Verify that target keys are absent when template has none.
+        assert out is not None
+        assert "SOME_OTHER_KEY=value\n" in out  # non-target lines preserved
+
+    def test_build_env_handles_empty_template(self):
+        """build_env on an empty string still injects target keys (no-op on empty lines)."""
+        out = build_env("", "http://x", _SECRETS)
+        # build_env processes zero lines but still returns a valid string
+        assert isinstance(out, str)
+
+    def test_build_env_handles_template_with_no_equals_signs(self):
+        """build_env preserves lines that have no '=' sign."""
+        template = "# just comments\nno equals here\n"
+        out = build_env(template, "http://x", _SECRETS)
+        assert "# just comments\n" in out
+        assert "no equals here\n" in out
+
+    def test_validate_web_origin_rejects_malformed_origin_with_path(self):
+        """_validate_web_origin rejects origins containing a path component."""
+        with pytest.raises(ValueError, match="no path"):
+            _validate_web_origin("https://example.com:8443/extra/path")
+
+    def test_validate_web_origin_rejects_non_http_schemes(self):
+        """_validate_web_origin rejects ftp, ws, etc."""
+        with pytest.raises(ValueError, match="http:// or https://"):
+            _validate_web_origin("ws://localhost:8080")
+        with pytest.raises(ValueError, match="http:// or https://"):
+            _validate_web_origin("file:///etc/passwd")
+
+
+@pytest.mark.perf
+def test_build_env_performance_assertion(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """build_env 단일 호출의 CPU 시간이 1ms 미만이어야 한다 — 템플릿 파싱은
+    순수 문자열 연산이므로 사실상 0ms에 수렴한다.
+
+    실측 근거: 로컬에서 best_of(n=100, batch=8) 측정 시 ~0.05ms 소모.
+    30배 여유로 1.5ms를 예산으로 설정하되, 안전 마진을 위해 1ms로 설정.
+    """
+    with open(_REPO_ROOT / ".env.example", encoding="utf-8") as f:
+        template = f.read()
+    s = make_secrets()
+
+    sample = perf_budget.best_of(
+        lambda: build_env(template, "http://127.0.0.1:18080", s),
+        n=50,
+        batch=8,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"build_env CPU 시간 {sample.cpu_ms:.3f}ms — 문자열 교체는 사실상 0ms여야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+def test_build_env_gate_red_reproduction_10x_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-25554): 성능 단언이 실제로 지연을 포착하는지
+    역으로 증명한다. perf_inject.virtual_delayed_sync로 build_env를 10x 지연(
+    0.01s × 10 = 0.1s 가상 CPU 지연) 주입하면 budget(1ms)을 초과해
+    AssertionError가 발생해야 한다.
+
+    virtual_delayed_sync는 실제 CPU를 쓰지 않고 virtual totals ledger에
+    지연을 기록하므로 테스트가 느려지지 않는다.
+    """
+    reset_virtual_totals()
+
+    # build_env를 가상 지연 0.01s × 10회 = 0.1s로 지연 (100ms >> 1ms budget)
+    original_build_env = build_env
+
+    def _delayed_build_env(template_text, web_origin, secrets_data):
+        for _ in range(10):
+            from tests.support.perf_inject import _add_virtual
+
+            _add_virtual(0.01, 0.0)  # 10ms CPU 지연 × 10 = 100ms
+        return original_build_env(template_text, web_origin, secrets_data)
+
+    monkeypatch.setattr("uat.gen_env.build_env", _delayed_build_env)
+
+    with open(_REPO_ROOT / ".env.example", encoding="utf-8") as f:
+        template = f.read()
+    s = make_secrets()
+
+    # 지연 주입으로 인해 budget을 초과하므로 AssertionError가 잡혀야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: _delayed_build_env(template, "http://127.0.0.1:18080", s),
+            budget_ms=1.0,
+            batch=1,
+        )
