@@ -193,3 +193,179 @@ def test_order_float_quantity_is_stored_as_decimal_not_float() -> None:
     order = Order(**_order_kwargs(quantity=0.01))
     assert isinstance(order.quantity, Decimal)
     assert not isinstance(order.quantity, float)
+
+
+# ── FuturesContractInfo ──────────────────────────────────────────────────────
+
+FuturesContractInfo = trading_module.FuturesContractInfo
+
+
+def test_futures_contract_info_construction() -> None:
+    """정상: 모든 필수 필드 채워 FuturesContractInfo 생성."""
+    info = FuturesContractInfo(
+        symbol="BTC240628",
+        exchange="bitget",
+        base_coin="BTC",
+        quote_coin="USDT",
+        min_order_size=Decimal("1"),
+        price_tick_size=Decimal("0.1"),
+        size_tick_size=Decimal("0.001"),
+        max_leverage=Decimal("125"),
+    )
+    assert info.symbol == "BTC240628"
+    assert info.base_coin == "BTC"
+    assert info.quote_coin == "USDT"
+    assert info.max_leverage == Decimal("125")
+
+
+def test_futures_contract_info_float_min_order_size_coerced() -> None:
+    """Pydantic v2는 Decimal 필드에 float를 자동 coerse한다.
+    이 테스트는 그 동작을 고정(fix)한다 — float가 거부되지 않음을 문서화."""
+    # float literal 1.5가 Decimal("1.5")로 coerse됨 — Pydantic v2 기본 동작
+    _float_input: float = 1.5
+    info = FuturesContractInfo(
+        symbol="X",
+        exchange="bitget",
+        base_coin="X",
+        quote_coin="USDT",
+        min_order_size=_float_input,
+        price_tick_size=Decimal("0.1"),
+        size_tick_size=Decimal("0.001"),
+        max_leverage=Decimal("1"),
+    )
+    assert info.min_order_size == Decimal("1.5")
+
+
+# ── MarginAccountAsset ───────────────────────────────────────────────────────
+
+MarginAccountAsset = trading_module.MarginAccountAsset
+
+
+def test_margin_account_asset_defaults() -> None:
+    """risk_rate=None 기본값, borrowed/interest=0 기본값 확인."""
+    asset = MarginAccountAsset(
+        exchange="bitget",
+        margin_type="crossed",
+        coin="USDT",
+        available=Decimal("1000"),
+        borrowed=Decimal("0"),
+        interest=Decimal("0"),
+        net_asset=Decimal("1000"),
+    )
+    assert asset.risk_rate is None
+    assert asset.borrowed == Decimal("0")
+    assert asset.symbol is None  # crossed → None
+
+
+def test_margin_account_asset_isolated_symbol() -> None:
+    """isolated 타입은 symbol이 채워진다."""
+    asset = MarginAccountAsset(
+        exchange="bitget",
+        margin_type="isolated",
+        symbol="BTC/USDT",
+        coin="USDT",
+        available=Decimal("500"),
+        borrowed=Decimal("100"),
+        interest=Decimal("1"),
+        net_asset=Decimal("400"),
+    )
+    assert asset.symbol == "BTC/USDT"
+    assert asset.margin_type == "isolated"
+
+
+def test_margin_account_asset_available_rejects_non_decimal() -> None:
+    """음성: available에 Decimal이 아닌 값을 넣으면 ValidationError."""
+    _bad: str = "not-decimal"
+    with pytest.raises(ValidationError):
+        MarginAccountAsset(
+            exchange="bitget",
+            margin_type="crossed",
+            coin="USDT",
+            available=_bad,
+            borrowed=Decimal("0"),
+            interest=Decimal("0"),
+            net_asset=Decimal("1000"),
+        )
+
+
+# ── SecretBundle serialization leak prevention ───────────────────────────────
+
+
+def test_secret_bundle_model_dump_masks_values() -> None:
+    """model_dump() 결과에 평문 시크릿이 나타나지 않는다."""
+    bundle = SecretBundle(
+        database_url="postgresql+SENTINEL-db",
+        jwt_secret_key="SENTINEL-jwt",
+        credential_encryption_key="SENTINEL-key",
+        bitget_api_key="SENTINEL-k",
+        bitget_api_secret="SENTINEL-secret",
+        kis_app_key="SENTINEL-k",
+        kis_app_secret="SENTINEL-s",
+    )
+    dumped = bundle.model_dump()
+    for secret_val in ("SENTINEL-db", "SENTINEL-jwt", "SENTINEL-key", "SENTINEL-secret"):
+        assert secret_val not in str(dumped), f"Leak detected: {secret_val} in model_dump()"
+
+
+def test_secret_bundle_model_dump_json_masks_values() -> None:
+    """model_dump_json() 결과에 평문 시크릿이 나타나지 않는다."""
+    bundle = SecretBundle(
+        database_url="postgresql+SENTINEL-db",
+        jwt_secret_key="SENTINEL-jwt",
+        credential_encryption_key="SENTINEL-key",
+        bitget_api_key="SENTINEL-k",
+        bitget_api_secret="SENTINEL-secret",
+        kis_app_key="SENTINEL-k",
+        kis_app_secret="SENTINEL-s",
+    )
+    json_str = bundle.model_dump_json()
+    for secret_val in ("SENTINEL-db", "SENTINEL-jwt", "SENTINEL-key", "SENTINEL-secret"):
+        assert secret_val not in json_str, f"Leak detected: {secret_val} in model_dump_json()"
+
+
+# ── OrderStatus invariant ────────────────────────────────────────────────────
+
+
+def test_order_status_contains_cancel_requested() -> None:
+    """OrderStatus에 CANCEL_REQUESTED가 포함된다 (task-2432 승격)."""
+    values = set(OrderStatus)
+    assert OrderStatus.CANCEL_REQUESTED in values
+    assert "CANCEL_REQUESTED" in {v.value for v in values}
+
+
+# ── Failure injection: SecretBundle missing required field ───────────────────
+
+
+def test_secret_bundle_missing_required_field_raises() -> None:
+    """실패주입: 필수 필드 database_url을 누르면 ValidationError."""
+    with pytest.raises(ValidationError):
+        SecretBundle(
+            jwt_secret_key="k",
+            credential_encryption_key="k",
+            bitget_api_key="k",
+            bitget_api_secret="k",
+            kis_app_key="k",
+            kis_app_secret="k",
+        )
+
+
+# ── Performance assertion ────────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+def test_margin_account_asset_construction_perf_under_budget(perf_budget) -> None:
+    """성능단언: MarginAccountAsset 생성 5000회가 500ms 예산 내에 끝나야 한다."""
+
+    def _run() -> None:
+        for _i in range(5000):
+            MarginAccountAsset(
+                exchange="bitget",
+                margin_type="crossed",
+                coin="USDT",
+                available=Decimal("1000"),
+                borrowed=Decimal("0"),
+                interest=Decimal("0"),
+                net_asset=Decimal("1000"),
+            )
+
+    perf_budget.assert_within(_run, budget_ms=500.0, label="construct 5000 MarginAccountAsset")
