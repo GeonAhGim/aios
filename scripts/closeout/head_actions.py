@@ -151,6 +151,54 @@ def check_12_head_actions_green(
     return CheckResult(key, title, passed, evidence, detail)
 
 
+def write_head_green_cache(path: Path, result: CheckResult, head_sha: str) -> None:
+    """라이브 조회 결과를 남긴다 -- 다음 주기에 gh를 안 부를 때 재사용한다."""
+    run_url = next((e.split("=", 1)[1] for e in result.evidence if e.startswith("run_url=")), "")
+    conclusion = next(
+        (e.split("=", 1)[1] for e in result.evidence if e.startswith("conclusion=")), ""
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps({"head": head_sha, "run_url": run_url, "conclusion": conclusion}),
+            encoding="utf-8",
+        )
+        tmp.replace(path)  # 원자적 교체 -- 읽는 쪽이 쓰다 만 파일을 보지 않는다
+    except OSError:
+        pass
+
+
+def cached_head_green(
+    repo_root: Path,
+    path: Path,
+    *,
+    git_head: Callable[[Path], str | None] = default_git_head,
+) -> CheckResult | None:
+    """직전 라이브 조회가 *같은 HEAD*의 success였을 때만 그 결과를 재사용한다.
+
+    HEAD가 바뀌었거나 캐시가 없거나 success가 아니면 None -- 호출부가 미검증(적색)으로 둔다.
+    과거 녹색이 새 HEAD로 번지는 일은 없다(headSha 일치가 조건, 위 기준12 원칙과 같다).
+    """
+    key, title = "12_head_actions_green", "현재 HEAD Actions 녹색"
+    head_sha = git_head(repo_root)
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not head_sha or rec.get("head") != head_sha or rec.get("conclusion") != "success":
+        return None
+    url = str(rec.get("run_url") or "")
+    evidence = (f"head={head_sha}", f"run_url={url}", "conclusion=success", "source=cache")
+    return CheckResult(
+        key,
+        title,
+        True,
+        evidence,
+        f"HEAD({head_sha[:8]})가 quality.yml에서 success(직전 조회 재사용): {url}",
+    )
+
+
 def trigger_head_workflow_dispatch(gh_run: GhRunner = default_gh_run, *, ref: str = "main") -> bool:
     """`quality.yml`을 workflow_dispatch로 수동 트리거한다(HEAD 재검증 스크립트)."""
     result = gh_run(["workflow", "run", GH_QUALITY_WORKFLOW, "--ref", ref])

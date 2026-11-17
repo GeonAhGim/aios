@@ -333,3 +333,46 @@ def test_wait_for_head_green_times_out_when_never_completes(tmp_path: Path) -> N
 
     assert not result.passed
     assert "대기했지만 완료되지 않음" in result.detail
+
+
+# ------------------------------------------------ 12: 조회를 건너뛴 주기의 결과 재사용(2026-11-17)
+
+
+def _green_result(head: str):
+    return cc.CheckResult(
+        "12_head_actions_green",
+        "현재 HEAD Actions 녹색",
+        True,
+        (f"head={head}", "run_url=https://x/run/1", "conclusion=success"),
+        "ok",
+    )
+
+
+def test_cache_reuses_a_success_only_for_the_same_head(tmp_path: Path) -> None:
+    from scripts.closeout import head_actions as ha
+
+    cache = tmp_path / "ci" / "actions_head_green.json"
+    ha.write_head_green_cache(cache, _green_result("abc"), "abc")
+
+    same = ha.cached_head_green(tmp_path, cache, git_head=lambda _r: "abc")
+    assert same is not None and same.passed and "source=cache" in same.evidence
+    # HEAD가 바뀌면 과거 녹색은 번지지 않는다 -- 기준12 원칙
+    assert ha.cached_head_green(tmp_path, cache, git_head=lambda _r: "def") is None
+
+
+def test_cache_is_never_green_without_a_matching_success(tmp_path: Path) -> None:
+    from scripts.closeout import head_actions as ha
+
+    cache = tmp_path / "actions_head_green.json"
+    assert ha.cached_head_green(tmp_path, cache, git_head=lambda _r: "abc") is None  # 파일 없음
+    cache.write_text("{not json", encoding="utf-8")
+    assert ha.cached_head_green(tmp_path, cache, git_head=lambda _r: "abc") is None  # 깨진 파일
+    red = cc.CheckResult(
+        "12_head_actions_green",
+        "x",
+        False,
+        ("head=abc", "run_url=u", "conclusion=failure"),
+        "red",
+    )
+    ha.write_head_green_cache(cache, red, "abc")
+    assert ha.cached_head_green(tmp_path, cache, git_head=lambda _r: "abc") is None  # success 아님

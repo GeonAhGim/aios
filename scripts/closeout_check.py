@@ -74,10 +74,13 @@ from scripts.closeout.hardening import (
     check_11_hardening,
 )
 from scripts.closeout.head_actions import (
+    cached_head_green,
     check_12_head_actions_green,
     default_gh_run,
+    default_git_head,
     trigger_head_workflow_dispatch,
     wait_for_head_green,
+    write_head_green_cache,
 )
 from scripts.closeout.ops import (
     JOURNEY_SPECS,
@@ -436,6 +439,15 @@ def main(argv: list[str] | None = None) -> int:
         help="12번 항목을 실제 `gh run list`로 조회한다(네트워크·GitHub 인증 필요)",
     )
     parser.add_argument(
+        "--head-green-cache",
+        type=Path,
+        default=None,
+        help=(
+            "12번 항목 결과 캐시. --live-head-check 결과를 쓰고, 조회를 건너뛴 주기엔 "
+            "같은 HEAD의 success일 때만 그 결과를 재사용한다(그 외엔 기존대로 미검증 적색)"
+        ),
+    )
+    parser.add_argument(
         "--trigger-head-recheck",
         action="store_true",
         help=(
@@ -450,6 +462,12 @@ def main(argv: list[str] | None = None) -> int:
         head_green_result = wait_for_head_green(args.repo_root)
     elif args.live_head_check:
         head_green_result = check_12_head_actions_green(args.repo_root, gh_run=_default_gh_run)
+        if args.head_green_cache is not None:
+            head_sha = default_git_head(args.repo_root)
+            if head_sha:
+                write_head_green_cache(args.head_green_cache, head_green_result, head_sha)
+    elif args.head_green_cache is not None:
+        head_green_result = cached_head_green(args.repo_root, args.head_green_cache)
 
     results = run_all(
         args.repo_root,
