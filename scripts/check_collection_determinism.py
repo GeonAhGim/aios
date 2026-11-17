@@ -78,37 +78,40 @@ def collected_ids(files: list[str], seed: str, root: Path = ROOT) -> list[str] |
     return [line.strip() for line in result.stdout.splitlines() if "::" in line]
 
 
-def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
-    first, second = (collected_ids(files, seed, root) for seed in SEEDS)
-    # 수집 자체가 실패한 시드가 있으면 — 해시 시드에 따라 수명이 달라진다는 뜻
-    if first is None and second is None:
-        return []
-    if first is None or second is None:
-        # 한쪽 시드에서만 수집이 실패하면 해당 파일 전체를 불안정으로标记
-        return list(files)
-    if first == second:
-        return []
+def _owner_file(nodeid: str, files: list[str]) -> str | None:
+    """nodeid가 속한 검사 대상 파일.
+
+    tmp_path 기반 테스트는 pytest가 temp 디렉터리 이름을 경로 앞에 붙이므로 끝부분
+    일치로, 그래도 못 찾으면 마지막 컴포넌트(basename)만으로 매칭한다."""
+    path = nodeid.split("::")[0].replace("\\", "/")
+    for f in files:
+        if path == f or path.endswith("/" + f):
+            return f
+    basename = path.rsplit("/", 1)[-1]
+    return next((f for f in files if f.split("/")[-1] == basename), None)
+
+
+def _ids_by_file(
+    first: list[str], second: list[str], files: list[str]
+) -> dict[str, tuple[list[str], list[str]]]:
     by_file: dict[str, tuple[list[str], list[str]]] = {f: ([], []) for f in files}
     for ids, slot in ((first, 0), (second, 1)):
         for nodeid in ids:
-            path = nodeid.split("::")[0].replace("\\", "/")
-            # tmp_path 기반 테스트에서 pytest가 temp 디렉터리 이름을
-            # 경로 앞에 붙이는 경우를 위해 끝부분 일치로 매칭
-            matched = False
-            for f in files:
-                if path == f or path.endswith("/" + f):
-                    by_file[f][slot].append(nodeid)
-                    matched = True
-                    break
-            if not matched:
-                # 마지막 컴포넌트basename만으로 매칭 시도
-                basename = path.rsplit("/", 1)[-1]
-                for f in files:
-                    if f.split("/")[-1] == basename:
-                        by_file[f][slot].append(nodeid)
-                        matched = True
-                        break
-    return [f for f, (a, b) in by_file.items() if a != b]
+            owner = _owner_file(nodeid, files)
+            if owner is not None:
+                by_file[owner][slot].append(nodeid)
+    return by_file
+
+
+def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
+    first, second = (collected_ids(files, seed, root) for seed in SEEDS)
+    if first is None and second is None:
+        return []  # 두 시드 모두 수집 실패 -- 이 게이트의 대상이 아니다
+    if first is None or second is None:
+        return list(files)  # 한쪽 시드에서만 수집이 실패하면 해시 시드에 따라 달라지는 것
+    if first == second:
+        return []
+    return [f for f, (a, b) in _ids_by_file(first, second, files).items() if a != b]
 
 
 def main(argv: list[str] | None = None) -> int:
