@@ -113,6 +113,53 @@ async def test_search_published_span_without_published_from_is_200(
     assert response.status_code == 200, response.text
 
 
+async def _search_results(client, secret: str, **body) -> list:  # noqa: ANN001
+    response = await client.post(
+        _URL,
+        json={"source_id": SOURCE_ID, **body},
+        headers={AGENT_TOKEN_HEADER: secret},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def test_search_with_invalid_kind_filter_rejected_returns_empty(
+    client,
+    pool,
+    token_repo: PostgresAgentTokenRepository,
+    research_repo,
+):
+    """A kind no seeded item has yields an empty list, not items or an error."""
+    secret = await _seeded_token(pool, token_repo, research_repo)
+    results = await _search_results(client, secret, kinds=("nonexistent_kind_xyz",))
+    assert results == []
+
+
+async def test_search_with_forbidden_instrument_returns_empty(
+    client,
+    pool,
+    token_repo: PostgresAgentTokenRepository,
+    research_repo,
+):
+    """An instrument code no item holds yields an empty list."""
+    secret = await _seeded_token(pool, token_repo, research_repo)
+    results = await _search_results(client, secret, instruments=("ZZZZZZ",))
+    assert results == []
+
+
+async def test_search_as_of_before_known_at_rejects_unknown_items(
+    client,
+    pool,
+    token_repo: PostgresAgentTokenRepository,
+    research_repo,
+):
+    """as_of in the distant past (before known_at) must hide every item."""
+    secret = await _seeded_token(pool, token_repo, research_repo)
+    past = datetime(2000, 1, 1, tzinfo=UTC).isoformat()
+    results = await _search_results(client, secret, as_of=past)
+    assert results == []
+
+
 # -- failure injection ---------------------------------------------------------
 
 
