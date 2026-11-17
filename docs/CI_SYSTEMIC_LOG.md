@@ -3967,3 +3967,11 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - `git log -- scripts/replay_verify.py src/core/eventstore src/services/oms` 최근 변경은 스타일/StrEnum/번역뿐이며 최근 merge-queue 커밋은 이 경로를 건드리지 않는다.
 - 로컬 재현(aios_test_backend_1): `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/test_replay_verify{,_order_chain}.py` **58 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**.
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인; 58 passed 수치로 대체).
+
+## task-25439 — pytest 24h 4회 반복 systemic 묶음 (task-25337/25345/25429/25437), 설계 결함 재조사 (2026-11-17)
+
+- `scripts/check_pytest.py`는 여전히 없다 — `pytest`는 전체 스위트 컨테이너 이름이며 공통 검사 규칙·기준선이 없다(#28/#34/task-20247/task-24841과 같은 결론).
+- task-25337/25345/25429: 카드 본문이 `scripts/replay_verify.py::_order_pair`의 설계된 pre-cutover skip 진단("seq=N from_status=SUBMITTED != folded status so far (CREATED)")이며 녹색 실행에도 출력된다. FAILED 신호가 아닌데 카드로 발행되는 것이 반복 유입 원인이다(task-21172/23608/23884/24862와 동형, 카드 분류는 fleet 코드 영역이라 저장소 변경 대상 아님).
+- task-25437: 실제 실패는 `test_check_collection_determinism.py::test_frozenset_parametrize_is_flagged_and_sorted_list_is_not`(원인 0278e7ae5). HEAD에서 로컬 재현 시 **2 passed** — 이미 정정·병합됨(merge-queue 2a5806140).
+- 판정: 저장소 측 신규 설계 결함 없음. 기준선/임계값/ignore 변경 없음(DECISION_GUIDELINES B-2). 재발 시 실패 nodeid가 실제로 `FAILED` 줄을 가진 카드인지 먼저 확인하고, replay 진단 문구만이면 비회귀로 닫는다.
+- D2: N/A(조사·기록 리프, 실행 코드 변경 없음).
