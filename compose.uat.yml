@@ -1,0 +1,100 @@
+# compose.uat.yml -- UAT(체험) 스택. 모의(PAPER) 전용.
+# postgres  127.0.0.1:15432 -> 5432
+# redis     127.0.0.1:16379 -> 6379
+# api       127.0.0.1:18000 -> 8000
+# web       127.0.0.1:18080 -> 80
+# 시크릿은 .env.uat 에만 둔다. compose 파일 자체에는 값을 적지 않는다.
+# AIOS_RUNTIME_MODE=PAPER 고정 — LIVE 키를 만들지 않는다.
+
+name: aios-uat
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - aios_uat_pgdata:/var/lib/postgresql/data
+    env_file:
+      - .env.uat
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aios} -d ${POSTGRES_DB:-aios}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "127.0.0.1:16379:6379"
+    env_file:
+      - .env.uat
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    profiles: ["migrate"]
+    env_file:
+      - .env.uat
+    environment:
+      AIOS_RUNTIME_MODE: PAPER
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env.uat
+    environment:
+      AIOS_RUNTIME_MODE: PAPER
+      CORS_ALLOWED_ORIGINS: ${UAT_WEB_ORIGIN}
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/livez', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env.uat
+    environment:
+      AIOS_RUNTIME_MODE: PAPER
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ops/uat
+      args:
+        VITE_API_BASE_URL: ${UAT_API_BASE_URL}
+    env_file:
+      - .env.uat
+    ports:
+      - "127.0.0.1:18080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  aios_uat_pgdata:
