@@ -308,6 +308,23 @@ def test_hard_fail_when_splits_below_min_oos_windows(
     assert result.hard_fail_reasons == ["VALIDATION_OOS_INSUFFICIENT"]
 
 
+def test_hard_fail_when_backtest_replay_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Negative test: a `BacktestRunError` raised while replaying a window
+    inside `run_walk_forward` is caught by the replay guard and collapses
+    into `VALIDATION_OOS_INSUFFICIENT` (hard fail), not a propagated crash
+    and not a soft PASS/FAIL with a stale Sharpe."""
+    from src.foundation.backtest.application.run_backtest import BacktestRunError
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise BacktestRunError("injected replay failure")
+
+    monkeypatch.setattr(check_mod, "run_walk_forward", _raise)
+    result = check_mod.run(_ctx(_bars(50)))
+    assert result.outcome == Outcome.FAIL
+    assert result.hard_fail_reasons == ["VALIDATION_OOS_INSUFFICIENT"]
+    assert result.metrics["reason"] == "injected replay failure"
+
+
 def _p95_ms(samples: list[float]) -> float:
     ordered = sorted(samples)
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
