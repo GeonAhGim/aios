@@ -10,6 +10,12 @@ export const catalogEnExtra = {
     run: "Run parameter sweep",
     invalid: "Check the grid and data provenance. Use unique integer values and input names declared in the script.",
   },
+  scriptEditorPage: {
+    runBacktest: "Run backtest",
+    backtestRunning: "Running backtest...",
+    backtestFailed: "Backtest failed.",
+    backtestNeedsInstrument: "Open this page with an instrument_id to run a backtest.",
+  },
   riskVerdictPanel: {
     title: "Risk / compliance verdict",
     noVerdict: "No verdict yet.",

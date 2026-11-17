@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ApiError } from "@aios/api-client";
+import { ApiError, type QuickBacktestResultView } from "@aios/api-client";
 import type { IndicatorPluginRegistry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
 import { createIndicatorPluginRegistry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
 import { clearScriptPreview, syncScriptPreview } from "@aios/chart-engine/src/plugins/scriptPreview";
@@ -7,13 +7,14 @@ import { createOverlayRegistry } from "@aios/chart-engine/src/indicators/overlay
 import type { PaneModel } from "@aios/chart-engine/src/panes/paneModel";
 import { createPaneModel } from "@aios/chart-engine/src/panes/paneModel";
 import { apiClient } from "@aios/shared-hooks";
-import { isScriptCompileErrorDetails, type CompileScriptView } from "@aios/shared-types";
+import { getApiErrorMessage, isScriptCompileErrorDetails, type CompileScriptView } from "@aios/shared-types";
 import { Alert, Button, PageHeader } from "@aios/ui-web";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ScriptEditor, type ScriptEditorMarker } from "../../components/ScriptEditor";
+import { backtestsClient, DEFAULT_TIMEFRAME, DEFAULT_VENUE } from "../chart/chartPageConfig";
 import { useTranslation } from "react-i18next";
 
 // DSL-13a: DSL-12(POST /v1/scripts/compile, 선행 task-1535) 컴파일 미리보기
@@ -40,8 +41,11 @@ const DEFAULT_SOURCE = [
 
 export type CompileScript = (source: string) => Promise<CompileScriptView>;
 
+export type RunScriptBacktest = (source: string) => Promise<QuickBacktestResultView>;
+
 interface ScriptEditorPageProps {
   compileScript?: CompileScript;
+  runBacktest?: RunScriptBacktest;
 }
 
 interface ScriptPreviewState {
@@ -80,8 +84,34 @@ function ScriptPreviewPanes({ registry }: { registry: IndicatorPluginRegistry })
   );
 }
 
-function CompilePreview({ result, onOpenChart }: { result: CompileScriptView; onOpenChart: () => void }) {
+function BacktestSummary({ result }: { result: QuickBacktestResultView }) {
   const { t } = useTranslation();
+  return (
+    <dl data-testid="compile-backtest-summary" className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      <dt className="text-fg-muted">{t("legacy.backtestPanel.t8")}</dt>
+      <dd>{result.finalEquity}</dd>
+      <dt className="text-fg-muted">{t("legacy.backtestPanel.t9")}</dt>
+      <dd>{result.fills.length}</dd>
+      <dt className="text-fg-muted">{t("legacy.backtestPanel.t10")}</dt>
+      <dd>{result.bars}</dd>
+    </dl>
+  );
+}
+
+function CompilePreview({
+  result,
+  source,
+  onOpenChart,
+  runBacktest,
+}: {
+  result: CompileScriptView;
+  source: string;
+  onOpenChart: () => void;
+  runBacktest: RunScriptBacktest;
+}) {
+  const { t } = useTranslation();
+  // The compiled source is re-sent: POST /v1/backtests/quick takes scriptSource, not a hash.
+  const backtest = useMutation({ mutationFn: runBacktest });
   return (
     <Alert tone="success">
       <p data-testid="compile-preview-hash" className="font-mono text-xs break-all">
@@ -99,15 +129,61 @@ function CompilePreview({ result, onOpenChart }: { result: CompileScriptView; on
         <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t8")}</dt>
         <dd data-testid="compile-preview-elapsed">{result.elapsedMs}ms</dd>
       </dl>
-      <Button data-testid="compile-open-chart" className="mt-2" onClick={onOpenChart}>
-        차트에서 백테스트
-      </Button>
+      <div className="mt-2 flex gap-2">
+        <Button data-testid="compile-open-chart" onClick={onOpenChart}>
+          차트에서 백테스트
+        </Button>
+        <Button
+          data-testid="compile-run-backtest"
+          onClick={() => backtest.mutate(source)}
+          disabled={backtest.isPending}
+        >
+          {backtest.isPending ? t("scriptEditorPage.backtestRunning") : t("scriptEditorPage.runBacktest")}
+        </Button>
+      </div>
+      {backtest.isError && (
+        <div role="alert" data-testid="compile-backtest-error" className="mt-2 text-xs text-danger">
+          {getApiErrorMessage(
+            backtest.error instanceof ApiError ? backtest.error.errorCode : undefined,
+            backtest.error instanceof Error ? backtest.error.message : t("scriptEditorPage.backtestFailed"),
+          )}
+        </div>
+      )}
+      {backtest.isSuccess && <BacktestSummary result={backtest.data} />}
     </Alert>
   );
 }
 
-export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(apiClient) }: ScriptEditorPageProps) {
+export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(apiClient), runBacktest }: ScriptEditorPageProps) {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const instrumentId = searchParams.get("instrument_id");
+  // Default: quick backtest over the last 7 days on the instrument chosen in the URL.
+  const defaultRunBacktest: RunScriptBacktest = async (scriptSource) => {
+    if (!instrumentId) throw new Error(t("scriptEditorPage.backtestNeedsInstrument"));
+    const end = new Date();
+    const start = new Date(end.getTime() - 7 * 24 * 3600 * 1000);
+    return backtestsClient.runQuickBacktest({
+      venue: DEFAULT_VENUE,
+      instrumentId,
+      timeframe: DEFAULT_TIMEFRAME,
+      start: start.toISOString(),
+      end: end.toISOString(),
+      initialCash: "10000",
+      scriptSource,
+      config: {
+        slippage: { kind: "fixed", bps: 0 },
+        commission: { venue: DEFAULT_VENUE, makerBps: 0, takerBps: 0, minFee: 0 },
+        latencyMs: 0,
+        partialFill: { maxParticipationPct: 1 },
+        orderTypes: { limit: false, stop: false, oco: false, trailing: false },
+        magnifierTf: null,
+        costs: { funding: false, borrowApr: null },
+        adjustments: { splits: false, dividends: false },
+        calendar: "24x7",
+      },
+    });
+  };
   const navigate = useNavigate();
   const [source, setSource] = useState(DEFAULT_SOURCE);
   const mutation = useMutation({ mutationFn: compileScript });
@@ -178,7 +254,12 @@ export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(
         )}
 
         {mutation.isSuccess && (
-          <CompilePreview result={mutation.data} onOpenChart={() => handleOpenChart(mutation.data)} />
+          <CompilePreview
+            result={mutation.data}
+            source={source}
+            onOpenChart={() => handleOpenChart(mutation.data)}
+            runBacktest={runBacktest ?? defaultRunBacktest}
+          />
         )}
         <ScriptPreviewPanes registry={preview.registry} />
       </div>
