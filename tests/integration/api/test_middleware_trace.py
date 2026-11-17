@@ -93,6 +93,17 @@ async def test_malformed_traceparent_header_is_ignored(client):
     assert _UUID_RE.match(response.headers[TRACE_ID_HEADER])
 
 
+async def test_all_zero_traceparent_trace_id_is_rejected(client):
+    """negative: W3C 명세상 all-zero trace-id는 무효다 — 채택하지 않고 새 trace_id를 만든다."""
+    response = await client.get(
+        "/openapi.json", headers={"traceparent": f"00-{'0' * 32}-0123456789abcdef-01"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers[TRACE_ID_HEADER] != str(uuid.UUID(int=0))
+    assert _UUID_RE.match(response.headers[TRACE_ID_HEADER])
+
+
 class _StructuredCapture(logging.Handler):
     """`configure_logging`의 `QueueHandler`(비동기 리스너 스레드)를 거치지 않고,
     로그 호출 시점(=`RequestContextMiddleware`의 `with bind(...)` 블록 안)에
