@@ -285,6 +285,21 @@ def test_gate_red_report_hash_uniqueness_violation() -> None:
     assert r5.report_hash != r4.report_hash
 
 
+def test_gate_red_fails_on_injected_hash_collision(inputs: dict[str, Any]) -> None:
+    """CM-15 gate_red 재현: 해시 입력 직렬화가 모든 입력에 같은 바이트를 내면
+    고유성 단언이 실제로 실패해야 한다 — 위 positive 테스트가 green인 이유가
+    검사 자체가 무력화되어서가 아님을 보인다."""
+    with patch(
+        "src.foundation.mandates.reporting.domain.trade_report.canonical_json",
+        return_value=b"collision",
+    ):
+        r1 = normalize_trade_report(**inputs)
+        inputs["instrument"] = "000660"
+        r2 = normalize_trade_report(**inputs)
+        with pytest.raises(AssertionError):
+            assert r2.report_hash != r1.report_hash
+
+
 # Module-level replay worker — picklable by ProcessPoolExecutor
 def _trade_report_replay_worker(serialized: bytes) -> list[str]:
     """별도 OS 프로세스에서 trade report 해시 재현."""
