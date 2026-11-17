@@ -209,6 +209,21 @@ async def test_gate_red_sync_violation_caught() -> None:
             pass
 
 
+async def test_gate_red_fails_on_injected_custom_limit_overrun() -> None:
+    """gate_red/fails_on_injected: 데코레이터에 주입된 limit_seconds 가
+    기본 2.0s 가 아니라 실제로 적용되는지 확인한다. 0.5s 제한에서 0.6s 는
+    위반이어야 하며, 이 검사가 침묵하면 (기본값으로 되돌아가면) 테스트가 실패한다.
+    """
+    clock = _step_clock(0.0, 0.6)
+
+    @enforce_session_policy(limit_seconds=0.5, clock=clock)
+    async def op() -> str:
+        return "ok"
+
+    with pytest.raises(SessionPolicyViolation, match="0.500s FA-17 ceiling"):
+        await op()
+
+
 # ---------------------------------------------------------------------------
 # D3: INVARIANTS I-10 "implemented != wired" — 적대적 교차 검증
 # ---------------------------------------------------------------------------
