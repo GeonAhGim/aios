@@ -210,6 +210,81 @@ def test_exactly_500_lines_is_not_a_loc_over_500_hit(tmp_path: Path) -> None:
     assert _run(tmp_path, baseline) == 0
 
 
+def test_skip_xfail_baseline_equal_current_exits_zero(tmp_path: Path) -> None:
+    """Negative: skip_xfail count in baseline matches the tree -> exit 0."""
+    # Create a file with a pytest.mark.skip decorator
+    path = tmp_path / "src" / "skipped.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "import pytest\n\n@pytest.mark.skip(reason='temp')\ndef foo(): pass\n",
+        encoding="utf-8",
+    )
+
+    baseline = _empty_baseline()
+    baseline["skip_xfail"] = 1
+
+    assert _run(tmp_path, baseline) == 0
+
+
+def test_ratchet_allow_exempts_not_implemented_error(tmp_path: Path) -> None:
+    """Negative: ``# ratchet-allow:`` in first 20 lines exempts ``NotImplementedError``."""
+    path = tmp_path / "src" / "stub.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# ratchet-allow: fail-closed adapter stub\nraise NotImplementedError('not yet')\n",
+        encoding="utf-8",
+    )
+
+    assert _run(tmp_path, _empty_baseline()) == 0
+
+
+def test_ratchet_allow_marker_not_in_first_20_lines_does_not_exempt(tmp_path: Path) -> None:
+    """Negative: ``# ratchet-allow:`` beyond line 20 does NOT exempt ``NotImplementedError``."""
+    lines = ["x = 1\n"] * 20
+    lines.append("# ratchet-allow: too late\n")
+    lines.append("raise NotImplementedError('not yet')\n")
+    path = tmp_path / "src" / "stub.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(lines), encoding="utf-8")
+
+    baseline = _empty_baseline()
+    # ratchet-allow is after line 20, so NotImplementedError counts: current=1, baseline=0 -> exit 2
+    assert _run(tmp_path, baseline) == 2
+
+
+def test_baseline_missing_metric_key_fails_closed(tmp_path: Path) -> None:
+    """Failure injection: a baseline missing a metric key (e.g. skip_xfail) fails
+    with exit code 1 (fail-closed baseline validation)."""
+    _write_src(tmp_path, "small.py", 10)
+
+    baseline = {"loc_over_500": 0}  # skip_xfail key is absent
+    # missing key -> parse error -> exit 1
+    assert _run(tmp_path, baseline) == 1
+
+
+def test_empty_scan_dirs_exits_zero(tmp_path: Path) -> None:
+    """Negative: a root with no src/tests/scripts directories exits 0."""
+    baseline_path = tmp_path / "code-ratchets-baseline.json"
+    baseline_path.write_text(json.dumps(_empty_baseline()), encoding="utf-8")
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+
+
+def test_nonzero_baseline_with_no_violations_exits_zero(tmp_path: Path) -> None:
+    """Negative: baseline has counts but no violating files exist -> exit 0."""
+    _write_src(tmp_path, "small.py", 10)
+
+    baseline = _empty_baseline()
+    baseline["loc_over_500"] = 5
+    baseline["skip_xfail"] = 3
+
+    assert _run(tmp_path, baseline) == 0
+
+
 @pytest.mark.perf
 def test_perf_scan_file_within_budget(perf_budget: PerfBudget) -> None:
     """Perf: ``_scan_file`` on a 501-line module stays under 60 ms (best of 7).
