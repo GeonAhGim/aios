@@ -228,3 +228,33 @@ def test_section_order_tamper_detected(runbook_text: str) -> None:
     # The current validator only checks section presence, not order.
     # This is a known limitation documented for D3 replay_verify.
     validate_dr_runbook(reordered)
+
+
+def test_concurrent_validation_is_consistent_across_threads(runbook_text: str) -> None:
+    """D3 동시성: 여러 스레드가 동시에 검증해도 결과가 직렬 실행과 같아야 한다.
+
+    validate_dr_runbook은 순수 함수여야 하며(전역 상태·캐시 없음), 손상된 입력은
+    모든 스레드에서 동일하게 DrRunbookValidationError로 거부되어야 한다.
+    정상 입력은 모든 스레드에서 통과, 손상 입력은 모든 스레드에서 실패해야 한다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    corrupted = runbook_text.replace("## 7. 에스컬레이션", "## 7. (removed)")
+
+    def check(text: str) -> str:
+        try:
+            validate_dr_runbook(text)
+        except DrRunbookValidationError as exc:
+            return f"rejected:{exc}"
+        return "passed"
+
+    inputs = [runbook_text, corrupted] * 50
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(check, inputs))
+
+    serial = [check(text) for text in inputs]
+    assert outcomes == serial
+    assert all(o == "passed" for o in outcomes[0::2])
+    assert all(
+        o.startswith("rejected:") and "section:## 7. 에스컬레이션" in o for o in outcomes[1::2]
+    )
