@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
 ROOT = Path(__file__).resolve().parents[3]
 _spec = importlib.util.spec_from_file_location("uat_up", ROOT / "scripts" / "uat" / "up.py")
 assert _spec is not None and _spec.loader is not None
@@ -98,3 +101,78 @@ def test_reset_confirmed_removes_volumes():
     rec = Recorder()
     assert up.cmd_reset("127.0.0.1", runner=rec, confirm=lambda _p: "yes") == 0
     assert rec.calls[0][0][-2:] == ["down", "-v"]
+
+
+# --- D2 depth: negative / failure injection / perf / red-gate reproduction ---
+
+
+class _Boom(RuntimeError):
+    pass
+
+
+def test_runner_exception_propagates_and_stops_sequence():
+    """Failure injection: a runner that raises must abort cmd_up, not be swallowed."""
+    calls: list[list[str]] = []
+
+    def exploding(cmd, env=None):
+        calls.append(list(cmd))
+        raise _Boom("docker unavailable")
+
+    with pytest.raises(_Boom):
+        _up(exploding)
+    assert len(calls) == 1
+
+
+def test_health_check_exception_propagates():
+    def bad_check(_u):
+        raise _Boom("probe crashed")
+
+    with pytest.raises(_Boom):
+        up.wait_healthy("u", check=bad_check, sleep=lambda _s: None)
+
+
+def test_reset_runner_failure_propagates():
+    def exploding(cmd, env=None):
+        raise _Boom("compose down failed")
+
+    with pytest.raises(_Boom):
+        up.cmd_reset("127.0.0.1", runner=exploding, confirm=lambda _p: "yes")
+
+
+def test_wait_healthy_timeout_rejected():
+    ticks = iter(range(0, 100_000, 10))
+    assert not up.wait_healthy(
+        "u", check=lambda _u: False, sleep=lambda _s: None, clock=lambda: next(ticks), timeout=30
+    )
+
+
+def test_reset_unconfirmed_rejected_runs_nothing():
+    rec = Recorder()
+    assert up.cmd_reset("127.0.0.1", runner=rec, confirm=lambda _p: "YES please") == 1
+    assert rec.calls == []
+
+
+def test_unhealthy_stack_denies_seed_step():
+    rec = Recorder()
+    _up(rec, healthy=False)
+    seeded = [c for c, _ in rec.calls if "seed_demo" in " ".join(c)]
+    assert not seeded
+
+
+@pytest.mark.perf
+def test_perf_cmd_up_within_budget(perf_budget: PerfBudget):
+    """cmd_up with fake runner/clock does no I/O beyond printing. Budget 100 ms CPU;
+    measured locally ~1 ms best-of-5 (>=30x headroom)."""
+    rec = Recorder()
+    sample = perf_budget.best_of(lambda: _up(rec), n=5, warmup=1)
+    assert sample.cpu_ms < 100.0, f"cmd_up cpu={sample.cpu_ms:.3f}ms budget<100ms"
+
+
+@pytest.mark.perf
+def test_perf_cmd_up_goes_red_with_10x_virtual_delay(perf_budget: PerfBudget):
+    """Red-gate reproduction: injecting a virtual delay 10x the budget must trip it."""
+    reset_virtual_totals()
+    rec = Recorder()
+    delayed = virtual_delayed_sync(lambda: _up(rec), 1.0)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(delayed, budget_ms=100.0, n=5, warmup=1, label="cmd_up_10x")
