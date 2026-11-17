@@ -117,6 +117,12 @@ def test_mwr_returns_none_when_period_has_zero_duration():
     assert mwr([], Decimal("1000"), Decimal("1100"), _T0, _T0) is None
 
 
+def test_mwr_returns_none_when_period_is_reversed():
+    """기간이 역전(end < start)되면 total_seconds가 음수 — 0 이하 가드에서
+    None을 반환해야 한다. 가드가 빠지면 이분법이 잘못된 구간으로 돈다."""
+    assert mwr([], Decimal("1000"), Decimal("1100"), _T1, _T0) is None
+
+
 def test_mwr_returns_none_when_start_value_is_not_positive():
     assert mwr([], Decimal("0"), Decimal("1100"), _T0, _T1) is None
 
