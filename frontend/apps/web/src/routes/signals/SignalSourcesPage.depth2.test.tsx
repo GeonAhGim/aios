@@ -164,16 +164,31 @@ describe("SignalSourcesPage depth2", () => {
   // Gate red reproduction
   // ---------------------------------------------------------------------------
 
-  // gate red: listSources에 큰 지연을 주면 로딩 상태가 끝나지 않고
-  // findByText가 타임아웃으로 실패함 — 같은 findByText 단언이 실제로 실패함을 확인.
-  it("gate red: listSources 지연으로 findByText가 실패함을 단언", async () => {
+  // gate red: 정상 흐름에서는 소스 이름이 보이고, 지연(응답 없음)이나 입력 파손
+  // (목록 이름이 바뀜)을 주입하면 같은 findByText 단언이 실제로 실패한다.
+  it("gate red: 정상 응답이면 소스 이름이 보이고, 지연 또는 이름 파손이면 같은 단언이 실패한다", async () => {
     const client = stubClient({
       listSources: vi.fn().mockResolvedValueOnce({ items: [source()], total: 1 }),
     });
     renderPage({ signalsClient: client });
 
-    // 정상 흐름: 소스 이름이 표시되어야 함
     await waitFor(() => expect(client.listSources).toHaveBeenCalled());
     expect(await screen.findByText("TradingView 웹훅")).toBeInTheDocument();
+
+    // 지연 주입: 응답이 끝나지 않으면 같은 단언은 타임아웃으로 거부된다(.rejects)
+    cleanup();
+    const delayed = stubClient({ listSources: vi.fn().mockReturnValue(new Promise(() => {})) });
+    renderPage({ signalsClient: delayed });
+    await expect(screen.findByText("TradingView 웹훅", {}, { timeout: 100 })).rejects.toThrow();
+
+    // 입력 파손 주입: 목록 이름이 달라지면 원래 이름 단언이 실패한다
+    cleanup();
+    renderPage({
+      signalsClient: stubClient({
+        listSources: vi.fn().mockResolvedValue({ items: [source({ name: "깨진 이름" })], total: 1 }),
+      }),
+    });
+    await expect(screen.findByText("TradingView 웹훅", {}, { timeout: 100 })).rejects.toThrow();
+    expect(await screen.findByText("깨진 이름")).toBeInTheDocument();
   });
 });
