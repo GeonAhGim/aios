@@ -184,3 +184,12 @@ def test_secret_bundle_repr_masks_values():
     )
     assert "super-secret" not in repr(bundle)
     assert "fields, masked" in repr(bundle)
+
+
+def test_order_float_quantity_is_stored_as_decimal_not_float() -> None:
+    """게이트 적색 재현: 금액 필드에 float가 들어와도 Decimal로 정규화되어야 한다
+    (CLAUDE.md §3 'Monetary amounts are Decimal, never float'). float가 그대로
+    남으면 check 규칙 위반이므로 이 단언이 적색이 된다."""
+    order = Order(**_order_kwargs(quantity=0.01))
+    assert isinstance(order.quantity, Decimal)
+    assert not isinstance(order.quantity, float)
