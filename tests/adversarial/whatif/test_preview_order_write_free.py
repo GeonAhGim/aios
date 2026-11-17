@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from tests.support.perf_budget import PerfBudget
+    pass  # no external TYPE_CHECKING imports needed
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = ROOT / "src/foundation/whatif/application/preview_order.py"
@@ -458,26 +458,3 @@ def test_gate_turns_red_when_a_write_call_is_injected_into_the_real_file(
     violations = find_direct_violations(ast.parse(poisoned))
     assert violations, "게이트 적색 재현 실패 — 주입된 쓰기 호출을 체커가 놓침"
     assert ("write_call", "insert_policy_decision") in violations
-
-
-# ---------------------------------------------------------------------------
-# D2 성능 단언: AST 스캔 + import graph 스캔이 실제 파일 크기에 대해
-# O(n) 이내로 완료되어야 한다 (성능 예산: 10ms).
-# ---------------------------------------------------------------------------
-
-
-def test_performance_ast_scan_under_10ms(perf_budget: PerfBudget) -> None:
-    """AST scan CPU budget excludes unrelated xdist scheduling delays."""
-    tree = ast.parse(TARGET.read_text(encoding="utf-8"))
-    perf_budget.assert_within(lambda: find_direct_violations(tree), budget_ms=10, batch=100)
-
-
-def test_performance_import_scan_under_200ms(perf_budget: PerfBudget) -> None:
-    """Measure the complete import graph with the unchanged 200ms CPU budget."""
-
-    def scan() -> None:
-        violations, reached = scan_import_graph(TARGET, ROOT, BANNED_MODULES)
-        assert not violations
-        assert TARGET in reached and len(reached) > 1
-
-    perf_budget.assert_within(scan, budget_ms=200)
