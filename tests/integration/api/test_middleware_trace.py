@@ -350,6 +350,27 @@ def test_rebind_tenant_same_id_twice_is_noop(
     assert spy_metrics.counters == []
 
 
+def test_rebind_tenant_mismatch_is_not_sticky_across_repeated_foreign_rebinds(spy_metrics):
+    """negative: 불일치 한 번 뒤 컨텍스트는 새 tenant_id로 갱신되므로, 같은
+    trace_id에 원래 tenant를 다시 얹으면 또 한 번 mismatch로 계수된다. 첫
+    불일치 후 값이 "고정"되어 이후 모든 불일치를 삼키는 회귀를 막는다."""
+    trace_id = uuid.uuid4()
+    first_tenant = uuid.uuid4()
+    second_tenant = uuid.uuid4()
+    ctx_second = TenantContext(tenant_id=second_tenant, subject_id=uuid.uuid4(), mfa_verified=True)
+    ctx_first = TenantContext(tenant_id=first_tenant, subject_id=uuid.uuid4(), mfa_verified=True)
+
+    with bind(trace_id=trace_id, tenant_id=first_tenant):
+        rebind_tenant(ctx_second)  # 1차 불일치 → 컨텍스트는 second_tenant로 갱신
+        rebind_tenant(ctx_first)  # 2차: second → first 는 다시 불일치
+        assert observability_context.current().tenant_id == first_tenant
+
+    assert spy_metrics.counters == [
+        (AUTH_TENANT_MISMATCH_COUNT_TOTAL, None),
+        (AUTH_TENANT_MISMATCH_COUNT_TOTAL, None),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # task-3149 DEEPEN — RequestContextMiddleware.dispatch 실패 주입 + 성능 단언.
 #
