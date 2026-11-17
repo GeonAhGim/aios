@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-16T17:15:06+00:00",
+ "refreshed_at": "2026-11-17T17:17:37+00:00",
  "specs": [
   {
    "below_floor": 0,
@@ -12,8 +12,8 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D2": 8,
-    "D3": 15
+    "D2": 7,
+    "D3": 16
    }
   },
   {
@@ -61,7 +61,7 @@
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_execution_oms_and_exchange_v1.0.md",
    "spec": "execution_oms_and_exchange",
    "total": 30,
@@ -71,8 +71,7 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 1,
-    "D3": 29
+    "D3": 30
    }
   },
   {
@@ -131,7 +130,7 @@
    "depth": {}
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_platform_observability_tenancy_api_v1.0.md",
    "spec": "platform_observability_tenancy_api",
    "total": 42,
@@ -139,11 +138,10 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
-    "D1": 1,
     "D2": 11,
-    "D3": 30
+    "D3": 31
    }
   },
   {
@@ -162,7 +160,7 @@
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_research_data_and_market_ecosystem_v1.0.md",
    "spec": "research_data_and_market_ecosystem",
    "total": 18,
@@ -172,9 +170,8 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 1,
     "D2": 9,
-    "D3": 8
+    "D3": 9
    }
   },
   {
