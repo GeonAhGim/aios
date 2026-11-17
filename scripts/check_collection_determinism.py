@@ -78,6 +78,20 @@ def collected_ids(files: list[str], seed: str, root: Path = ROOT) -> list[str] |
     return [line.strip() for line in result.stdout.splitlines() if "::" in line]
 
 
+def _match_file(path: str, files: list[str]) -> str | None:
+    """Map a collected node path to one of ``files``, or None if unmatched."""
+    # pytest may prefix tmp_path-based tests with a temp dir name, so match on the suffix
+    for f in files:
+        if path == f or path.endswith("/" + f):
+            return f
+    # fall back to matching on the basename alone
+    basename = path.rsplit("/", 1)[-1]
+    for f in files:
+        if f.split("/")[-1] == basename:
+            return f
+    return None
+
+
 def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
     first, second = (collected_ids(files, seed, root) for seed in SEEDS)
     # 수집 자체가 실패한 시드가 있으면 — 해시 시드에 따라 수명이 달라진다는 뜻
@@ -91,23 +105,9 @@ def unstable_files(files: list[str], root: Path = ROOT) -> list[str]:
     by_file: dict[str, tuple[list[str], list[str]]] = {f: ([], []) for f in files}
     for ids, slot in ((first, 0), (second, 1)):
         for nodeid in ids:
-            path = nodeid.split("::")[0].replace("\\", "/")
-            # tmp_path 기반 테스트에서 pytest가 temp 디렉터리 이름을
-            # 경로 앞에 붙이는 경우를 위해 끝부분 일치로 매칭
-            matched = False
-            for f in files:
-                if path == f or path.endswith("/" + f):
-                    by_file[f][slot].append(nodeid)
-                    matched = True
-                    break
-            if not matched:
-                # 마지막 컴포넌트basename만으로 매칭 시도
-                basename = path.rsplit("/", 1)[-1]
-                for f in files:
-                    if f.split("/")[-1] == basename:
-                        by_file[f][slot].append(nodeid)
-                        matched = True
-                        break
+            matched = _match_file(nodeid.split("::")[0].replace("\\", "/"), files)
+            if matched is not None:
+                by_file[matched][slot].append(nodeid)
     return [f for f, (a, b) in by_file.items() if a != b]
 
 
