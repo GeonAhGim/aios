@@ -8,6 +8,9 @@ SCAFFOLD 완료 조건)". 이 테스트가 그 최초 실행이다 — 실제 �
 
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from src.core.safety import watchdog_simulator
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import Diagnosis, FailureDomain
@@ -239,3 +242,29 @@ async def test_watchdog_simulator_fails_on_injected_bug_disabling_liquidation(
 
     assert report.false_negative_rate > 0.0
     assert any(r.final_action == WatchdogAction.NORMAL for r in report.results if r.expect_trigger)
+
+
+def test_watchdog_snapshot_rejects_malformed_loss_pct():
+    """Negative: a non-numeric loss_pct must be refused at the model boundary."""
+    with pytest.raises(ValidationError):
+        WatchdogSnapshot(loss_pct="not-a-number", unresponsive_sec=0.0, exchange_healthy=True)
+
+
+def test_watchdog_decision_rejects_unknown_action():
+    """Negative: an action outside NORMAL/HALT/LIQUIDATE must never construct."""
+    from src.core.safety.watchdog import WatchdogDecision
+
+    with pytest.raises(ValidationError):
+        WatchdogDecision(action="IGNORE", reason="x")
+
+
+def test_read_heartbeat_age_corrupt_file_is_infinite_not_fresh(tmp_path):
+    """Negative: a corrupt heartbeat must fail closed (inf), never look fresh."""
+    from src.core.safety.heartbeat import read_heartbeat_age_seconds
+
+    path = tmp_path / "corrupt.heartbeat"
+    path.write_text("garbage", encoding="utf-8")
+
+    assert read_heartbeat_age_seconds(path) == float("inf")
+    with pytest.raises(AssertionError):
+        assert read_heartbeat_age_seconds(path) < 1.0
