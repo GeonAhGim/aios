@@ -329,3 +329,73 @@ async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99(
     p99 = cpu_ms_samples[int(len(cpu_ms_samples) * 0.99)]
     assert p99 < 5.0, f"suppressed on_breach p99={p99:.3f}ms exceeds 5ms budget"
     assert len(gateway.calls) == 1  # only the initial, unsuppressed send
+
+
+@pytest.mark.asyncio
+async def test_suppressed_duplicate_does_not_extend_the_window() -> None:
+    """Negative/boundary: a breach that is suppressed must NOT refresh the
+    reservation timestamp. Dispatch at 0s, duplicate at 200s is suppressed,
+    and a breach at 400s is past the 5-minute window measured from the
+    original 0s send, so it MUST dispatch again."""
+    gateway = FakeGateway()
+    service = RiskAlertService(gateway, _clock([0, 200, 400]))
+
+    await service.on_breach(_event(hard=True))  # 0s -> dispatch
+    await service.on_breach(_event(hard=True))  # 200s -> suppressed
+    await service.on_breach(_event(hard=True))  # 400s -> window measured from 0s
+
+    assert len(gateway.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_distinct_limit_ids_under_concurrency_are_not_suppressed_together() -> None:
+    """Negative: concurrent breaches on five different limit_ids for the same
+    tenant and severity at one instant must each dispatch. The lock guards
+    the check-then-reserve step per key; it must not collapse unrelated keys
+    into a single dispatch."""
+    gateway = FakeGateway(delay=0.001)
+    fixed_now = _BASE
+
+    def _fixed_clock() -> datetime:
+        return fixed_now
+
+    service = RiskAlertService(gateway, _fixed_clock)
+    limit_ids = [f"SYMBOL:COIN{i}-USDT:GROSS_NOTIONAL_PCT" for i in range(5)]
+
+    await asyncio.gather(
+        *(
+            service.on_breach(
+                LimitBreachEvent(tenant_id=TENANT_A, user_id=USER_A, limit_id=lid, hard=True)
+            )
+            for lid in limit_ids
+        )
+    )
+
+    assert len(gateway.calls) == 5
+    assert {c["limit_id"] for c in gateway.calls} == set(limit_ids)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_during_in_flight_failed_send_is_suppressed_then_slot_released() -> None:
+    """Negative: while the first send for a key is still in flight, a
+    concurrent duplicate is suppressed by the reservation even though that
+    first send later fails. Once the failure releases the slot, the next
+    breach must dispatch. Nothing is delivered while the send is failing."""
+    gateway = FakeGateway(delay=0.01, raise_on_call=True)
+    fixed_now = _BASE
+
+    def _fixed_clock() -> datetime:
+        return fixed_now
+
+    service = RiskAlertService(gateway, _fixed_clock)
+
+    await asyncio.gather(
+        service.on_breach(_event(hard=True)),  # reserves, then fails
+        service.on_breach(_event(hard=True)),  # suppressed by in-flight reservation
+    )
+    assert gateway.calls == []
+
+    gateway.raise_on_call = False
+    await service.on_breach(_event(hard=True))  # slot released -> dispatches
+
+    assert len(gateway.calls) == 1
