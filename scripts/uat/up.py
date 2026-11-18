@@ -102,7 +102,7 @@ def cmd_up(
     steps: list[list[str]] = [
         compose("up", "-d", "--build", "postgres", "redis"),
         compose("--profile", "migrate", "run", "--rm", "migrate"),
-        compose("up", "-d", "--build", "api", "worker", "web"),
+        compose("up", "-d", "--build", "api", "web"),
     ]
     for step in steps:
         rc = runner(step, env)

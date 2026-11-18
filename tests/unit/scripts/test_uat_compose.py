@@ -53,3 +53,9 @@ def test_all_ports_bind_loopback_only() -> None:
     for name, service in _services().items():
         for port in service.get("ports", []):
             assert str(port).startswith("127.0.0.1:"), f"{name}: 루프백 외 바인딩 {port}"
+
+
+def test_watchdog_worker_not_started_by_default() -> None:
+    """회귀: 하트비트 없는 워치독이 전역 킬스위치를 켜 모의 주문을 막았다 -- 기본 기동에서 제외."""
+    worker = _services()["worker"]
+    assert worker.get("profiles") == ["watchdog"]

@@ -44,7 +44,7 @@ def test_up_order_and_args(capsys):
     assert cmds[0][:6] == ["docker", "compose", "-f", "compose.uat.yml", "up", "-d"]
     assert cmds[0][-2:] == ["postgres", "redis"] and "--build" in cmds[0]
     assert cmds[1][-5:] == ["--profile", "migrate", "run", "--rm", "migrate"][-5:]
-    assert cmds[2][-3:] == ["api", "worker", "web"]
+    assert cmds[2][-3:] == ["api", "web"]
     assert cmds[3][1].endswith("seed_demo.py")
     env = rec.calls[0][1]
     assert env["UAT_WEB_ORIGIN"] == "http://100.1.2.3:18080"
