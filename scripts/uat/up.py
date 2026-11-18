@@ -112,6 +112,16 @@ def cmd_up(
     if not wait_healthy(f"{api_url}/livez", check=check, sleep=sleep, clock=clock):
         print(f"API health check failed within {HEALTH_TIMEOUT_S:.0f}s: {api_url}", file=sys.stderr)
         return 1
+    rc = runner(
+        compose(
+            "exec", "-T", "api", "python", "-m", "src.foundation.market_data.application.uat_seed"
+        ),
+        env,
+    )
+    if rc != 0:
+        print(
+            "WARNING: market-data seed failed; continuing without UAT market data", file=sys.stderr
+        )
     rc = runner([sys.executable, "scripts/uat/seed_demo.py", "--base-url", api_url], env)
     if rc != 0:
         return rc
