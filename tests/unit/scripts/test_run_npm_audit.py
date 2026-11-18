@@ -154,7 +154,8 @@ def test_main_passes_with_valid_exception_and_fails_without(
 def test_repo_exception_file_is_valid_and_unexpired() -> None:
     ignore = _PATH.parents[1] / "frontend" / ".npm-audit-ignore"
     ids = mod.load_ignored_ids(ignore, today=dt.date.today())
-    assert GHSA.lower() in ids
+    # The picomatch exception was removed once the audit stopped reporting it; no stale entries.
+    assert GHSA.lower() not in ids
 
 
 @pytest.mark.perf
