@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-LoginPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 개인 트레이더(투자자) — PERSONAS :22(J1~J6 전체 [확인]), :40(시작·온보딩 J1 = P1) |
+| 목적(한 문장) | 이메일·비밀번호(설정한 계정은 2단계 인증 코드 포함)로 로그인해 보호 화면(/dashboard 또는 `?next=`으로 지정한 경로)으로 복귀한다. LoginPage.tsx:40-44(`login.mutateAsync` 후 `navigate(sanitizeNextPath(...))`), :14-17(`next`는 `/`로 시작하고 `//`가 아닐 때만 신뢰, 기본값 `/dashboard`) |
+| 진입 조건 | `/login`은 공개 라우트 — router.tsx:86(`protect()`로 감싸지 않음). 보호 라우트가 세션 만료·미로그인 때 남긴 `?next=`로 복귀 — LoginPage.tsx:11-13. `protect()` 본문(router.tsx:70)은 ProtectedRoute.tsx:18에서 `loginRedirect = /login?next=...`로 리다이렉트(미확인: `ProtectedRoute` 컴포넌트 직접 읽음). 회원가입 링크 — LoginPage.tsx:115(`/signup`) |
+| 사용자 준비물 | 가입된 이메일, 비밀번호. 2단계 인증을 설정한 계정은 인증 코드 필요 — LoginPage.tsx:88(`hint="설정한 경우만 입력"`). 인증 앱의 구체적 이름과 잠금 해제 절차 — 미확인 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
