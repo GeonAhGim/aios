@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-MfaSetupPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더). 근거: `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`에 P1 핵심 과업이 "J1~J6 전체"로 명시. 가입 후 MFA 설정은 모든 페르소나 공통 진입이므로 P1로 기록. |
+| 목적(한 문장) | 가입 직후 TOTP 인증 앱을 연결하고 6자리 코드로 검증해 계정의 2단계 인증을 켠다. 근거: `frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:34-35`(필수 게이트 주석), `:72`(검증 성공 시 `/onboarding/risk-assessment`로 이동). |
+| 진입 조건 | 로그인 토큰 보유 + `me.mfaEnabled === false`. 근거: 라우트 `frontend/apps/web/src/router.tsx:87`, `protect()`로 감싸지며 `router.tsx:70-72` 기준 `ProtectedRoute`를 거친다. 기능 플래그 게이트 없음(플래그는 `router.tsx:93,101,109`의 connect/demo에만 존재). `frontend/apps/web/src/components/ProtectedRoute.tsx:20-22`: 토큰 없으면 `/login`으로 보냄. `ProtectedRoute.tsx:32-34`: `mfaEnabled` false이면 이 경로로 강제 리다이렉트. 가입 성공 후 진입은 `frontend/apps/web/src/routes/auth/SignupPage.tsx:64`. `frontend/apps/web/src/components/layout/navItems.ts:91-93`에 따라 상시 내비게이션 진입점이 아님. |
+| 사용자 준비물 | TOTP 인증 앱(Google Authenticator 등, 근거 `MfaSetupPage.tsx:81` 부제 — 하드코딩 문구), 가입 직후의 로그인 세션, 인증 앱에 표시되는 6자리 코드. QR 스캔 불가 시 수동 입력용 코드 사용(`legacy.mfaSetupPage.t4`, `MfaSetupPage.tsx:95`). |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
