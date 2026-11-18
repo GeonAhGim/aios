@@ -75,7 +75,8 @@ def make_secrets() -> dict[str, str]:
         "CRED_HEX64": secrets.token_hex(_KEY_BYTES),
         "JWT_SECRET_KEY": secrets.token_hex(_KEY_BYTES),
         "CREDENTIAL_ENCRYPTION_KEY": secrets.token_hex(_KEY_BYTES),
-        "UAT_DEMO_PASSWORD": secrets.token_urlsafe(16),
+        # 서버 정책(12자 이상, 대·소문자·숫자·특수문자)을 항상 만족하도록 고정 접두를 둔다.
+        "UAT_DEMO_PASSWORD": "Aa1!" + secrets.token_urlsafe(16),
     }
 
 

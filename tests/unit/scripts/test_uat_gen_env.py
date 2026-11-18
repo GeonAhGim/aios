@@ -399,3 +399,11 @@ def test_demo_account_written_for_seed_and_user_login() -> None:
     env = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
     assert env["UAT_DEMO_EMAIL"].endswith("@demo.uat")
     assert env["UAT_DEMO_PASSWORD"] == "demo-pass-xyz"
+
+
+def test_generated_demo_password_satisfies_server_policy() -> None:
+    """회귀: token_urlsafe만으로는 비밀번호 정책을 보장하지 못해 가입이 401로 거부될 수 있다."""
+    from src.services.auth_service import _password_strong_enough
+
+    for _ in range(200):
+        assert _password_strong_enough(make_secrets()["UAT_DEMO_PASSWORD"])
