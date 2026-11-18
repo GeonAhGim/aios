@@ -29,10 +29,14 @@ API_PORT: int = 18000
 WEB_PORT: int = 18080
 DEFAULT_WEB_ORIGIN: str = "http://127.0.0.1:18080"
 DEFAULT_OUT: str = ".env.uat"
+DB_USER: str = "aios"
+DB_NAME: str = "aios"
 
 # Keys that this script will fill in (order matters for readability).
 _TARGET_KEYS: list[str] = [
     "DATABASE_URL",
+    "POSTGRES_USER",
+    "POSTGRES_DB",
     "POSTGRES_PASSWORD",
     "JWT_SIGNING_KEYS",
     "JWT_ACTIVE_KID",
@@ -98,10 +102,14 @@ def build_env(
         stripped = line.split("=", 1)[0].strip() if "=" in line else ""
         if stripped == "DATABASE_URL":
             result.append(
-                f"DATABASE_URL=postgresql+asyncpg://aios:"
+                f"DATABASE_URL=postgresql+asyncpg://{DB_USER}:"
                 f"{secrets_data['POSTGRES_PASSWORD']}"
-                f"@postgres:5432/aios\n"
+                f"@postgres:5432/{DB_NAME}\n"
             )
+        elif stripped == "POSTGRES_USER":
+            result.append(f"POSTGRES_USER={DB_USER}\n")
+        elif stripped == "POSTGRES_DB":
+            result.append(f"POSTGRES_DB={DB_NAME}\n")
         elif stripped == "POSTGRES_PASSWORD":
             result.append(f"POSTGRES_PASSWORD={secrets_data['POSTGRES_PASSWORD']}\n")
         elif stripped == "JWT_SIGNING_KEYS":
@@ -134,6 +142,12 @@ def build_env(
     seen = {ln.split("=", 1)[0].strip() for ln in result if "=" in ln}
     if result and not result[-1].endswith(NL):
         result.append(NL)
+    # postgres 컨테이너가 DATABASE_URL과 같은 사용자·DB로 초기화되도록 항상 명시한다(미지정이면
+    # 이미지 기본값 postgres로 만들어져 api/migrate가 "password authentication failed"가 된다).
+    if "POSTGRES_USER" not in seen:
+        result.append(f"POSTGRES_USER={DB_USER}" + NL)
+    if "POSTGRES_DB" not in seen:
+        result.append(f"POSTGRES_DB={DB_NAME}" + NL)
     if "POSTGRES_PASSWORD" not in seen:
         result.append(f"POSTGRES_PASSWORD={secrets_data['POSTGRES_PASSWORD']}" + NL)
     return "".join(result)

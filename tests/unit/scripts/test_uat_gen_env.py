@@ -109,6 +109,23 @@ class TestBuildEnv:
         else:
             pytest.fail("POSTGRES_PASSWORD not found")
 
+    def test_postgres_user_and_db_match_database_url(self):
+        """회귀: POSTGRES_USER/DB가 없으면 postgres 컨테이너가 기본 사용자 postgres로 초기화돼
+        DATABASE_URL(aios)과 어긋나 'password authentication failed'가 된다(2026-11-18 첫 기동)."""
+        out = build_env(_MINIMAL_TEMPLATE, "http://x", _SECRETS)
+        env = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+        url = env["DATABASE_URL"]
+        assert url.startswith(f"postgresql+asyncpg://{env['POSTGRES_USER']}:")
+        assert url.endswith(f"@postgres:5432/{env['POSTGRES_DB']}")
+        assert env["POSTGRES_USER"] == "aios"
+        assert env["POSTGRES_DB"] == "aios"
+
+    def test_template_postgres_user_is_overridden_not_duplicated(self):
+        out = build_env("POSTGRES_USER=postgres\nPOSTGRES_DB=other\n", "http://x", _SECRETS)
+        assert out.count("POSTGRES_USER=") == 1
+        assert "POSTGRES_USER=aios" in out
+        assert "POSTGRES_DB=aios" in out
+
     def test_jwt_signing_keys_format(self):
         out = build_env(_MINIMAL_TEMPLATE, "http://x", _SECRETS)
         lines = [line.split("=", 1) for line in out.splitlines() if "=" in line]
