@@ -78,6 +78,60 @@ async def test_121st_read_request_is_rejected_with_429_envelope(
     assert response.headers["X-Trace-Id"]
 
 
+async def test_429_response_includes_cors_header(
+    client: AsyncClient,
+) -> None:
+    """429 rate-limit rejection must carry `Access-Control-Allow-Origin` so
+    that cross-origin browsers can read the response body.
+
+    RateLimitMiddleware sits outside CORSMiddleware (outermost registration
+    per PLT-25); responses rejected before reaching CORSMiddleware would
+    otherwise lack CORS headers and cause "Failed to fetch" on the frontend.
+    """
+    limit = POLICIES["read"].limit
+
+    for _ in range(limit):
+        await client.get("/openapi.json")
+
+    response = await client.get("/openapi.json")
+
+    assert response.status_code == 429
+    assert response.headers.get("Access-Control-Allow-Origin") == "*"
+
+
+async def test_429_sanitizes_unsafe_request_id(
+    client: AsyncClient,
+) -> None:
+    """ULID or arbitrary strings in `X-Request-ID` must not corrupt the
+    429 response header — `_accept_or_new` accepts safe tokens (UUID, ULID)
+    and replaces unsafe ones (spaces, newlines, too-long) with a fresh id.
+
+    Regression: the old code used `request.headers.get()` raw, which could
+    pass control characters into response headers or log lines.
+    """
+    limit = POLICIES["read"].limit
+
+    for _ in range(limit):
+        await client.get("/openapi.json")
+
+    # ULID — safe, should be echoed back
+    response = await client.get(
+        "/openapi.json",
+        headers={"X-Request-ID": "01M7PM0JK2XG3E6P15WD6C7DKN"},
+    )
+    assert response.status_code == 429
+    assert response.headers["X-Request-ID"] == "01M7PM0JK2XG3E6P15WD6C7DKN"
+
+    # Unsafe: contains spaces — must be replaced with a fresh hex id
+    response = await client.get(
+        "/openapi.json",
+        headers={"X-Request-ID": "bad id with spaces"},
+    )
+    assert response.status_code == 429
+    assert response.headers["X-Request-ID"] != "bad id with spaces"
+    assert len(response.headers["X-Request-ID"]) == 32  # uuid4().hex
+
+
 async def test_concurrent_storm_admits_exactly_limit_requests_no_partial_overrun(
     client: AsyncClient,
 ) -> None:

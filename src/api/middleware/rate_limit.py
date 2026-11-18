@@ -174,6 +174,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             rejection.headers["RateLimit-Limit"] = str(policy.limit)
             rejection.headers["RateLimit-Remaining"] = "0"
             rejection.headers["RateLimit-Reset"] = str(decision.retry_after_s)
+            # CORS: RateLimitMiddleware sits outside CORSMiddleware (outermost
+            # registration order per PLT-25); this 429 path never reaches
+            # CORSMiddleware, so we must emit the CORS header ourselves.
+            rejection.headers["Access-Control-Allow-Origin"] = "*"
             return rejection
 
         response: Response = await call_next(request)
