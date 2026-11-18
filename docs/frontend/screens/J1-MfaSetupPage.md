@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-MfaSetupPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — 온보딩 여정 J1의 첫 단계. [확인] `PERSONAS_AND_JOURNEYS.md` §3: J1 시작·온보딩의 주 페르소나. |
+| 목적(한 문장) | MFA(2단계 인증)를 설정하여 계정 보안을 강화한다. [확인] 화면 문구 `legacy.mfaSetupPage.title1` "2단계 인증 설정 (필수)" (:80). |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:87` — `/onboarding/mfa-setup` 라우트는 `protect(<MfaSetupPage />)`로 감김. `frontend/apps/web/src/components/ProtectedRoute.tsx:32-33` — `me.mfaEnabled === false`일 때 `/onboarding/mfa-setup`로 리다이렉트. 즉 MFA 미설정 상태의 인증된 사용자만 진입 가능. [확인] |
+| 사용자 준비물 | QR 코드를 스캔할 인증 앱(Google Authenticator 등). [확인] `MfaSetupPage.tsx:81` subtitle "Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요". |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
