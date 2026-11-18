@@ -98,3 +98,81 @@ def test_reset_confirmed_removes_volumes():
     rec = Recorder()
     assert up.cmd_reset("127.0.0.1", runner=rec, confirm=lambda _p: "yes") == 0
     assert rec.calls[0][0][-2:] == ["down", "-v"]
+
+
+# --- D2 depth: negative / failure injection / perf / gate-red ---
+
+
+def test_up_rejects_runner_failure_at_every_step():
+    """Negative: a failing command at any step returns non-zero and stops the sequence."""
+    for step in range(3):
+        rec = Recorder(fail_at=step)
+        assert _up(rec) != 0
+        assert len(rec.calls) == step + 1
+
+
+def test_up_health_failure_denies_seed_and_returns_nonzero():
+    """Negative: unhealthy stack is refused -- no seed command and a non-zero exit."""
+    rec = Recorder()
+    code = _up(rec, healthy=False)
+    assert code != 0
+    assert [c for c, _ in rec.calls if "seed_demo" in " ".join(c)] == []
+
+
+def test_wait_healthy_timeout_rejected_returns_false():
+    """Negative: wait_healthy never succeeding returns a falsy result instead of raising."""
+    clock = iter(range(0, 100_000, 100)).__next__
+    result = up.wait_healthy("u", check=lambda _u: False, sleep=lambda _s: None, clock=clock)
+    assert not result
+
+
+def test_reset_invalid_answer_rejected_keeps_volumes():
+    """Negative: anything but exact confirmation never issues a command."""
+    rec = Recorder()
+    with pytest.raises(AssertionError):
+        assert up.cmd_reset("127.0.0.1", runner=rec, confirm=lambda _p: "YES!") == 0
+    assert rec.calls == []
+
+
+def test_runner_exception_propagates_and_stops_sequence():
+    """Failure injection: a runner raising mid-sequence aborts without running later steps."""
+    rec = Recorder()
+
+    def boom(cmd, env=None):
+        rec(cmd, env)
+        if len(rec.calls) == 2:
+            raise OSError("docker unavailable")
+        return 0
+
+    with pytest.raises(OSError):
+        up.cmd_up(
+            "127.0.0.1",
+            runner=boom,
+            check=lambda _u: True,
+            sleep=lambda _s: None,
+            clock=iter(range(0, 10_000, 50)).__next__,
+            env_exists=lambda: True,
+        )
+    assert len(rec.calls) == 2
+
+
+@pytest.mark.perf
+def test_perf_cmd_up_within_budget(perf_budget):
+    """Perf: injected-runner cmd_up best-of-5 CPU time under 50 ms.
+
+    Budget rationale: pure in-memory command construction; local measurement is well under
+    1 ms (expected <1.5 ms incl. stdout capture), so 50 ms leaves >30x headroom.
+    """
+    sample = perf_budget.best_of(lambda: _up(Recorder()), n=5, warmup=1)
+    assert sample.cpu_ms < 50.0, f"cpu={sample.cpu_ms:.3f}ms budget<50ms"
+
+
+@pytest.mark.perf
+def test_perf_cmd_up_goes_red_with_10x_virtual_delay(perf_budget):
+    """Gate-red reproduction: a 500 ms virtual delay (10x budget) makes the budget fail."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    slow = virtual_delayed_sync(lambda: _up(Recorder()), 0.5)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(slow, budget_ms=50.0, n=3, warmup=1, label="cmd_up_10x")
