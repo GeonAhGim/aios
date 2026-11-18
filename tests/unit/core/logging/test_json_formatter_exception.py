@@ -98,26 +98,27 @@ def test_exception_message_truncated_to_500_chars():
 
 def test_exception_stack_truncated_to_8000_chars():
     """exception.stack은 포맷된 스택 트레이스 최대 8000자, 초과 시 [...truncated]."""
-
-    # Build a deep call stack so formatted traceback exceeds 8000 chars.
-    def _recurse(n):
-        if n <= 0:
-            raise RecursionError("deep")
-        return _recurse(n - 1)
+    # RecursionError tracebacks are limited by the interpreter and won't
+    # exceed a few hundred chars — build a synthetic long traceback instead.
+    long_tb_lines: list[str] = []
+    for i in range(2000):
+        long_tb_lines.append(f'  File "/fake/path_{i}.py", line {i}, in fake_func\n')
+        long_tb_lines.append(f"    raise RuntimeError('frame {i}')\n")
+    long_tb = (
+        "Traceback (most recent call last):\n" + "".join(long_tb_lines) + "RuntimeError: boom\n"
+    )
 
     try:
-        _recurse(500)
-    except RecursionError:
+        raise RuntimeError("overflow")
+    except RuntimeError:
         exc_type = sys.exc_info()
-        record = _make_record(exc_info=exc_type)
+        with patch("traceback.format_exception", return_value=[long_tb]):
+            record = _make_record(exc_info=exc_type)
+            data = _format(record)
 
-    data = _format(record)
     stack = data["exception"]["stack"]
     assert len(stack) <= 8000
-    if len(traceback.format_exception(*exc_type)) > 0:
-        # With 500 recursion depth the formatted stack is very long;
-        # verify truncation happened.
-        assert stack.endswith("[truncated]")
+    assert stack.endswith("[truncated]")
 
 
 def test_exception_stack_contains_traceback_lines():
