@@ -31,6 +31,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Pre-create the shared heartbeat dir so a fresh named volume inherits app ownership.
+RUN mkdir -p /app/runtime && chown app:app /app/runtime
+
 USER app
 
 CMD ["python", "-m", "src.watchdog_process"]

@@ -52,7 +52,7 @@ from decimal import Decimal
 import asyncpg
 
 from src.core.loader.secret_loader import load_env_secrets
-from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH
+from src.core.safety.heartbeat import resolve_heartbeat_path
 from src.core.safety.market_correlation import is_market_wide_move
 from src.core.safety.split_brain import CheckFn, Diagnosis, SplitBrainDiagnostics
 from src.core.safety.watchdog import (
@@ -224,7 +224,7 @@ async def run_forever(pool: asyncpg.Pool) -> None:
     service = WatchdogService(
         compute_equity=compute_equity,
         health_check=exchange_health_cache.get,
-        heartbeat_path=DEFAULT_HEARTBEAT_PATH,
+        heartbeat_path=resolve_heartbeat_path(),
     )
     split_brain = SplitBrainDiagnostics()
     kill_switch = build_kill_switch_service(pool)
