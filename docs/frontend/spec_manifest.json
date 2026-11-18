@@ -1,0 +1,119 @@
+{
+ "_설명": "Phase 0 화면 명세 대상(J1~J3). 사실 추출기·명세 발행기의 단일 입력.",
+ "screens": [
+  {
+   "id": "J1-SignupPage",
+   "journey": "J1",
+   "route": "/signup",
+   "page": "frontend/apps/web/src/routes/auth/SignupPage.tsx"
+  },
+  {
+   "id": "J1-LoginPage",
+   "journey": "J1",
+   "route": "/login",
+   "page": "frontend/apps/web/src/routes/auth/LoginPage.tsx"
+  },
+  {
+   "id": "J1-MfaSetupPage",
+   "journey": "J1",
+   "route": "/onboarding/mfa-setup",
+   "page": "frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx"
+  },
+  {
+   "id": "J1-RiskAssessmentPage",
+   "journey": "J1",
+   "route": "/onboarding/risk-assessment",
+   "page": "frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx"
+  },
+  {
+   "id": "J1-OnboardingFlowPage",
+   "journey": "J1",
+   "route": "/onboarding/first-run",
+   "page": "frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.tsx"
+  },
+  {
+   "id": "J1-ConnectionWizardPage",
+   "journey": "J1",
+   "route": "/onboarding/connect",
+   "page": "frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx"
+  },
+  {
+   "id": "J1-DemoModePage",
+   "journey": "J1",
+   "route": "/onboarding/demo",
+   "page": "frontend/apps/web/src/routes/onboarding/DemoModePage.tsx"
+  },
+  {
+   "id": "J1-DemoChartPage",
+   "journey": "J1",
+   "route": "/onboarding/demo/:instrumentId",
+   "page": "frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx"
+  },
+  {
+   "id": "J1-ExchangeManagementPage",
+   "journey": "J1",
+   "route": "/exchanges",
+   "page": "frontend/apps/web/src/routes/exchanges/ExchangeManagementPage.tsx"
+  },
+  {
+   "id": "J1-DashboardPage",
+   "journey": "J1",
+   "route": "/dashboard",
+   "page": "frontend/apps/web/src/routes/dashboard/DashboardPage.tsx"
+  },
+  {
+   "id": "J2-ScreenerPage",
+   "journey": "J2",
+   "route": "/screener",
+   "page": "frontend/apps/web/src/routes/screener/ScreenerPage.tsx"
+  },
+  {
+   "id": "J2-ChartPage",
+   "journey": "J2",
+   "route": "/chart",
+   "page": "frontend/apps/web/src/routes/chart/ChartPage.tsx"
+  },
+  {
+   "id": "J2-ScriptEditorPage",
+   "journey": "J2",
+   "route": "/scripts/editor",
+   "page": "frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx"
+  },
+  {
+   "id": "J3-ExecutionControlPage",
+   "journey": "J3",
+   "route": "/executions",
+   "page": "frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx"
+  },
+  {
+   "id": "J3-PortfolioPage",
+   "journey": "J3",
+   "route": "/portfolio",
+   "page": "frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx"
+  },
+  {
+   "id": "J3-MandatesPage",
+   "journey": "J3",
+   "route": "/mandates",
+   "page": "frontend/apps/web/src/routes/mandates/MandatesPage.tsx"
+  },
+  {
+   "id": "J3-MandatePage",
+   "journey": "J3",
+   "route": "/compliance/mandate",
+   "page": "frontend/apps/web/src/routes/compliance/MandatePage.tsx"
+  },
+  {
+   "id": "J3-AlertsPage",
+   "journey": "J3",
+   "route": "/alerts",
+   "page": "frontend/apps/web/src/routes/alerts/AlertsPage.tsx"
+  },
+  {
+   "id": "J3-NotificationCenterPage",
+   "journey": "J3",
+   "route": "/notifications",
+   "page": "frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx"
+  }
+ ]
+}

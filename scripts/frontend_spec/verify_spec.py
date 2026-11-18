@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DIRS = ("docs/frontend/screens", "docs/frontend/xcut")
+DEFAULT_DIRS = ("docs/frontend/screens", "docs/frontend/xcut", "docs/frontend/facts")
 BASELINE = ROOT / "docs" / "frontend" / ".spec_verify_baseline.json"
 SKIP_DIRS = {"node_modules", ".git", "dist", "__pycache__", ".venv"}
 

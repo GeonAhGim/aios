@@ -12,6 +12,14 @@
 | `WIRING_FINDINGS_2026-11-19.md` | 프런트-백엔드 배선 진위 점검 결과(실스택) | 작성 |
 | `WIRING_REPORT.md` | 배선 전수 점검 생성 보고서(`scripts/uat/wiring_probe.py`) | 생성물 |
 | `screens/` | 화면별 명세 — J1~J3 먼저(Phase 0), 나머지는 Phase 1 | 작성 중 |
+| `spec_manifest.json` | Phase 0 화면 명세 대상 목록(사실 추출기·발행기의 단일 입력) | 생성 |
+| `facts/` | **자동 추출 사실 시트**(코드에서 기계가 뽑음, 줄 번호 인용, 편집 금지) | 생성물 |
+
+## 명세 작성 절차 (신뢰 규칙)
+
+1. 사실은 `facts/<Page>.facts.md`에서 가져온다(코드에서 기계가 추출, `python -m scripts.frontend_spec.gen_facts`로 재생성, 최신성은 테스트가 검사).
+2. 명세 표의 모든 코드 주장은 `파일:줄` 인용과 함께 쓰고, `python -m scripts.frontend_spec.verify_spec --check`가 통과해야 한다(없는 필드·틀린 줄 번호는 기계가 적발).
+3. 사람/모델의 **판단**(상태 매트릭스, 갭, 수용 기준)은 사실 시트와 구분해 "해석"으로 표시한다.
 
 ## 규칙
 
