@@ -9,6 +9,8 @@
 | `UNSPECIFIED_ACTIONS.md` | 미규정 액션 레지스트리(D4) | 시작 |
 | `PRO_WORKSPACE_DESIGN.md` | Pro Workspace 설계(FE-9): 패널·맥락 그룹·다중 거래소 정규화·밀도 단계 | v0.2(비교 분석 반영, 기본안 승인) |
 | `COMPETITIVE_ANALYSIS.md` | 경쟁 제품 비교와 설계 결정 근거 | 작성(출처 6건) |
+| `WIRING_FINDINGS_2026-11-19.md` | 프런트-백엔드 배선 진위 점검 결과(실스택) | 작성 |
+| `WIRING_REPORT.md` | 배선 전수 점검 생성 보고서(`scripts/uat/wiring_probe.py`) | 생성물 |
 | `screens/` | 화면별 명세 — J1~J3 먼저(Phase 0), 나머지는 Phase 1 | 작성 중 |
 
 ## 규칙
