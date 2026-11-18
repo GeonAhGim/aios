@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any, TypeVar
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
 
@@ -31,7 +31,11 @@ def current_trace_id() -> UUID:
     raw = get_current_request_id()
     if raw is None:
         return uuid4()
-    return UUID(hex=raw)
+    try:
+        return UUID(hex=raw)
+    except ValueError:
+        # Non-UUID client ids (ULID etc.) map deterministically so one request keeps one trace_id.
+        return uuid5(NAMESPACE_OID, raw)
 
 
 class Meta(BaseModel):

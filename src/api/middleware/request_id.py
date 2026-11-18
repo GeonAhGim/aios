@@ -16,6 +16,7 @@ app assembly point in main.py (this file provides only the middleware itself).
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -28,11 +29,23 @@ from src.core.logging.request_context import request_id_var
 REQUEST_ID_HEADER = "X-Request-ID"
 
 
+_MAX_REQUEST_ID_LEN = 128
+_SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _accept_or_new(raw: str | None) -> str:
+    """Return the client id when it is a short token of safe characters (UUID, ULID, ...);
+    otherwise a fresh 32-hex id, so oversized or control-character ids never reach logs."""
+    if raw and len(raw) <= _MAX_REQUEST_ID_LEN and _SAFE_REQUEST_ID.match(raw):
+        return raw
+    return uuid.uuid4().hex
+
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request_id = _accept_or_new(request.headers.get(REQUEST_ID_HEADER))
         token = request_id_var.set(request_id)
         try:
             response = await call_next(request)

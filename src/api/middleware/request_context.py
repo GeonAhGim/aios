@@ -25,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Match
 
-from src.api.middleware.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
+from src.api.middleware.request_id import REQUEST_ID_HEADER, RequestIdMiddleware, _accept_or_new
 from src.core.observability.context import bind
 from src.core.observability.metric_names import (
     API_REQUEST_COUNT_TOTAL,
@@ -67,7 +67,7 @@ class RequestContextMiddleware(RequestIdMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        request_id = _accept_or_new(request.headers.get(REQUEST_ID_HEADER))
         trace_id = _extract_trace_id(request.headers.get(_TRACEPARENT_HEADER))
         route = _route_template(request)
         start = time.monotonic()
