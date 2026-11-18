@@ -94,6 +94,12 @@ export const catalogKoExtra = {
   },
   // task-7500(J3 G-4): 실행 생성 시 리스크/컴플라이언스 판정을 전용 패널로 보여준다
   // (ExecutionControlPage.tsx, FF_J3_RISK_PANEL 뒤).
+  scriptEditorPage: {
+    runBacktest: "백테스트 실행",
+    backtestRunning: "백테스트 실행 중...",
+    backtestFailed: "백테스트에 실패했습니다.",
+    backtestNeedsInstrument: "백테스트를 실행하려면 instrument_id가 지정된 주소로 여세요.",
+  },
   riskVerdictPanel: {
     title: "리스크/컴플라이언스 판정",
     noVerdict: "아직 판정 결과가 없습니다.",
