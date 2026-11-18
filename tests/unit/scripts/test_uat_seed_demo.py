@@ -103,7 +103,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
             token = _make_token(email)
             self._send_json(
                 201,
-                {"ok": {"access_token": token, "token_type": "bearer", "expires_in": 900}},
+                {"data": {"access_token": token, "token_type": "bearer", "expires_in": 900}},
             )
 
         elif self.path == "/auth/login":
@@ -119,7 +119,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
             token = _make_token(email)
             self._send_json(
                 200,
-                {"ok": {"access_token": token, "token_type": "bearer", "expires_in": 900}},
+                {"data": {"access_token": token, "token_type": "bearer", "expires_in": 900}},
             )
 
         elif self.path == "/exchange-credentials":
@@ -139,7 +139,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
             if any(c["exchange"] == exchange for c in creds):
                 self._send_json(
                     200,
-                    {"ok": [{"exchange": exchange, "is_active": True}]},
+                    {"data": [{"exchange": exchange, "is_active": True}]},
                 )
                 return
 
@@ -155,7 +155,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
             self._send_json(
                 201,
                 {
-                    "ok": {
+                    "data": {
                         "id": _fake_state["next_cred_id"],
                         "exchange": exchange,
                         "is_active": True,
@@ -174,7 +174,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
 
         if self.path == "/exchange-credentials":
             creds = _fake_state["credentials"].get(token_str, [])
-            self._send_json(200, {"ok": creds})
+            self._send_json(200, {"data": creds})
         else:
             self._send_json(404, {"error": "not found"})
 

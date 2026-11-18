@@ -168,3 +168,13 @@ def test_perf_extract_token_baseline_and_gate_red_with_virtual_delay() -> None:
     )
 
     reset_virtual_totals()
+
+
+def test_extract_token_reads_real_data_envelope_and_legacy_ok() -> None:
+    """회귀(2026-11-18 첫 기동): 실제 봉투는 data/meta인데 ok만 읽어 토큰이 None이었다."""
+    real = {"data": {"access_token": "tok-real", "token_type": "bearer"}, "meta": {}}
+    legacy = {"ok": {"access_token": "tok-legacy"}}
+    assert _seed_demo._extract_token(real) == "tok-real"
+    assert _seed_demo._extract_token(legacy) == "tok-legacy"
+    assert _seed_demo._extract_token({"data": {}, "meta": {}}) is None
+    assert _seed_demo._extract_token("not a dict") is None

@@ -110,14 +110,21 @@ def _login(
     return status, token
 
 
+def _envelope_payload(body: dict[str, Any]) -> Any:
+    """실제 API 응답 봉투는 {"data": ..., "meta": ...}. 예전 표기 {"ok": ...}도 받아 준다."""
+    if "data" in body:
+        return body["data"]
+    return body.get("ok")
+
+
 def _extract_token(body: dict[str, Any] | str) -> str | None:
     """Pull an access token from various response shapes."""
     if isinstance(body, str):
         return None
-    # ApiResponse envelope: {"ok": {"access_token": ...}}
-    ok = body.get("ok")
-    if isinstance(ok, dict):
-        return ok.get("access_token")
+    # ApiResponse envelope: {"data": {"access_token": ...}, "meta": {...}} (구버전 표기 "ok"도 허용)
+    payload = _envelope_payload(body)
+    if isinstance(payload, dict):
+        return payload.get("access_token")
     # Direct TokenPairResponse
     return body.get("access_token")
 
@@ -164,9 +171,9 @@ def _list_exchanges(
     if isinstance(body, list):
         return status, body
     # ApiResponse envelope
-    ok = body.get("ok") if isinstance(body, dict) else None
-    if isinstance(ok, list):
-        return status, ok
+    payload = _envelope_payload(body) if isinstance(body, dict) else None
+    if isinstance(payload, list):
+        return status, payload
     return status, []
 
 
