@@ -26,7 +26,8 @@
     "bench:chart-pane-row": "npm run bench:chart-pane-row --workspace=apps/web",
     "check:coverage": "npm run test:coverage --workspace=apps/web && node ../scripts/frontend_coverage_ratchet.mjs",
     "test:coverage-ratchet": "node --test ../scripts/frontend_coverage_ratchet.test.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:uat": "playwright test -c playwright.uat.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
