@@ -8,6 +8,7 @@
 | `XCUT_RULES.md` | 횡단 규칙집(FE-2) | Phase 0 작성 중 |
 | `UNSPECIFIED_ACTIONS.md` | 미규정 액션 레지스트리(D4) | 시작 |
 | `PRO_WORKSPACE_DESIGN.md` | Pro Workspace 설계(FE-9): 패널·맥락 그룹·다중 거래소 정규화·밀도 단계 | v0.2(비교 분석 반영, 기본안 승인) |
+| `../uat/UAT_GUIDE.md` | 체험(UAT) 사용 안내 -- 접속·첫 로그인 준비물·되는 것/막힌 것 | 작성 |
 | `PERSONAS_AND_JOURNEYS.md` | 사용자 기준 페르소나 P1~P11·여정 지도·역할/맥락 모델·플러그인 모델 | v0.1 |
 | `COMPETITIVE_ANALYSIS.md` | 경쟁 제품 비교와 설계 결정 근거 | 작성(출처 6건) |
 | `WIRING_FINDINGS_2026-11-19.md` | 프런트-백엔드 배선 진위 점검 결과(실스택) | 작성 |
