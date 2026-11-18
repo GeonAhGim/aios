@@ -47,6 +47,7 @@ _SECRETS = {
     "JWT_SECRET_KEY": "c" * 64,
     "CREDENTIAL_ENCRYPTION_KEY": "d" * 64,
     "UAT_DEMO_PASSWORD": "demo-pass-xyz",
+    "AIOS_LIQUIDATION_SEED_KEY": "e" * 64,
 }
 
 
@@ -407,3 +408,12 @@ def test_generated_demo_password_satisfies_server_policy() -> None:
 
     for _ in range(200):
         assert _password_strong_enough(make_secrets()["UAT_DEMO_PASSWORD"])
+
+
+def test_liquidation_seed_key_present_so_readyz_can_turn_green() -> None:
+    """Regression: no AIOS_LIQUIDATION_SEED_KEY -> liquidation worker fails closed each tick."""
+    for template in (_MINIMAL_TEMPLATE, "AIOS_LIQUIDATION_SEED_KEY=" + chr(10)):
+        out = build_env(template, "http://x", _SECRETS)
+        env = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+        assert env["AIOS_LIQUIDATION_SEED_KEY"] == "e" * 64
+        assert out.count("AIOS_LIQUIDATION_SEED_KEY=") == 1

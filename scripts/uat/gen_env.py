@@ -77,6 +77,7 @@ def make_secrets() -> dict[str, str]:
         "CREDENTIAL_ENCRYPTION_KEY": secrets.token_hex(_KEY_BYTES),
         # 서버 정책(12자 이상, 대·소문자·숫자·특수문자)을 항상 만족하도록 고정 접두를 둔다.
         "UAT_DEMO_PASSWORD": "Aa1!" + secrets.token_urlsafe(16),
+        "AIOS_LIQUIDATION_SEED_KEY": secrets.token_hex(_KEY_BYTES),
     }
 
 
@@ -103,6 +104,7 @@ _APPEND_IF_MISSING: tuple[str, ...] = (
     "JWT_SECRET_KEY",
     "CREDENTIAL_ENCRYPTION_KEY",
     *EXCHANGE_PLACEHOLDER_KEYS,
+    "AIOS_LIQUIDATION_SEED_KEY",
     "UAT_DEMO_EMAIL",
     "UAT_DEMO_PASSWORD",
     "POSTGRES_USER",
@@ -132,6 +134,8 @@ def _assignments(web_origin: str, secrets_data: dict[str, str]) -> dict[str, str
         "AIOS_RUNTIME_MODE": "PAPER",
         "CORS_ALLOWED_ORIGINS": web_origin,
         # Demo account: seed_demo signs up with it and the user logs in from .env.uat.
+        # Without it the liquidation worker fails closed on every tick and /readyz stays 503.
+        "AIOS_LIQUIDATION_SEED_KEY": secrets_data["AIOS_LIQUIDATION_SEED_KEY"],
         "UAT_DEMO_EMAIL": DEMO_EMAIL,
         "UAT_DEMO_PASSWORD": secrets_data["UAT_DEMO_PASSWORD"],
         **{key: PLACEHOLDER for key in EXCHANGE_PLACEHOLDER_KEYS},
