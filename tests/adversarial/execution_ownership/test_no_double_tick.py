@@ -32,6 +32,7 @@ from src.services.background_loops import BackgroundLoops
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler, TickReport
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
@@ -390,13 +391,15 @@ async def test_lease_repo_failure_is_fail_closed_and_does_not_block_other_owner(
 
 
 @pytest.mark.perf
-async def test_five_schedulers_race_completes_within_budget(pool, perf_budget):
-    """성능 단언 — 경쟁자를 5개로 늘려도 tick_all_running()이 로컬 budget
-    5초 안에 끝난다(§7 "1회 왕복" 배치 UPSERT 설계가 경쟁자 수에 선형으로
-    지연을 만들지 않음을 수치로 고정 — split_brain DEEPEN(task-4114)과
-    동일한 자체 정의 budget 관례).
+async def test_five_schedulers_race_completes_within_budget(pool):
+    """Performance assertion — with 5 competing schedulers, tick_all_running()
+    stays within a relative wall-clock budget of a single scheduler's tick
+    (the section 7 "single round-trip" batch UPSERT must not make latency grow
+    linearly with the number of competitors; split_brain DEEPEN task-4114).
 
-    task-10875: raw time.monotonic() 단언 → perf_budget.sample_async()로 전환.
+    task-25711: async I/O is measured by wall clock via
+    RelativeBudget.measure_async (a cpu-time sample would miss DB contention
+    regressions), normalised by a single-scheduler tick on the same pool.
     """
     user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
@@ -408,17 +411,22 @@ async def test_five_schedulers_race_completes_within_budget(pool, perf_budget):
         )
         for i in range(5)
     ]
-
-    sample = await perf_budget.sample_async(
-        lambda: asyncio.gather(*(s.tick_all_running() for s in schedulers))
+    calibration = _scheduler(
+        pool, resolve_adapter=resolve_adapter, owner_id=f"cal-{uuid.uuid4().hex[:8]}"
     )
+    first_reports: list[list[TickReport]] = []
 
-    # budget 5초 = 5000ms (process_time 기준; wall_ms도 함께 기록)
-    assert sample.cpu_ms < 5000, (
-        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<5000ms"
-    )
+    async def race() -> list[TickReport]:
+        reports = await asyncio.gather(*(s.tick_all_running() for s in schedulers))
+        if not first_reports:
+            first_reports.append(list(reports))
+        return reports
+
+    sample = await RelativeBudget().measure_async(race, calibration_fn=calibration.tick_all_running)
+
+    assert sample.op_ms < 5000, RelativeBudget().describe(sample, max_ratio=5.0)
+    assert sample.ratio < 5.0, RelativeBudget().describe(sample, max_ratio=5.0)
     assert shared_adapter.place_order_call_count == 1
 
-    reports = sample.result
-    ticked_count = sum(1 for r in reports if execution_id in r.ticked)
+    ticked_count = sum(1 for r in first_reports[0] if execution_id in r.ticked)
     assert ticked_count == 1
