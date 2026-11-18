@@ -13,12 +13,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any, TypeVar
-from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 from src.api.contracts.pagination import PageMeta
 from src.core.logging.request_context import get_current_request_id
+from src.core.logging.request_id_format import request_id_to_uuid
 
 T = TypeVar("T")
 
@@ -32,10 +33,10 @@ def current_trace_id() -> UUID:
     if raw is None:
         return uuid4()
     try:
-        return UUID(hex=raw)
+        return request_id_to_uuid(raw)
     except ValueError:
-        # Non-UUID client ids (ULID etc.) map deterministically so one request keeps one trace_id.
-        return uuid5(NAMESPACE_OID, raw)
+        # Defensive: an unconvertible id must never break the error envelope itself.
+        return uuid4()
 
 
 class Meta(BaseModel):

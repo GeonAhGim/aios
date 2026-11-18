@@ -42,12 +42,12 @@ async def test_failure_injection_restores_outer_request_context(monkeypatch):
             "type": "http",
             "method": "GET",
             "path": "/",
-            "headers": [(b"x-request-id", b"inner-request")],
+            "headers": [(b"x-request-id", b"22222222222222222222222222222222")],
         }
     )
 
     async def fail(_request):
-        assert request_id_var.get() == "inner-request"
+        assert request_id_var.get() == "22222222222222222222222222222222"
         raise RuntimeError("injected downstream failure")
 
     dependency = AsyncMock()
@@ -61,7 +61,7 @@ async def test_failure_injection_restores_outer_request_context(monkeypatch):
             request, AsyncMock(return_value=Response(status_code=204))
         )
         assert response.status_code == 204
-        assert response.headers["X-Request-ID"] == "inner-request"
+        assert response.headers["X-Request-ID"] == "22222222222222222222222222222222"
         assert request_id_var.get() == "outer-request"
     finally:
         request_id_var.reset(token)
