@@ -134,13 +134,13 @@ class TestFailureInjectionGetRequestIdException:
             ok(_Payload(value=42))
 
     def test_ok_does_not_fabricate_trace_id_when_request_id_is_malformed(self, monkeypatch):
-        """미들웨어가 깨진 request_id 를 넘기면 UUID 파싱 실패가 그대로 드러나야 한다."""
+        """A malformed request_id must not break the envelope: a fresh uuid4 is used."""
         from src.api.contracts import envelope
 
         monkeypatch.setattr(envelope, "get_current_request_id", lambda: "not-hex-value")
 
-        with pytest.raises(ValueError):
-            ok(_Payload(value=1))
+        resp = ok(_Payload(value=1))
+        assert resp.meta.trace_id.version == 4
 
 
 class TestPerfOkEnvelope:

@@ -42,11 +42,11 @@ async def test_reuses_client_supplied_request_id_header():
     transport = ASGITransport(app=_make_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/echo-request-id", headers={REQUEST_ID_HEADER: "client-supplied-id"}
+            "/echo-request-id", headers={REQUEST_ID_HEADER: "01M7PM0JK2XG3E6P15WD6C7DKN"}
         )
 
-    assert response.headers[REQUEST_ID_HEADER] == "client-supplied-id"
-    assert response.json()["seen_inside_handler"] == "client-supplied-id"
+    assert response.headers[REQUEST_ID_HEADER] == "01M7PM0JK2XG3E6P15WD6C7DKN"
+    assert response.json()["seen_inside_handler"] == "01M7PM0JK2XG3E6P15WD6C7DKN"
 
 
 async def test_request_id_not_visible_outside_request_context():
@@ -81,11 +81,11 @@ async def test_request_id_header_lookup_is_case_insensitive():
     transport = ASGITransport(app=_make_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/echo-request-id", headers={REQUEST_ID_HEADER.lower(): "lower-cased-id"}
+            "/echo-request-id", headers={REQUEST_ID_HEADER.lower(): "01M7PM0JK2XG3E6P15WD6C7DKN"}
         )
 
-    assert response.headers[REQUEST_ID_HEADER] == "lower-cased-id"
-    assert response.json()["seen_inside_handler"] == "lower-cased-id"
+    assert response.headers[REQUEST_ID_HEADER] == "01M7PM0JK2XG3E6P15WD6C7DKN"
+    assert response.json()["seen_inside_handler"] == "01M7PM0JK2XG3E6P15WD6C7DKN"
 
 
 async def test_concurrent_requests_do_not_leak_request_id_across_contexts():
@@ -96,12 +96,16 @@ async def test_concurrent_requests_do_not_leak_request_id_across_contexts():
     transport = ASGITransport(app=_make_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response_a, response_b = await asyncio.gather(
-            client.get("/echo-request-id", headers={REQUEST_ID_HEADER: "request-a"}),
-            client.get("/echo-request-id", headers={REQUEST_ID_HEADER: "request-b"}),
+            client.get(
+                "/echo-request-id", headers={REQUEST_ID_HEADER: "01M7PM0JK2XG3E6P15WD6C7DK3"}
+            ),
+            client.get(
+                "/echo-request-id", headers={REQUEST_ID_HEADER: "01M7PM0JK2XG3E6P15WD6C7DK4"}
+            ),
         )
 
-    assert response_a.json()["seen_inside_handler"] == "request-a"
-    assert response_b.json()["seen_inside_handler"] == "request-b"
+    assert response_a.json()["seen_inside_handler"] == "01M7PM0JK2XG3E6P15WD6C7DK3"
+    assert response_b.json()["seen_inside_handler"] == "01M7PM0JK2XG3E6P15WD6C7DK4"
 
 
 # ------------------------------------------------------------------ #

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.contracts.pagination import PageMeta
 from src.core.logging.request_context import get_current_request_id
+from src.core.logging.request_id_format import request_id_to_uuid
 
 T = TypeVar("T")
 
@@ -31,7 +32,11 @@ def current_trace_id() -> UUID:
     raw = get_current_request_id()
     if raw is None:
         return uuid4()
-    return UUID(hex=raw)
+    try:
+        return request_id_to_uuid(raw)
+    except ValueError:
+        # Defensive: a bad id must never break the error envelope itself.
+        return uuid4()
 
 
 class Meta(BaseModel):

@@ -24,6 +24,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from src.core.logging.request_context import request_id_var
+from src.core.logging.request_id_format import is_valid_request_id
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -32,7 +33,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        incoming = request.headers.get(REQUEST_ID_HEADER)
+        request_id = incoming if incoming and is_valid_request_id(incoming) else uuid.uuid4().hex
         token = request_id_var.set(request_id)
         try:
             response = await call_next(request)
