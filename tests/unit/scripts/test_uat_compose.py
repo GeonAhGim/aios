@@ -65,3 +65,14 @@ def test_worker_starts_by_default_with_shared_heartbeat_volume() -> None:
         assert (
             service["environment"]["AIOS_HEARTBEAT_PATH"] == "/app/runtime/main_process.heartbeat"
         )
+
+
+@pytest.mark.parametrize("compose_name", ["compose.uat.yml", "compose.prod.yml"])
+def test_worker_waits_for_healthy_api(compose_name: str) -> None:
+    """Regression: a watchdog polling before the first heartbeat tripped the kill switch."""
+    data = yaml.safe_load((ROOT / compose_name).read_text(encoding="utf-8"))
+    depends = data["services"]["worker"]["depends_on"]
+    assert depends["api"]["condition"] == "service_healthy"
+    assert data["services"]["api"].get("healthcheck"), (
+        "api needs a healthcheck for the ordering to hold"
+    )

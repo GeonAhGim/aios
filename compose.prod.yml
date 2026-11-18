@@ -66,8 +66,12 @@ services:
       AIOS_HEARTBEAT_PATH: /app/runtime/main_process.heartbeat
     volumes:
       - aios_runtime:/app/runtime
+    # Start only after the api is healthy: the api writes the first heartbeat during startup, and a
+    # watchdog that polls before it sees "main process unresponsive" and trips the GLOBAL kill switch.
     depends_on:
       postgres:
+        condition: service_healthy
+      api:
         condition: service_healthy
     restart: unless-stopped
 
