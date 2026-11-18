@@ -54,7 +54,7 @@ numpy==2.2.6
 packageurl-python==0.17.6
 packaging==26.3
 pandas==2.3.3
-pandas-ta-classic==0.8.32
+pandas-ta-classic==0.9.0
 pathspec==1.1.1
 pip-requirements-parser==32.0.1
 pip_api==0.0.35

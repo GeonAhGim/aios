@@ -43,7 +43,7 @@ dependencies = [
     # distribution only -- the optional test-oracle extra pulls in tulipy
     # (LGPL-3.0) and must never be installed (INDICATOR_OSS_EVAL.md §5,
     # NOTICE-AIOS.md). Do not add extras to this requirement string.
-    "pandas-ta-classic>=0.6.52",
+    "pandas-ta-classic>=0.9.0",
     # SBX-2 (ADR-2026-09-26-B, task-7616): sandboxed_script_eval.py watcher
     # thread reads child-process RSS -- previously only declared as an
     # optional test fixture dependency (see the mypy override below).
