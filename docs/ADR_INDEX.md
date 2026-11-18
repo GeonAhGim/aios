@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 50건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 6건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A.
+전체 53건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 7건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -56,3 +56,6 @@
 | ADR-2026-10-23-A | — CI 수리 템플릿 · 발행 규율 · 보안 범프 허용 | **MISSING** |  |  |  |  | ADR-2026-10-23-A-ci-repair-templates-and-issuance-discipline.md |
 | ADR-2026-10-28-A | — 공급망 보안 범프 처리·기한부 예외 정책 | **MISSING** |  |  |  |  | ADR-2026-10-28-A-supply-chain-bump-and-waiver-policy.md |
 | ADR-2026-10-29-A | — Python 3.13 단일 지원 버전 전환 | **MISSING** |  |  |  |  | ADR-2026-10-29-A-python-313-single-version.md |
+| ADR-2026-11-11-A | ruff format 일괄 정리와 CI 게이트 | **MISSING** |  |  |  |  | ADR-2026-11-11-A-ruff-format-gate.md |
+| ADR-2026-11-18-A | MVP-1 종결 2관문(T 기술 / U 사용자) | Accepted | 2026-11-18 |  |  |  | ADR-2026-11-18-A-mvp1-two-gate-closeout.md |
+| ADR-2026-11-18-B | 글로벌 규모 프런트엔드 프로그램 (명세 우선 · 실스택 계약 · 미규정 액션 인입) | Accepted | 2026-11-18 |  |  |  | ADR-2026-11-18-B-global-grade-frontend-program.md |
