@@ -133,14 +133,14 @@ class TestFailureInjectionGetRequestIdException:
         with pytest.raises(RuntimeError, match="request_id_service_down"):
             ok(_Payload(value=42))
 
-    def test_ok_does_not_fabricate_trace_id_when_request_id_is_malformed(self, monkeypatch):
-        """미들웨어가 깨진 request_id 를 넘기면 UUID 파싱 실패가 그대로 드러나야 한다."""
+    def test_ok_maps_non_uuid_request_id_to_stable_trace_id(self, monkeypatch):
+        """ULID 등 비-UUID request_id 는 500 대신 같은 값 -> 같은 trace_id 로 결정적 매핑된다."""
         from src.api.contracts import envelope
 
         monkeypatch.setattr(envelope, "get_current_request_id", lambda: "not-hex-value")
 
-        with pytest.raises(ValueError):
-            ok(_Payload(value=1))
+        first, second = ok(_Payload(value=1)), ok(_Payload(value=1))
+        assert first.meta.trace_id == second.meta.trace_id
 
 
 class TestPerfOkEnvelope:
