@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import importlib
 import json
-import socket
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -179,8 +179,7 @@ class _FakeHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
 
-def _start_fake_server() -> str:
-    """Start a fake server in a background thread. Returns base_url."""
+def _reset_fake_state() -> None:
     global _token_counter
     _token_counter = 0
     _fake_state["users"] = {}
@@ -188,43 +187,24 @@ def _start_fake_server() -> str:
     _fake_state["credentials"] = {}
     _fake_state["next_cred_id"] = 1
 
-    from http.server import HTTPServer
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.listen(5)
+@pytest.fixture
+def fake_server() -> Iterator[str]:
+    """Start a fake UAT server and yield its base_url; shut it down afterwards.
 
-    server = HTTPServer(("127.0.0.1", port), _FakeHandler)
+    Bind port 0 directly so the OS picks a free port. Reserving a port with a second socket and then
+    binding the server to it works on Windows but fails on Linux with "Address already in use"
+    (Actions test-shard 3, 2026-11-18)."""
+    _reset_fake_state()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    return f"http://127.0.0.1:{port}"
-
-
-def _stop_fake_server() -> None:
-
-    # Find and stop the server — we use a module-level reference trick
-    pass  # server is daemon; process exit cleans up
-
-
-# We need a way to stop the server per-test. Use a fixture-scoped reference.
-_fake_server_ref: Any = None
-
-
-@pytest.fixture(autouse=False)
-def fake_server() -> str:
-    """Start a fake UAT server. Returns base_url."""
-    global _fake_server_ref
-    _fake_server_ref = _start_fake_server()
-    yield _fake_server_ref
-    # Cleanup: stop the server
-    if _fake_server_ref:
-        # Find the running server by checking thread names
-
-        # The server is running as daemon thread; we can't easily stop it
-        # without a reference. Accept that it dies with the process.
-        pass
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
