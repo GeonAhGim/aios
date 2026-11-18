@@ -395,6 +395,7 @@ export const catalogKo = {
     "/scripts/editor": "스크립트편집기",
     "/marketplace": "마켓플레이스",
     "/follow": "팔로우",
+    "/signals/sources": "신호 소스",
     "/ai/studio": "AI 스튜디오",
     "/executions": "실행제어판",
     "/portfolio": "포트폴리오",
@@ -430,6 +431,7 @@ export const catalogKo = {
     "/admin/reconciliation": "대사관리",
     "/admin/evidence-chain": "증빙체인검증",
     "/admin/trust": "신뢰멤버십",
+    "/admin/audit-log": "감사로그",
   },
   // task-5597 (EMS-18 CI 정정): ExecutionAlgoPage/TcaPage 새 문구 -- i18n-literals
   // ratchet(scripts/check_i18n_literals.mjs)이 baseline에 없는 새 리터럴을 막는다.

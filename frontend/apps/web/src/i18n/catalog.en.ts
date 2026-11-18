@@ -377,6 +377,7 @@ export const catalogEn = {
     "/scripts/editor": "Script editor",
     "/marketplace": "Marketplace",
     "/follow": "Follow",
+    "/signals/sources": "Signal sources",
     "/ai/studio": "AI studio",
     "/executions": "Execution control",
     "/portfolio": "Portfolio",
@@ -412,6 +413,7 @@ export const catalogEn = {
     "/admin/reconciliation": "Reconciliation",
     "/admin/evidence-chain": "Evidence chain",
     "/admin/trust": "Trust membership",
+    "/admin/audit-log": "Audit log",
   },
   executionAlgoPage: {
     pageTitle: "Algo execution progress",
