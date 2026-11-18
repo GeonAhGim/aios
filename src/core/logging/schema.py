@@ -33,6 +33,8 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import re
+import traceback
 from datetime import UTC, datetime
 from logging.handlers import QueueHandler, QueueListener
 from typing import Any
@@ -40,9 +42,33 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.core.logging import fields as log_fields
-from src.core.logging.redaction import RedactionFilter
+from src.core.logging.redaction import REDACTED, RedactionFilter
 from src.core.logging.request_context import get_current_request_id
 from src.core.observability.context import current as current_request_context
+
+# Reuse the same value-based secret patterns from redaction.py — applied as
+# substring matches inside message/stack strings (fullmatch is for dict values
+# where the whole value *is* the secret; here the secret is embedded in text).
+# Order matters: JWT-like must come before hex64 because a JWT payload segment
+# can look like a hex string once decoded.
+_BEARER_RE: re.Pattern[str] = re.compile(r"Bearer\s+[^\s,;}\]]+")
+_HEX64_RE: re.Pattern[str] = re.compile(r"[0-9a-fA-F]{64}")
+_JWT_LIKE_RE: re.Pattern[str] = re.compile(r"eyJ[A-Za-z0-9_.-]{10,}")
+_RRN_LIKE_RE: re.Pattern[str] = re.compile(r"\d{6}-?\d{7}")
+
+
+def _redact_string(value: str) -> str:
+    """Apply the same secret-pattern masking used by redaction.py to a free-
+    form string, returning a new masked string.
+
+    Existing patterns are reused as substring matches so that secrets embedded
+    in log messages / stack traces are caught without inventing new rules.
+    """
+    value = _BEARER_RE.sub(f"Bearer {REDACTED}", value)
+    value = _HEX64_RE.sub(REDACTED, value)
+    value = _JWT_LIKE_RE.sub(REDACTED, value)
+    value = _RRN_LIKE_RE.sub(REDACTED, value)
+    return value
 
 
 class LogEntry(BaseModel):
@@ -80,6 +106,30 @@ class JSONLinesFormatter(logging.Formatter):
             extra=getattr(record, "payload", {}),
         )
         line = entry.model_dump(mode="json")
+
+        # Emit exception info (type/message/stack) when record.exc_info is
+        # present — this is what logger.exception(...) sets.  Omit the field
+        # entirely when absent so existing consumers / dashboards are not
+        # surprised (PLT-03 backward-compat).
+        exc_info = getattr(record, "exc_info", None)
+        if exc_info and exc_info[0] is not None:
+            exc_type = exc_info[0]
+            exc_message = str(exc_info[1])[:500]
+            formatted_tb = "".join(traceback.format_exception(*exc_info, limit=None))
+            _TRUNCATION_TAG = "[truncated]"
+            if len(formatted_tb) > 8000:
+                stack_raw = formatted_tb[: 8000 - len(_TRUNCATION_TAG)] + _TRUNCATION_TAG
+            else:
+                stack_raw = formatted_tb
+            # Pass through existing redaction patterns (no new rules).
+            exc_obj = {
+                "type": exc_type.__module__ + "." + exc_type.__qualname__
+                if getattr(exc_type, "__module__", None) not in (None, "builtins")
+                else exc_type.__qualname__,
+                "message": _redact_string(exc_message),
+                "stack": _redact_string(stack_raw),
+            }
+            line["exception"] = exc_obj
 
         # On the QueueHandler path, `_ContextCapturingQueueHandler.prepare()`
         # pre-takes a snapshot on the original thread (= the thread where RequestContext
