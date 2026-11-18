@@ -100,5 +100,8 @@ def test_manifest_pages_exist_and_are_unique() -> None:
 def test_committed_fact_sheets_are_fresh() -> None:
     """Sheets under docs/frontend/facts must equal a fresh extraction (like gen_adr_index)."""
     if not ef.catalogs_available(ef.load_catalogs()):
-        pytest.skip("Node >= 22.6 is required to read the TS i18n catalogs")
+        # Old Node (no type stripping): the generator must degrade visibly, never silently succeed.
+        rendered = gen_facts.render_all()
+        assert rendered and all("(missing in catalog)" in text for text in rendered.values())
+        return
     assert gen_facts.main(["--check"]) == 0

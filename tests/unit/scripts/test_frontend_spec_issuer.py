@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from scripts.frontend_spec import extract_facts as ef
 from scripts.frontend_spec import gen_facts, plan_leaves, skeleton, verify_spec
 
@@ -50,8 +48,7 @@ def test_fit_never_cuts_the_fixed_part_and_respects_the_limit() -> None:
 
 def test_plan_for_a_block_is_small_complete_and_machine_checkable() -> None:
     catalogs = ef.load_catalogs()
-    if not ef.catalogs_available(catalogs):
-        pytest.skip("Node >= 22.6 is required to read the TS i18n catalogs")
+    assert plan_leaves.build_plan(_item(), "st-b", catalogs).spec  # also works with no catalogs
     plan = plan_leaves.build_plan(_item(), "st-b", catalogs)
     assert len(plan.spec) <= plan_leaves.MAX_SPEC_CHARS
     assert f"<!-- BLOCK:{SCREEN}:st-b -->" in plan.spec
