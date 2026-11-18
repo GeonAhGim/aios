@@ -1,7 +1,7 @@
 # ADR-2026-11-18-A: MVP-1 종결 2관문(T 기술 / U 사용자)
 
 ## Status
-Proposed (2026-11-18, CTO 검토 대기). 원 작성: claude-local-5 worker, task-25537.
+Accepted (2026-11-18, 사용자 승인: D안 두 관문 T/U, G-1 -> MVP-2, G-5 역할 분리, G-9 규칙만). 원 작성: claude-local-5 worker, task-25537.
 
 ## Context
 
