@@ -60,6 +60,9 @@ services:
     environment:
       AIOS_RUNTIME_MODE: PAPER
       CORS_ALLOWED_ORIGINS: ${UAT_WEB_ORIGIN}
+      AIOS_HEARTBEAT_PATH: /app/runtime/main_process.heartbeat
+    volumes:
+      - aios_runtime:/app/runtime
     ports:
       - "127.0.0.1:18000:8000"
     depends_on:
@@ -76,10 +79,6 @@ services:
     restart: unless-stopped
 
   worker:
-    # 기본 기동에서 제외(profile). 워치독이 main 프로세스 하트비트(runtime/main_process.heartbeat)를
-    # 못 봐 'main_process_unresponsive'로 전역 킬스위치를 ACTIVE로 만들어 모의 주문을 막는다(2026-11-18 실측).
-    # main이 하트비트를 쓰도록 배선되고 컨테이너 간 공유되기 전에는 켜지 않는다.
-    profiles: ["watchdog"]
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -87,6 +86,9 @@ services:
       - .env.uat
     environment:
       AIOS_RUNTIME_MODE: PAPER
+      AIOS_HEARTBEAT_PATH: /app/runtime/main_process.heartbeat
+    volumes:
+      - aios_runtime:/app/runtime
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,3 +110,4 @@ services:
 
 volumes:
   aios_uat_pgdata:
+  aios_runtime:

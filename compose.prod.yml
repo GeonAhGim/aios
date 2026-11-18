@@ -39,6 +39,10 @@ services:
       dockerfile: Dockerfile.api
     env_file:
       - .env
+    environment:
+      AIOS_HEARTBEAT_PATH: /app/runtime/main_process.heartbeat
+    volumes:
+      - aios_runtime:/app/runtime
     ports:
       - "8000:8000"
     depends_on:
@@ -58,6 +62,10 @@ services:
       dockerfile: Dockerfile.worker
     env_file:
       - .env
+    environment:
+      AIOS_HEARTBEAT_PATH: /app/runtime/main_process.heartbeat
+    volumes:
+      - aios_runtime:/app/runtime
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,3 +88,4 @@ services:
 
 volumes:
   pgdata:
+  aios_runtime:

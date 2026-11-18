@@ -36,6 +36,7 @@ from src.core.notifications.gateway import NotificationGateway
 from src.core.observability.loop_health import loop_health
 from src.core.observability.metrics_registry import get_registry
 from src.core.safety.data_freshness import DataFreshnessTracker
+from src.core.safety.heartbeat_writer import start_heartbeat_writer
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.core.security.key_ring import KeyRing
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
@@ -187,6 +188,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     market_data_tasks: list[asyncio.Task[None]] = []
     positions_tasks: list[asyncio.Task[None]] = []
     algo_tasks: list[asyncio.Task[None]] = []
+    heartbeat_task: asyncio.Task[None] | None = None
     pool: asyncpg.Pool | None = None
     try:
         secrets = load_env_secrets()
@@ -232,6 +234,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 api_tracker, build_adapter, freshness=freshness_tracker
             ),
         )
+
+        # The watchdog judges main liveness by this heartbeat file; without a writer
+        # it always concludes main_process_unresponsive and HALTs.
+        heartbeat_task = start_heartbeat_writer()
 
         # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety 재가동
         # 루프 생성·재시작 복구는 background_loops.py로 분리했다(P6). lifespan은
@@ -341,6 +347,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.algo_scheduler = algo_scheduler
         yield
     finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
         all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks, *algo_tasks]
         for task in all_scheduler_tasks:
             task.cancel()

@@ -19,6 +19,16 @@ from pathlib import Path
 # 유일한 통신 경로 — 프로세스 메모리 경계를 파일 하나로 명확히 넘는다.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_HEARTBEAT_PATH = _PROJECT_ROOT / "runtime" / "main_process.heartbeat"
+HEARTBEAT_PATH_ENV = "AIOS_HEARTBEAT_PATH"
+
+
+def resolve_heartbeat_path() -> Path:
+    """Heartbeat file path shared by writer (main) and reader (watchdog).
+
+    ``AIOS_HEARTBEAT_PATH`` wins when set and non-empty, so separate containers can
+    point both sides at one shared volume; otherwise the in-repo default is used."""
+    override = os.environ.get(HEARTBEAT_PATH_ENV, "").strip()
+    return Path(override) if override else DEFAULT_HEARTBEAT_PATH
 
 
 def write_heartbeat(path: Path) -> None:

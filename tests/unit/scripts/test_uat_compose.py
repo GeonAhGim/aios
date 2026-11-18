@@ -55,7 +55,13 @@ def test_all_ports_bind_loopback_only() -> None:
             assert str(port).startswith("127.0.0.1:"), f"{name}: 루프백 외 바인딩 {port}"
 
 
-def test_watchdog_worker_not_started_by_default() -> None:
-    """회귀: 하트비트 없는 워치독이 전역 킬스위치를 켜 모의 주문을 막았다 -- 기본 기동에서 제외."""
-    worker = _services()["worker"]
-    assert worker.get("profiles") == ["watchdog"]
+def test_worker_starts_by_default_with_shared_heartbeat_volume() -> None:
+    """Regression: the worker watchdog needs main's heartbeat -- api and worker share one volume."""
+    services = _services()
+    assert "profiles" not in services["worker"]
+    for name in ("api", "worker"):
+        service = services[name]
+        assert "aios_runtime:/app/runtime" in service["volumes"]
+        assert (
+            service["environment"]["AIOS_HEARTBEAT_PATH"] == "/app/runtime/main_process.heartbeat"
+        )
