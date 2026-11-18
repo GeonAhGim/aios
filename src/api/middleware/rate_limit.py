@@ -11,12 +11,13 @@ for integration tests to isolate via `set_limiter(...)` (same reason
 `limiter()` singleton getter per request — the `limiter/policy` values themselves
 match the spec exactly.
 
-Registration order (main.py, §9 PLT-25 table): RateLimit → RequestContext → CORS.
-Because this middleware sits on the outside of the stack, rejected requests skip
-trace_id context binding and structured logging (RequestContextMiddleware). The
-intentional trade-off is to reject as fast as possible, even skipping the binding
-and logging overhead, especially during traffic spikes. Therefore this middleware
-itself populates `X-Request-ID`/`X-Trace-Id` on 429 responses.
+Registration order (main.py, outer → inner): CORS → RateLimit → RequestContext.
+CORS is outermost so 429/500 responses still carry Access-Control-Allow-Origin.
+Rejected requests skip trace_id context binding and structured logging
+(RequestContextMiddleware); the intentional trade-off is to reject as fast as
+possible during traffic spikes. Therefore this middleware itself populates
+`X-Request-ID`/`X-Trace-Id` on 429 responses, replacing an unsafe incoming
+request id with a fresh one (same rule as RequestIdMiddleware).
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from starlette.types import ASGIApp
 from src.api.contracts.envelope import ApiError
 from src.api.contracts.error_codes import HTTP_STATUS, ErrorCode
 from src.api.middleware.request_context import TRACE_ID_HEADER
-from src.api.middleware.request_id import REQUEST_ID_HEADER
+from src.api.middleware.request_id import REQUEST_ID_HEADER, _accept_or_new
 from src.core.observability.metric_names import AUTH_RATE_LIMITED_COUNT_TOTAL
 from src.core.observability.metrics import metrics
 from src.core.rate_limit.limiter import limiter
@@ -146,7 +147,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         decision = await limiter().acquire(policy, key)
         if not decision.allowed:
             metrics().counter(AUTH_RATE_LIMITED_COUNT_TOTAL, {"policy": policy.name})
-            request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+            request_id = _accept_or_new(request.headers.get(REQUEST_ID_HEADER))
             trace_id = uuid.uuid4()
             logger.warning(
                 "rate limit exceeded: policy=%s key=%s",
