@@ -54,6 +54,9 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Single source of the gitleaks version: pm/local_ci reads this value and runs the same
+          # binary locally, so the local gate cannot pass what Actions rejects (2026-11-18 drift).
+          GITLEAKS_VERSION: 8.24.3
 
       - uses: actions/setup-python@v5
         with:
