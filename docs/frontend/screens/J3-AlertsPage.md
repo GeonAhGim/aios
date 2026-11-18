@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-AlertsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`: "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독" |
+| 목적(한 문장) | 가격/지표 알림을 생성·관리하고, 발동 상태를 확인하여 모니터링 조건을 자동화한다 |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:144` — `/alerts` 경로는 `protect(<AlertsPage />)`로 ProtectedRoute 감싸져 있음(인증 필요) |
+| 사용자 준비물 | 로그인 상태, 최소 1개 거래소 연동(bitget/kis), 모니터링할 종목/심볼 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
