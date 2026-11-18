@@ -238,7 +238,7 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
             )
 
     sample = await perf_budget.sample_async(_batch)
-    elapsed = sample.wall_ms / 1000
+    elapsed = sample.cpu_ms / 1000
 
     assert elapsed < 5.0, f"50건 직렬 삽입이 {elapsed:.3f}s 걸림 (예산 5s 초과)"
 
@@ -250,11 +250,11 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
 
 @pytest.mark.perf
 async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
-    """단일 호출 벽시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
 
     `time.process_time()` 기반 CPU 시간 측정은 I/O 대기 중 0ms가 될 수
-    있어(네트워크 지연), 벽시간(`time.perf_counter`)으로 측정 버그를
-    감지한다. batch=32로 여러 호출을 묶으면 양자화 오차가 줄어 벽시간을
+    있어(네트워크 지연), `PerfBudget.sample_async`의 `cpu_ms`로 측정 버그를
+    감지한다. batch=32로 여러 호출을 묶으면 양자화 오차가 줄어 CPU 시간을
     정상 측정한다. task-11539 감사: 0 수렴이면 batch로 정정.
     """
     sample = await perf_budget.sample_async(
@@ -266,29 +266,39 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
         ),
         batch=32,
     )
-    assert sample.wall_ms > 0, (
-        f"단일 호출 벽시간이 0ms (batch=32 기준) — 측정 버그: "
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU시간이 0ms (batch=32 기준) — 측정 버그: "
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
     )
 
 
 @pytest.mark.perf
-async def test_insert_or_get_perf_budget_goes_red_with_sleep_injection(
+async def test_insert_or_get_perf_budget_goes_red_with_cpu_injection(
     pool, repo, perf_budget, monkeypatch
 ):
-    """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
+    """gate-red reproduction: CPU busy-loop 주입으로 CPU 시간을 인위적으로 늘리면
     기존 녹색 성능 단언이 적색으로 떨어져야 한다.
 
-    `insert_or_get` 내부의 DB 왕복 전에 `asyncio.sleep(0.05)`를 주입해
-    같은 측정/단언을 재사용한다. 예산 10배 지연이므로 50건 기준
-    wall_ms 예산을 초과해야 한다. 단언/마커 삭제와 예산 완화 금지."""
-    import asyncio
+    `insert_or_get` 전에 CPU 바쁜 대기(~100ms)를 주입해
+    같은 측정/단언을 재사용한다. 예산 10배 CPU 지연이므로 50건 기준
+    cpu_ms 예산을 초과해야 한다. 단언/마커 삭제와 예산 완화 금지.
 
-    # Wrap the repo's insert_or_get to inject sleep before each DB call
+    asyncio.sleep()는 GIL을 놓으므로 CPU 시간을消费하지 않는다 —
+    PerfBudget이 cpu_ms를 기준으로 하므로 busy-loop로 교체한다.
+    """
+    # Wrap the repo's insert_or_get to inject CPU-bound delay before each DB call
     original_insert_or_get = repo.insert_or_get
 
+    def _cpu_spill():
+        """약 100ms의 CPU 소비를 만드는 바쁜 대기 — time.process_time()에 기록됨."""
+        import math
+
+        x = 1.0
+        for _ in range(5_000_000):
+            x = math.sin(x)
+
     async def slow_insert_or_get(*args, **kwargs):
-        await asyncio.sleep(0.1)  # 100ms delay per call → ~10× 실제 DB 왕복
+        _cpu_spill()  # ~100ms CPU per call → ~10× 실제 DB CPU
         return await original_insert_or_get(*args, **kwargs)
 
     repo.insert_or_get = slow_insert_or_get
@@ -303,9 +313,9 @@ async def test_insert_or_get_perf_budget_goes_red_with_sleep_injection(
             )
 
     sample = await perf_budget.sample_async(_batch)
-    elapsed = sample.wall_ms / 1000
+    elapsed = sample.cpu_ms / 1000
 
     assert elapsed >= 5.0, (
-        f"sleep 주입 후 50건 직렬 삽입이 {elapsed:.3f}s — "
+        f"CPU 주입 후 50건 직렬 삽입이 {elapsed:.3f}s — "
         f"예산 5s 초과 단언이 실패: 측정/단언이 공허함(hollow assertion)"
     )
