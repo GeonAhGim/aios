@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-RiskAssessmentPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`: "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독" [확인] |
+| 목적(한 문장) | 회원가입(MFA 완료) 후 투자자 적합성평가를 통해 투자 경험·위험 감내도·투자 목표·자금 필요 시점을 수집하고, 이에 기반한 위험 등급을 안내한다. [확인: RiskAssessmentPage.tsx:142-144] |
+| 진입 조건 | `router.tsx:88` — `/onboarding/risk-assessment` 라우트는 `protect()`로 ProtectedRoute 감싸짐. `ProtectedRoute.tsx:35-41` — `me.mfaEnabled=true`이고 `riskProfile`이 없을 때 강제 리다이렉트. 즉 MFA 완료 후 최초 진입 [확인] |
+| 사용자 준비물 | MFA(2단계 인증) 완료 — `MfaSetupPage.tsx:72`에서 검증 성공 시 `/onboarding/risk-assessment`로 자동 전이 [확인] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
