@@ -243,7 +243,7 @@ def run(
     status, token = _signup(base_url, email, pw)
     if status == 201 and token:
         print(f"OK (signup, {status})")
-    elif status in (400, 409):
+    elif status in (400, 401, 409):  # 중복 가입은 열거 방지로 401(AUTH_INVALID_CREDENTIALS)로 온다
         print(f"Already exists ({status}), logging in ...", end=" ")
         status, token = _login(base_url, email, pw)
         if status == 200 and token:

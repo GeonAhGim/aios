@@ -200,3 +200,27 @@ def test_exchange_link_skipped_without_user_keys(
     monkeypatch.setattr(_seed_demo, "_register_exchange", _boom)
     assert _seed_demo.run(base_url="http://127.0.0.1:1", email="a@demo.uat", password="pw") == 0
     assert "skip exchange link" in capsys.readouterr().out
+
+
+def test_duplicate_signup_401_falls_back_to_login(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """회귀: 이미 가입된 이메일은 401로 온다. 그래도 로그인으로 이어져 멱등이어야 한다."""
+    for name in _seed_demo.BITGET_DEMO_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(_seed_demo, "_env_value", lambda name: None)
+    monkeypatch.setattr(_seed_demo, "_signup", lambda *a, **k: (401, None))
+    monkeypatch.setattr(_seed_demo, "_login", lambda *a, **k: (200, "tok"))
+    assert _seed_demo.run(base_url="http://127.0.0.1:1", email="a@demo.uat", password="pw") == 0
+    assert "login" in capsys.readouterr().out
+
+
+def test_duplicate_signup_401_and_bad_login_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """401인데 로그인도 거부되면(비밀번호 불일치) 성공으로 오인하지 않는다."""
+    monkeypatch.setattr(_seed_demo, "_env_value", lambda name: None)
+    monkeypatch.setattr(_seed_demo, "_signup", lambda *a, **k: (401, None))
+    monkeypatch.setattr(_seed_demo, "_login", lambda *a, **k: (401, None))
+    assert _seed_demo.run(base_url="http://127.0.0.1:1", email="a@demo.uat", password="pw") == 1
