@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-ConnectionWizardPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — J1 온보딩 여정의 첫 화면, P1~P11 전체가 자기 버전을 가진다(§2, §3) [확인] |
+| 목적(한 문장) | 거래소/증권사 공급자의 API 키를 입력하고 읽기 전용 권한 범위를 선택·확인한 뒤 연결 요청을 발송한다 [확인] |
+| 진입 조건 | `/onboarding/connect` 라우트; `router.tsx:70-72`의 `protect()`로 ProtectedRoute 가드 + `router.tsx:93-94`의 `FeatureFlagGate flag="onboarding_connection_wizard"` 필요 [확인] |
+| 사용자 준비물 | 발급받은 공급자 코드(providerCode), 계정 키(opaqueAccountRef) [확인] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
