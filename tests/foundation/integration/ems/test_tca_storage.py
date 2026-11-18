@@ -238,7 +238,7 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
             )
 
     sample = await perf_budget.sample_async(_batch)
-    elapsed = sample.wall_ms / 1000
+    elapsed = sample.cpu_ms / 1000
 
     assert elapsed < 5.0, f"50건 직렬 삽입이 {elapsed:.3f}s 걸림 (예산 5s 초과)"
 
@@ -250,12 +250,13 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
 
 @pytest.mark.perf
 async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
-    """단일 호출 벽시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+    """단일 호출 CPU 시간이 0ms로 수렴하지 않음을 검증한다(0 수렴 결함 감지).
 
     `time.process_time()` 기반 CPU 시간 측정은 I/O 대기 중 0ms가 될 수
-    있어(네트워크 지연), 벽시간(`time.perf_counter`)으로 측정 버그를
-    감지한다. batch=32로 여러 호출을 묶으면 양자화 오차가 줄어 벽시간을
-    정상 측정한다. task-11539 감사: 0 수렴이면 batch로 정정.
+    있어(네트워크 지연), 이 테스트는 CPU 시간이 양수임을 단언해
+    측정 파이프라인이 정상 작동함을 확인한다. batch=32로 여러 호출을 묶으면
+    양자화 오차가 줄어 CPU 시간을 정상 측정한다. task-11539 감사: 0 수렴이면
+    batch로 정정.
     """
     sample = await perf_budget.sample_async(
         lambda: repo.insert_or_get(
@@ -266,8 +267,8 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
         ),
         batch=32,
     )
-    assert sample.wall_ms > 0, (
-        f"단일 호출 벽시간이 0ms (batch=32 기준) — 측정 버그: "
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 시간이 0ms (batch=32 기준) — 측정 버그: "
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
     )
 
@@ -279,9 +280,10 @@ async def test_insert_or_get_perf_budget_goes_red_with_sleep_injection(
     """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
     기존 녹색 성능 단언이 적색으로 떨어져야 한다.
 
-    `insert_or_get` 내부의 DB 왕복 전에 `asyncio.sleep(0.05)`를 주입해
-    같은 측정/단언을 재사용한다. 예산 10배 지연이므로 50건 기준
-    wall_ms 예산을 초과해야 한다. 단언/마커 삭제와 예산 완화 금지."""
+    `asyncio.sleep`은 CPU 시간을 소모하지 않으므로(이벤트 루프만 해제),
+    이 테스트는 wall-clock(`wall_ms`)으로 측정해야 sleep의 실제 지연을
+    포착할 수 있다. CPU 시간으로 측정하면 sleep이 0ms로 읽혀
+    gate-red 재현이 무력화된다. 단언/마커 삭제와 예산 완화 금지."""
     import asyncio
 
     # Wrap the repo's insert_or_get to inject sleep before each DB call
