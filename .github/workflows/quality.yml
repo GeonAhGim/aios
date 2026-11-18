@@ -376,12 +376,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --workspaces --include-workspace-root
 
-      # H-5(ADR-2026-09-09-B) — 프론트엔드 공급망 게이트. high 이상만 실패시킨다
-      # (backend와 달리 예외 파일이 없다 — 발견되면 업그레이드로 고치는 게 기본이고,
-      # 정말 유예가 필요하면 이 스텝 자체에 사유·만료일 주석을 남기고 --audit-level을
-      # 일시적으로 조정한다).
+      # H-5(ADR-2026-09-09-B) — 프론트엔드 공급망 게이트. high 이상만 실패시킨다(npm audit
+      # --audit-level=high와 같은 임계값). 패치판이 아직 없는 advisory만 frontend/.npm-audit-ignore
+      # (GHSA 단위, 사유·만료일 필수, 만료·불필요·패치 가능해지면 실패)로 유예한다 -- 판정은
+      # scripts/run_npm_audit.py(backend run_pip_audit.py와 같은 원칙). --audit-level을 올리지 않는다.
       - name: Supply chain audit (npm)
-        run: npm audit --audit-level=high
+        run: python3 ../scripts/run_npm_audit.py --frontend-dir .
 
       - run: npm run lint --workspace=apps/web
       - run: npm run build --workspace=apps/web

@@ -1,0 +1,10 @@
+{
+  "_설명": "scripts/run_npm_audit.py가 읽는 npm audit 예외 목록. advisory(GHSA) 단위, id/reason/expires 모두 필수 -- expires가 지나거나, 감사 결과에서 사라졌거나, 호환 범위 패치가 생기면 CI가 예외 자체를 실패시킨다(예외 방치 금지, ADR-2026-09-09-B H-5).",
+  "ignore": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "picomatch ReDoS(영향 범위 <=4.0.7, 게시된 최신판 4.0.7 -- 패치 버전 없음). vite/vitest/tinyglobby/fdir 개발 도구의 글롭 매칭 경로로만 들어오고 사용자에게 배포되는 번들에는 포함되지 않는다(npm audit --omit=dev 0건). 패치판이 게시되면 업그레이드하고 이 항목을 지운다.",
+      "expires": "2026-12-02"
+    }
+  ]
+}
