@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-NotificationCenterPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — 여정 J3(모의 주문/감시) 소속, 알림을 확인해 전략 실행·모의 운용 상태를 모니터링 |
+| 목적(한 문장) | 채널별 알림 이력을 날짜별 다이제스트로 확인하고, 발송/실패 상태를 한눈에 감시한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:145` — `/notifications` 라우트, `protect(<NotificationCenterPage />)`으로 `ProtectedRoute` 필요 (로그인 세션 유효) |
+| 사용자 준비물 | 로그인 세션, `getNotificationHistory` API 접근 권한 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
