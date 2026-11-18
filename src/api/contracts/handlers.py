@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api.contracts.envelope import ApiError, current_trace_id
 from src.api.contracts.error_codes import HTTP_STATUS, ErrorCode
@@ -93,31 +94,71 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _handle_domain_or_unknown_exception(request: Request, exc: Exception) -> JSONResponse:
-        code, message, details = map_exception(exc)
-        # PLT-24 — AccountLockedError(423) 등 재시도 대기시간을 갖는 예외는
-        # `retry_after_seconds` 속성을 스스로 들고 있다(§3.3 계약, 프론트
-        # deriveLockout이 읽는 이름과 고정 일치) — 봉투에 그대로 실어 보낸다.
-        retry_after_seconds = getattr(exc, "retry_after_seconds", None)
-        if code == ErrorCode.INTERNAL_ERROR:
-            # 원인은 error 로그에만 — 클라이언트에게는 고정 메시지 + trace_id.
-            logger.error(
-                "미분류 예외",
-                exc_info=exc,
-                extra={
-                    "event_type": "api.unhandled_exception",
-                    "correlation_id": get_current_request_id(),
-                },
-            )
-            message = "일시적인 오류가 발생했습니다. 계속되면 trace_id와 함께 문의해주세요."
-            details = {}
-            retry_after_seconds = None
-        return _error_response(
-            code,
-            message,
-            details,
-            status_code=override_status(exc),
-            retry_after_seconds=retry_after_seconds,
+        return _domain_error_response(exc)
+
+    # Starlette는 `Exception` 핸들러를 ServerErrorMiddleware(모든 미들웨어 바깥)에서 실행한다.
+    # 그러면 응답이 CORSMiddleware를 거치지 않아 도메인 예외(401 등)에 Access-Control-Allow-Origin이
+    # 없고, 별도 오리진 프런트는 오류 본문을 읽지 못한 채 'Failed to fetch'만 본다.
+    # 같은 변환을 가장 안쪽 미들웨어에서 먼저 수행해 CORS를 통과시킨다(핸들러는 최후 안전망).
+    app.add_middleware(DomainErrorMiddleware)
+
+
+def _domain_error_response(exc: Exception) -> JSONResponse:
+    code, message, details = map_exception(exc)
+    # PLT-24 — AccountLockedError(423) 등 재시도 대기시간을 갖는 예외는
+    # `retry_after_seconds` 속성을 스스로 들고 있다(§3.3 계약, 프론트
+    # deriveLockout이 읽는 이름과 고정 일치) — 봉투에 그대로 실어 보낸다.
+    retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+    if code == ErrorCode.INTERNAL_ERROR:
+        # 원인은 error 로그에만 — 클라이언트에게는 고정 메시지 + trace_id.
+        logger.error(
+            "미분류 예외",
+            exc_info=exc,
+            extra={
+                "event_type": "api.unhandled_exception",
+                "correlation_id": get_current_request_id(),
+            },
         )
+        message = "일시적인 오류가 발생했습니다. 계속되면 trace_id와 함께 문의해주세요."
+        details = {}
+        retry_after_seconds = None
+    return _error_response(
+        code,
+        message,
+        details,
+        status_code=override_status(exc),
+        retry_after_seconds=retry_after_seconds,
+    )
+
+
+class DomainErrorMiddleware:
+    """처리되지 않은 예외를 봉투 응답으로 바꿔 바깥 미들웨어(CORS 등)를 통과시킨다.
+
+    이미 응답이 시작됐으면(스트리밍 도중) 건드리지 않고 다시 던진다.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:
+            if started:
+                raise
+            response = _domain_error_response(exc)
+            await response(scope, receive, send)
 
 
 __all__ = ["install_exception_handlers"]
