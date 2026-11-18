@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-MandatePage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22` J1~J6 전체 확인, §3: J1~J6 P1 중심. `MandatePage.tsx:173-175` 주석의 '작성자=승인자 400' 규칙(CM-5)과 `MandateActionError` 경로로 볼 때 승인 단계에 제3자가 개입할 수 있으나 보조 페르소나 여부는 미확인 |
+| 목적(한 문장) | 컴플라이언스 위임장 규칙(노출 한도·손실 한도·자율성 등)을 초안 작성·개정 제출·활성화·일시정지·재개하고 활성/대기 리비전을 확인한다 (`MandatePage.tsx:18-22` 상단 주석) |
+| 진입 조건 | 로그인 필요 — `router.tsx:138` `protect(<MandatePage />)` → `router.tsx:70-72` `<ProtectedRoute>` 감싸는 `protect()` 함수. `ProtectedRoute.tsx:20-21` 토큰 없으면 `/login` 리다이렉트, `ProtectedRoute.tsx:32-33` MFA 미설정 시 `/onboarding/mfa-setup` 리다이렉트, `ProtectedRoute.tsx:35-40` 위험 성향 미설정 시 `/onboarding/risk-assessment` 리다이렉트. 플래그 가드 없음(`router.tsx:93·101·109` 다른 라우트에만 `FeatureFlagGate` 존재). 추가 역할 가드 없음(확인된 범위 안에서). 로그인 후 `AppShell` 렌더 (`MandatePage.tsx:111`) |
+| 사용자 준비물 | 로그인 세션 필요, MFA 활성화 필요 (`ProtectedRoute.tsx:32`), 위험 성향 평가 완료 필요 (`ProtectedRoute.tsx:35`), 위임장 규칙 입력값: `MandateRuleForm` 컴포넌트(`frontend/apps/web/src/routes/mandates/MandateRuleForm.tsx:12-20`) — maxTotalExposurePct(총 노출 한도 %), maxSingleInstrumentPct(단일 종목 한도 %), minCashBufferPct(최소 현금 버퍼 %), maxDailyLossPct(일일 손실 한도 %), allowedAutonomy(OBSERVE/PAPER/LIMITED_LIVE), forbiddenAssets(금지 자산 쉼표 구분), 실패 시 '미확인'. 기존 활성 리비전 유무에 따라 초안 작성 또는 개정안 제안 중 하나 (`MandatePage.tsx:61`). 활성화는 작성자가 아닌 다른 사용자가 해야 함 (`MandatePage.tsx:173-175` 주석, CM-5 400 계약 인용, 실제 서버 검사 미확인) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
