@@ -30,11 +30,13 @@ test("demo account login leaves /login and reaches an authenticated screen", asy
   await expect(page.getByRole("heading", { name: "2단계 인증 설정 (필수)" })).toBeVisible();
 });
 
-test("offline demo onboarding page opens with a start button", async ({ page }) => {
-  // The route sits behind ProtectedRoute: logged-out visits bounce to /login.
+test("demo account visiting /onboarding/demo is guarded to the MFA setup step", async ({ page }) => {
+  // Current app behavior: an account with unfinished onboarding is redirected to the first
+  // mandatory step, so the offline demo start button is not reachable for the demo account.
   const { email, password } = demoAccount();
   await submitLogin(page, email, password);
   await expect(page).not.toHaveURL(/\/login/);
   await page.goto("/onboarding/demo");
-  await expect(page.locator('[data-testid^="demo-start-"]').first()).toBeVisible();
+  await expect(page).toHaveURL(/\/onboarding\/mfa-setup/);
+  await expect(page.getByRole("heading", { name: "2단계 인증 설정 (필수)" })).toBeVisible();
 });
