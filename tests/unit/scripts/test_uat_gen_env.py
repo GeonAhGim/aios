@@ -44,6 +44,8 @@ _SECRETS = {
     "JWT_HEX64": "a" * 64,
     "CRED_KID": "uat1",
     "CRED_HEX64": "b" * 64,
+    "JWT_SECRET_KEY": "c" * 64,
+    "CREDENTIAL_ENCRYPTION_KEY": "d" * 64,
 }
 
 
@@ -171,8 +173,30 @@ class TestBuildEnv:
         out = build_env(template_with_live, "http://x", _SECRETS)
         assert "CREDENTIAL_ENCRYPTION_KEYS_LIVE" not in out
         assert "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE" not in out
-        # Legacy single-key slot must also be stripped
-        assert "CREDENTIAL_ENCRYPTION_KEY=" not in out
+        # LIVE 슬롯이 없는 것과 별개로, 구형 단일 키는 앱 기동(SecretBundle)에 필요해 채워진다
+        assert "CREDENTIAL_ENCRYPTION_KEY=" + "d" * 64 in out
+
+    def test_legacy_secret_bundle_keys_present_for_app_startup(self):
+        """회귀: SecretBundle 필수 키가 없으면 api/worker가 KeyError로 죽는다."""
+        for template in (_MINIMAL_TEMPLATE, ""):
+            out = build_env(template, "http://x", _SECRETS)
+            env = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+            for key in (
+                "JWT_SECRET_KEY",
+                "CREDENTIAL_ENCRYPTION_KEY",
+                "BITGET_API_KEY",
+                "BITGET_API_SECRET",
+                "KIS_APP_KEY",
+                "KIS_APP_SECRET",
+            ):
+                assert env.get(key), f"{key} 누락"
+            assert len(env["CREDENTIAL_ENCRYPTION_KEY"]) == 64
+            assert "placeholder" in env["BITGET_API_KEY"]
+            assert env["CREDENTIAL_ENCRYPTION_KEY"] != env["JWT_SECRET_KEY"]
+
+    def test_exchange_placeholders_never_look_like_real_keys(self):
+        out = build_env("BITGET_API_KEY=realkey123\nKIS_APP_KEY=realkey456\n", "http://x", _SECRETS)
+        assert "realkey" not in out
 
     def test_no_legacy_credential_encryption_key(self):
         """Legacy CREDENTIAL_ENCRYPTION_KEY must not appear."""
@@ -242,10 +266,8 @@ class TestBuildEnvIntegration:
                 "CREDENTIAL_ENCRYPTION_KEYS_LIVE",
                 "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE",
             ), f"LIVE key found: {line[:80]}"
-        # Legacy single-key slot must also be stripped
-        for line in out.splitlines():
-            stripped = line.split("=", 1)[0].strip()
-            assert stripped != "CREDENTIAL_ENCRYPTION_KEY", f"Legacy key found: {line[:80]}"
+        # 구형 단일 키는 앱 기동(SecretBundle)에 필요해 채워진다(LIVE 스코프만 금지)
+        assert "CREDENTIAL_ENCRYPTION_KEY=" + s["CREDENTIAL_ENCRYPTION_KEY"] in out
 
     def test_database_url_format(self):
         with open(_REPO_ROOT / ".env.example", encoding="utf-8") as f:

@@ -38,6 +38,8 @@ _TARGET_KEYS: list[str] = [
     "POSTGRES_USER",
     "POSTGRES_DB",
     "POSTGRES_PASSWORD",
+    "JWT_SECRET_KEY",
+    "CREDENTIAL_ENCRYPTION_KEY",
     "JWT_SIGNING_KEYS",
     "JWT_ACTIVE_KID",
     "CREDENTIAL_ENCRYPTION_KEYS_PAPER",
@@ -70,10 +72,22 @@ def make_secrets() -> dict[str, str]:
         "JWT_HEX64": hex64,
         "CRED_KID": "uat1",
         "CRED_HEX64": secrets.token_hex(_KEY_BYTES),
+        "JWT_SECRET_KEY": secrets.token_hex(_KEY_BYTES),
+        "CREDENTIAL_ENCRYPTION_KEY": secrets.token_hex(_KEY_BYTES),
     }
 
 
 NL = chr(10)
+
+# secret_loader.py(SecretBundle)가 키 존재를 요구하는 구형 슬롯. 앱 기동(api/worker)에 필요하지만
+# 모의 스택은 실거래소를 호출하지 않으므로 실키가 아닌 명백한 자리표시자를 쓴다.
+PLACEHOLDER = "uat-paper-placeholder-not-a-real-key"
+EXCHANGE_PLACEHOLDER_KEYS: tuple[str, ...] = (
+    "BITGET_API_KEY",
+    "BITGET_API_SECRET",
+    "KIS_APP_KEY",
+    "KIS_APP_SECRET",
+)
 
 
 def build_env(
@@ -106,6 +120,14 @@ def build_env(
                 f"{secrets_data['POSTGRES_PASSWORD']}"
                 f"@postgres:5432/{DB_NAME}\n"
             )
+        elif stripped == "JWT_SECRET_KEY":
+            result.append(f"JWT_SECRET_KEY={secrets_data['JWT_SECRET_KEY']}\n")
+        elif stripped == "CREDENTIAL_ENCRYPTION_KEY":
+            result.append(
+                f"CREDENTIAL_ENCRYPTION_KEY={secrets_data['CREDENTIAL_ENCRYPTION_KEY']}\n"
+            )
+        elif stripped in EXCHANGE_PLACEHOLDER_KEYS:
+            result.append(f"{stripped}={PLACEHOLDER}\n")
         elif stripped == "POSTGRES_USER":
             result.append(f"POSTGRES_USER={DB_USER}\n")
         elif stripped == "POSTGRES_DB":
@@ -133,7 +155,6 @@ def build_env(
         elif stripped in (
             "CREDENTIAL_ENCRYPTION_KEYS_LIVE",
             "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE",
-            "CREDENTIAL_ENCRYPTION_KEY",
         ):
             pass  # drop
         else:
@@ -144,6 +165,13 @@ def build_env(
         result.append(NL)
     # postgres 컨테이너가 DATABASE_URL과 같은 사용자·DB로 초기화되도록 항상 명시한다(미지정이면
     # 이미지 기본값 postgres로 만들어져 api/migrate가 "password authentication failed"가 된다).
+    for key, value in (
+        ("JWT_SECRET_KEY", secrets_data["JWT_SECRET_KEY"]),
+        ("CREDENTIAL_ENCRYPTION_KEY", secrets_data["CREDENTIAL_ENCRYPTION_KEY"]),
+        *((k, PLACEHOLDER) for k in EXCHANGE_PLACEHOLDER_KEYS),
+    ):
+        if key not in seen:
+            result.append(f"{key}={value}" + NL)
     if "POSTGRES_USER" not in seen:
         result.append(f"POSTGRES_USER={DB_USER}" + NL)
     if "POSTGRES_DB" not in seen:

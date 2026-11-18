@@ -30,6 +30,11 @@ services:
       - "127.0.0.1:16379:6379"
     env_file:
       - .env.uat
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   migrate:
     build:
