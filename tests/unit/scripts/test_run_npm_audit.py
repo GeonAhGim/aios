@@ -156,6 +156,7 @@ def test_repo_exception_file_is_valid_and_unexpired() -> None:
     assert GHSA.lower() in ids
 
 
+@pytest.mark.perf
 def test_evaluate_is_fast_on_large_reports() -> None:
     advisories = [_via(f"GHSA-{i:04x}-aaaa-bbbb", name=f"pkg{i}") for i in range(2000)]
     started = time.perf_counter()
