@@ -85,7 +85,8 @@ services:
 
   web:
     build:
-      context: ops/uat
+      context: .
+      dockerfile: ops/uat/Dockerfile.web
       args:
         VITE_API_BASE_URL: ${UAT_API_BASE_URL}
     env_file:
