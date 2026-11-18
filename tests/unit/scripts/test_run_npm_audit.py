@@ -8,12 +8,13 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
-import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+
+from tests.support.perf_budget import PerfBudget
 
 _PATH = Path(__file__).resolve().parents[3] / "scripts" / "run_npm_audit.py"
 GHSA = "GHSA-fc5q-39xc-vjpf"
@@ -156,8 +157,9 @@ def test_repo_exception_file_is_valid_and_unexpired() -> None:
     assert GHSA.lower() in ids
 
 
-def test_evaluate_is_fast_on_large_reports() -> None:
-    advisories = [_via(f"GHSA-{i:04x}-aaaa-bbbb", name=f"pkg{i}") for i in range(2000)]
-    started = time.perf_counter()
-    mod.evaluate(_report(*advisories), {})
-    assert time.perf_counter() - started < 2.0
+@pytest.mark.perf
+def test_evaluate_cpu_budget_on_large_reports(perf_budget: PerfBudget) -> None:
+    """2000건 advisory 보고서 판정이 CPU 예산(100ms) 안에 끝난다(벽시계 아닌 CPU 시간)."""
+    report = _report(*[_via(f"GHSA-{i:04x}-aaaa-bbbb", name=f"pkg{i}") for i in range(2000)])
+    sample = perf_budget.best_of(lambda: mod.evaluate(report, {}), n=3, warmup=1)
+    assert sample.cpu_ms < 100.0, f"evaluate CPU budget 초과: {sample.cpu_ms:.1f}ms"
