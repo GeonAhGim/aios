@@ -126,45 +126,55 @@ def hook_definitions() -> dict[str, tuple[str, int]]:
     return defs
 
 
+# (kind, pattern, which group names the fact, ignore on import lines)
+SIMPLE_RULES: tuple[tuple[str, re.Pattern[str], int, bool], ...] = (
+    ("text", T_CALL, 2, False),
+    ("hook", HOOK_USE, 1, True),
+    ("flag", FLAG, 1, False),
+    ("error", ERROR_CALL, 1, True),
+    ("a11y", ROLE, 1, False),
+)
+
+
+def _testids(number: int, line: str) -> list[Fact]:
+    return [Fact(number, "testid", m.group(1) or m.group(2)) for m in TESTID.finditer(line)]
+
+
+def _controls(number: int, line: str) -> list[Fact]:
+    """Form fields (with their label key) and buttons (with their handler) on one line."""
+    found: list[Fact] = []
+    tag = FIELD_TAG.search(line)
+    if tag:
+        label = LABEL_PROP.search(line)
+        found.append(
+            Fact(number, "field", tag.group(1), (label.group(1) or label.group(2)) if label else "")
+        )
+    button = BUTTON_TAG.search(line)
+    if button:
+        handler = HANDLER.search(line)
+        found.append(Fact(number, "button", button.group(1), handler.group(2) if handler else ""))
+    return found
+
+
+def line_facts(number: int, line: str) -> list[Fact]:
+    stripped = line.strip()
+    if stripped.startswith(("//", "*", "/*")):
+        return []
+    is_import = stripped.startswith("import")
+    found = _testids(number, line) + _controls(number, line)
+    for kind, pattern, group, skip_imports in SIMPLE_RULES:
+        if skip_imports and is_import:
+            continue
+        found += [Fact(number, kind, m.group(group)) for m in pattern.finditer(line)]
+    return found
+
+
 def extract(path: Path) -> PageFacts:
     rel = path.relative_to(ROOT).as_posix()
     lines = path.read_text(encoding="utf-8").splitlines()
     page = PageFacts(rel, len(lines))
     for number, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if stripped.startswith(("//", "*", "/*")):
-            continue
-        for match in T_CALL.finditer(line):
-            page.facts.append(Fact(number, "text", match.group(2)))
-        for match in TESTID.finditer(line):
-            page.facts.append(Fact(number, "testid", match.group(1) or match.group(2)))
-        for match in HOOK_USE.finditer(line):
-            if not stripped.startswith("import"):
-                page.facts.append(Fact(number, "hook", match.group(1)))
-        for match in FLAG.finditer(line):
-            page.facts.append(Fact(number, "flag", match.group(1)))
-        for match in ERROR_CALL.finditer(line):
-            if not stripped.startswith("import"):
-                page.facts.append(Fact(number, "error", match.group(1)))
-        for match in ROLE.finditer(line):
-            page.facts.append(Fact(number, "a11y", match.group(1)))
-        tag = FIELD_TAG.search(line)
-        if tag:
-            label = LABEL_PROP.search(line)
-            page.facts.append(
-                Fact(
-                    number,
-                    "field",
-                    tag.group(1),
-                    (label.group(1) or label.group(2)) if label else "",
-                )
-            )
-        button = BUTTON_TAG.search(line)
-        if button:
-            handler = HANDLER.search(line)
-            page.facts.append(
-                Fact(number, "button", button.group(1), handler.group(2) if handler else "")
-            )
+        page.facts.extend(line_facts(number, line))
     return page
 
 
