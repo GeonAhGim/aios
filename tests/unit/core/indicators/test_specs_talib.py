@@ -17,13 +17,13 @@ from tests.conftest import PerfBudget
 
 
 def test_talib_specs_catalog_is_not_empty():
-    """TA-Lib 카탈로그가 정상 생성됨."""
+    """TA-Lib catalog generates normally."""
     assert len(TALIB_SPECS) > 0
-    assert len(TALIB_SPECS) >= 161  # 최소 161개 자동생성 + 11개 수동 오버라이드
+    assert len(TALIB_SPECS) >= 161  # min 161 auto-generated + 11 manual overrides
 
 
 def test_talib_specs_includes_manual_overrides():
-    """11개 수동 오버라이드가 모두 포함됨."""
+    """All 11 manual overrides are included."""
     required_overrides = {
         "SMA",
         "EMA",
@@ -41,35 +41,35 @@ def test_talib_specs_includes_manual_overrides():
 
 
 def test_talib_specs_deterministic():
-    """동일한 호출이 동일한 결과를 반환 (결정성)."""
+    """Identical calls return identical results (determinism)."""
     from src.core.indicators.specs_talib import TALIB_SPECS as TALIB_SPECS_2
 
-    # 다시 import해도 동일한 객체가 반환되거나, 동일한 구조를 가져야 함
+    # Re-importing must yield the same object or identical structure
     assert set(TALIB_SPECS.keys()) == set(TALIB_SPECS_2.keys())
 
-    # 각 항목의 name이 키와 일치
+    # Each item's name must match its key
     for key, spec in TALIB_SPECS.items():
         assert spec.name == key
 
 
 def test_talib_groups_is_not_empty():
-    """TA-Lib 그룹 분류가 생성됨."""
+    """TA-Lib group classification generates."""
     assert len(TALIB_GROUPS) > 0
 
 
 def test_each_spec_has_required_fields():
-    """각 IndicatorSpec이 필수 필드를 가짐."""
+    """Each IndicatorSpec carries required fields."""
     for name, spec in TALIB_SPECS.items():
         assert spec.name == name
         assert hasattr(spec, "inputs")
         assert hasattr(spec, "params")
         assert hasattr(spec, "outputs")
         assert hasattr(spec, "lookback")
-        assert len(spec.outputs) > 0, f"{name}: outputs 비어있음"
+        assert len(spec.outputs) > 0, f"{name}: outputs empty"
 
 
 def test_manual_override_sma_has_correct_defaults():
-    """수동 오버라이드 예: SMA는 기본값 20을 가짐."""
+    """Manual override example: SMA defaults to 20."""
     sma = TALIB_SPECS["SMA"]
     assert sma.name == "SMA"
     assert any(p.name == "timeperiod" for p in sma.params)
@@ -78,35 +78,35 @@ def test_manual_override_sma_has_correct_defaults():
 
 
 def test_generated_specs_have_lookback_function():
-    """자동생성 및 오버라이드 모든 spec이 lookback 함수를 가짐."""
+    """All auto-generated and overridden specs carry a lookback function."""
     for name, spec in TALIB_SPECS.items():
-        assert callable(spec.lookback), f"{name}: lookback이 callable이 아님"
+        assert callable(spec.lookback), f"{name}: lookback is not callable"
 
-        # lookback 함수가 동작
+        # Verify lookback function executes
         if spec.params:
             sample_params = {p.name: p.default for p in spec.params}
             result = spec.lookback(sample_params)
             assert isinstance(result, int)
-            assert result >= 0, f"{name}: lookback이 음수"
+            assert result >= 0, f"{name}: lookback is negative"
 
 
-# ── Negative tests (DoD: ≥3 건) ──────────────────────────────────────────────
+# ── Negative tests (DoD: ≥3) ─────────────────────────────────────────────────
 
 
 def test_generate_talib_specs_unknown_name_raises_valueerror() -> None:
-    """unknown TA-Lib 함수명: ValueError 발생 (fail-closed)."""
+    """Unknown TA-Lib function name: raises ValueError (fail-closed)."""
     with pytest.raises(ValueError, match="unknown talib function"):
         generate_talib_specs(["nonexistent_indicator_xyz"])
 
 
 def test_generate_talib_specs_mixed_unknown_raises_valueerror() -> None:
-    """유효+무효 혼합: 부분 생성 없이 전체 거부."""
+    """Mixed valid+invalid: reject all, generate none."""
     with pytest.raises(ValueError, match="unknown talib function"):
         generate_talib_specs(["sma", "also_fake"])
 
 
 def test_indicator_spec_plots_mismatch_outputs_raises_valueerror() -> None:
-    """plots 수와 outputs 수가 다르면 ValueError (IND-15)."""
+    """PlotSpec count differs from outputs: ValueError (IND-15)."""
     with pytest.raises(ValueError, match="PlotSpec count.*!= outputs count"):
         IndicatorSpec(
             name="fake",
@@ -119,7 +119,7 @@ def test_indicator_spec_plots_mismatch_outputs_raises_valueerror() -> None:
 
 
 def test_indicator_spec_fill_between_unknown_output_raises_valueerror() -> None:
-    """fill_between이 알려지지 않은 output를 참조하면 ValueError (IND-15)."""
+    """fill_between references unknown output: ValueError (IND-15)."""
     with pytest.raises(ValueError, match="fill_between references unknown output"):
         IndicatorSpec(
             name="fake",
@@ -139,7 +139,7 @@ def test_indicator_spec_fill_between_unknown_output_raises_valueerror() -> None:
 
 
 def test_indicator_spec_causal_default_is_true() -> None:
-    """causal 미지정 시 True (IND-16)."""
+    """causal defaults to True (IND-16)."""
     spec = IndicatorSpec(
         name="fake",
         inputs=("close",),
@@ -152,7 +152,7 @@ def test_indicator_spec_causal_default_is_true() -> None:
 
 
 def test_indicator_spec_causal_explicit_false_accepted() -> None:
-    """causal=False 명시 허용 (IND-16)."""
+    """causal=False explicitly accepted (IND-16)."""
     spec = IndicatorSpec(
         name="fake",
         inputs=("close",),
@@ -165,24 +165,27 @@ def test_indicator_spec_causal_explicit_false_accepted() -> None:
     assert spec.causal is False
 
 
-# ── Failure-injection test (DoD: ≥1 건) ──────────────────────────────────────
+# ── Failure-injection test (DoD: ≥1) ─────────────────────────────────────────
 
 
 def test_generate_talib_specs_talib_crash_raises_exception() -> None:
-    """talib.get_functions()가 예외를 raise하면 그 예외가 전파된다."""
-    with patch.object(
-        talib, "get_functions", side_effect=RuntimeError("simulated TA-Lib C-library crash")
+    """When talib.get_functions() raises, the exception propagates."""
+    # Patch at the generate_specs module level where talib is imported,
+    # not at the top-level `talib` module, to avoid cache-order dependency.
+    with patch(
+        "src.core.indicators.generate_specs.talib.get_functions",
+        side_effect=RuntimeError("simulated TA-Lib C-library crash"),
     ):
         with pytest.raises(RuntimeError, match="simulated TA-Lib C-library crash"):
             generate_talib_specs()
 
 
-# ── Performance assertion (DoD: perf_budget fixture 사용) ────────────────────
+# ── Performance assertion (DoD: perf_budget fixture) ─────────────────────────
 
 
 def test_generate_talib_specs_subset_performance(perf_budget: PerfBudget) -> None:
-    """generate_talib_specs subset 호출은 100ms 이내에 완료된다."""
-    # 실제 설치된 TA-Lib 함수명 사용 (0.4.x: AC, BBANDS, ADX 등)
+    """generate_talib_specs subset completes within 100ms."""
+    # Use actually installed TA-Lib function names (0.4.x: AC, BBANDS, ADX, etc.)
     installed = sorted(talib.get_functions())[:10]
     perf_budget.assert_within(
         lambda: generate_talib_specs(installed),
