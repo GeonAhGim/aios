@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-SignupPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더). 근거: PERSONAS_AND_JOURNEYS.md:22 — "P1 | **개인 트레이더(투자자)** | 전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독 | J1~J6 전체 [확인]". :36 — "기존 J1~J6(+UX 문서의 J7~J9 후보)은 **P1 중심**". :40 — "시작·온보딩(J1) | P1, 이후 모든 페르소나가 **자기 버전**을 가진다". |
+| 목적(한 문장) | 이메일과 비밀번호로 계정을 만들고, 성공하면 MFA 설정 화면(`/onboarding/mfa-setup`)으로 넘어간다. 근거: SignupPage.tsx:63-64(`signup.mutateAsync` 후 `navigate("/onboarding/mfa-setup")`). 부제: ":73('자동매매를 시작하기 위한 첫 단계입니다')". |
+| 진입 조건 | 공개 라우트. `router.tsx:85`에서 `/signup`은 `protect(...)`로 감싸지 않고 `<SignupPage />`를 바로 렌더링한다. :87-89의 온보딩 라우트는 `protect`를 쓴다(대비용으로 인용). 로그인 상태 가드는 `router.tsx:85` 기준으로 없다. 이미 로그인한 사용자가 `/signup`에 왔을 때의 리다이렉트 여부는 코드에서 확인하지 못했으므로 "미확인"이다. 기능 플래그 게이트는 `router.tsx:85` 줄에서 확인되지 않는다. 로그인 화면에서 넘어오는 경로는 미확인. |
+| 사용자 준비물 | 이메일 주소: SignupPage.tsx:75-80(`type="email"`, `required`). 비밀번호 12자 이상: SignupPage.tsx:89("12자 이상"), :94(`minLength={12}`). 인증 앱(Google Authenticator 등): SignupPage.tsx:104-105(`mfaPrenotice` 문구, "가입 전에 미리 설치해두세요"). 다음 단계(MFA 설정)에서 필요하다는 점도 같은 문구에 근거. 인증 앱 설치는 가입 전에 해둬야 한다. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
