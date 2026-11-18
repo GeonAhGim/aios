@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-AlertsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`: "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독" |
+| 목적(한 문장) | 사용자가 거래소·종목·지표·조건·임계값을 설정해 가격/지표 알림을 생성·관리하고, 발동된 알림을 확인·취소한다 |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:144` `/alerts` 경로 접근; `protect()`(`router.tsx:70-72`)가 `ProtectedRoute`(`ProtectedRoute.tsx:9`)로 감싸서 (1) 인증 토큰 존재(`ProtectedRoute.tsx:20`), (2) `useMe()`为用户 정보 존재(`ProtectedRoute.tsx:29`), (3) MFA 활성화 시 MFA 설정 완료(`ProtectedRoute.tsx:32`), (4) MFA 활성화 시 위험도 평가 완료(`ProtectedRoute.tsx:35`) 가드 통과 |
+| 사용자 준비물 | 로그인 세션, MFA 설정 완료, 위험도 평가 완료 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
