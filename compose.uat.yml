@@ -10,7 +10,7 @@ name: aios-uat
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16-bookworm  # 로컬 PC의 postgres:16 태그가 PG18로 별칭돼 있어(2026-11-18 실측) 명시 태그로 고정
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
