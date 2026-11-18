@@ -154,7 +154,7 @@ def test_main_passes_with_valid_exception_and_fails_without(
 def test_repo_exception_file_is_valid_and_unexpired() -> None:
     ignore = _PATH.parents[1] / "frontend" / ".npm-audit-ignore"
     ids = mod.load_ignored_ids(ignore, today=dt.date.today())
-    assert GHSA.lower() in ids
+    assert GHSA.lower() not in ids  # 감사 결과에서 사라진 예외는 지운다
 
 
 @pytest.mark.perf
