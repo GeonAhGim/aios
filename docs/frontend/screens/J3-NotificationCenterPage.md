@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-NotificationCenterPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더/투자자) — 전략의 백테스트·모의·실시간 실행 결과와 시스템 알림을 확인하는 사용자([확인] PERSONAS_AND_JOURNEYS.md §2 P1, J3 여정 소속) |
+| 목적(한 문장) | 발송된 알림(이메일/푸시/인앱)의 이력을 채널별·날짜별 다이제스트로 확인하고, 발송 성공/실패 현황을 한눈에 파악한다 |
+| 진입 조건 | `/notifications` 라우트(`frontend/apps/web/src/router.tsx:145`) — `protect()`로 감싼 `ProtectedRoute`가 인증 필요([확인]) |
+| 사용자 준비물 | 로그인 상태; 알림 채널(이메일/푸시/인앱) 구독 설정(`/settings/notifications`, `frontend/apps/web/src/router.tsx:149`) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
