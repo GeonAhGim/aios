@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+.env.uat
 .pytest_cache/
 *.egg-info/
 # 루트 로컬 상태(heartbeat)만 — 앵커 없는 runtime/ 는 src/core/script/runtime/(DSL-8)까지 무시했다

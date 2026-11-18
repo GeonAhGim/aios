@@ -93,6 +93,51 @@ EXCHANGE_PLACEHOLDER_KEYS: tuple[str, ...] = (
 )
 
 
+# LIVE-scope keys are never emitted (this stack is PAPER only).
+_DROPPED_KEYS: frozenset[str] = frozenset(
+    {"CREDENTIAL_ENCRYPTION_KEYS_LIVE", "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE"}
+)
+
+# Keys appended when the template does not define them (the app needs them to start).
+_APPEND_IF_MISSING: tuple[str, ...] = (
+    "JWT_SECRET_KEY",
+    "CREDENTIAL_ENCRYPTION_KEY",
+    *EXCHANGE_PLACEHOLDER_KEYS,
+    "UAT_DEMO_EMAIL",
+    "UAT_DEMO_PASSWORD",
+    "POSTGRES_USER",
+    "POSTGRES_DB",
+    "POSTGRES_PASSWORD",
+)
+
+
+def _assignments(web_origin: str, secrets_data: dict[str, str]) -> dict[str, str]:
+    """Return every key this script owns and the value it must carry."""
+    password = secrets_data["POSTGRES_PASSWORD"]
+    return {
+        "DATABASE_URL": f"postgresql+asyncpg://{DB_USER}:{password}@postgres:5432/{DB_NAME}",
+        # Without these the postgres container initialises as the image default user and
+        # api/migrate fail with "password authentication failed" (seen on first boot).
+        "POSTGRES_USER": DB_USER,
+        "POSTGRES_DB": DB_NAME,
+        "POSTGRES_PASSWORD": password,
+        "JWT_SECRET_KEY": secrets_data["JWT_SECRET_KEY"],
+        "CREDENTIAL_ENCRYPTION_KEY": secrets_data["CREDENTIAL_ENCRYPTION_KEY"],
+        "JWT_SIGNING_KEYS": f"{secrets_data['JWT_KID']}:{secrets_data['JWT_HEX64']}",
+        "JWT_ACTIVE_KID": secrets_data["JWT_KID"],
+        "CREDENTIAL_ENCRYPTION_KEYS_PAPER": (
+            f"{secrets_data['CRED_KID']}:{secrets_data['CRED_HEX64']}"
+        ),
+        "CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER": secrets_data["CRED_KID"],
+        "AIOS_RUNTIME_MODE": "PAPER",
+        "CORS_ALLOWED_ORIGINS": web_origin,
+        # Demo account: seed_demo signs up with it and the user logs in from .env.uat.
+        "UAT_DEMO_EMAIL": DEMO_EMAIL,
+        "UAT_DEMO_PASSWORD": secrets_data["UAT_DEMO_PASSWORD"],
+        **{key: PLACEHOLDER for key in EXCHANGE_PLACEHOLDER_KEYS},
+    }
+
+
 def build_env(
     template_text: str,
     web_origin: str,
@@ -101,8 +146,7 @@ def build_env(
     """Return a new .env string with target keys replaced.
 
     Lines not matching a target key are kept verbatim (including comments
-    and blank lines).  This makes unit testing trivial — just assert on
-    the output string.
+    and blank lines), which keeps unit testing trivial: assert on the output.
 
     Args:
         template_text:  Contents of .env.example.
@@ -112,80 +156,21 @@ def build_env(
     Returns:
         A complete .env string.
     """
-    lines: list[str] = template_text.splitlines(keepends=True)
+    assigned = _assignments(web_origin, secrets_data)
     result: list[str] = []
-
-    for line in lines:
-        stripped = line.split("=", 1)[0].strip() if "=" in line else ""
-        if stripped == "DATABASE_URL":
-            result.append(
-                f"DATABASE_URL=postgresql+asyncpg://{DB_USER}:"
-                f"{secrets_data['POSTGRES_PASSWORD']}"
-                f"@postgres:5432/{DB_NAME}\n"
-            )
-        elif stripped == "JWT_SECRET_KEY":
-            result.append(f"JWT_SECRET_KEY={secrets_data['JWT_SECRET_KEY']}\n")
-        elif stripped == "CREDENTIAL_ENCRYPTION_KEY":
-            result.append(
-                f"CREDENTIAL_ENCRYPTION_KEY={secrets_data['CREDENTIAL_ENCRYPTION_KEY']}\n"
-            )
-        elif stripped in EXCHANGE_PLACEHOLDER_KEYS:
-            result.append(f"{stripped}={PLACEHOLDER}\n")
-        elif stripped == "POSTGRES_USER":
-            result.append(f"POSTGRES_USER={DB_USER}\n")
-        elif stripped == "POSTGRES_DB":
-            result.append(f"POSTGRES_DB={DB_NAME}\n")
-        elif stripped == "POSTGRES_PASSWORD":
-            result.append(f"POSTGRES_PASSWORD={secrets_data['POSTGRES_PASSWORD']}\n")
-        elif stripped == "JWT_SIGNING_KEYS":
-            result.append(
-                f"JWT_SIGNING_KEYS={secrets_data['JWT_KID']}:{secrets_data['JWT_HEX64']}\n"
-            )
-        elif stripped == "JWT_ACTIVE_KID":
-            result.append(f"JWT_ACTIVE_KID={secrets_data['JWT_KID']}\n")
-        elif stripped == "CREDENTIAL_ENCRYPTION_KEYS_PAPER":
-            result.append(
-                f"CREDENTIAL_ENCRYPTION_KEYS_PAPER={secrets_data['CRED_KID']}:"
-                f"{secrets_data['CRED_HEX64']}\n"
-            )
-        elif stripped == "CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER":
-            result.append(f"CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER={secrets_data['CRED_KID']}\n")
-        elif stripped == "AIOS_RUNTIME_MODE":
-            result.append("AIOS_RUNTIME_MODE=PAPER\n")
-        elif stripped == "CORS_ALLOWED_ORIGINS":
-            result.append(f"CORS_ALLOWED_ORIGINS={web_origin}\n")
-        # Explicitly drop LIVE / legacy keys — never emit them.
-        elif stripped in (
-            "CREDENTIAL_ENCRYPTION_KEYS_LIVE",
-            "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE",
-        ):
-            pass  # drop
-        else:
+    for line in template_text.splitlines(keepends=True):
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+        if key in assigned:
+            result.append(f"{key}={assigned[key]}\n")
+        elif key not in _DROPPED_KEYS:
             result.append(line)
 
     seen = {ln.split("=", 1)[0].strip() for ln in result if "=" in ln}
     if result and not result[-1].endswith(NL):
         result.append(NL)
-    # postgres 컨테이너가 DATABASE_URL과 같은 사용자·DB로 초기화되도록 항상 명시한다(미지정이면
-    # 이미지 기본값 postgres로 만들어져 api/migrate가 "password authentication failed"가 된다).
-    for key, value in (
-        ("JWT_SECRET_KEY", secrets_data["JWT_SECRET_KEY"]),
-        ("CREDENTIAL_ENCRYPTION_KEY", secrets_data["CREDENTIAL_ENCRYPTION_KEY"]),
-        *((k, PLACEHOLDER) for k in EXCHANGE_PLACEHOLDER_KEYS),
-    ):
+    for key in _APPEND_IF_MISSING:
         if key not in seen:
-            result.append(f"{key}={value}" + NL)
-    # 체험용 데모 계정 -- seed_demo가 이 값으로 가입하고, 사용자는 .env.uat에서 확인해 로그인한다.
-    if "UAT_DEMO_EMAIL" not in seen:
-        result.append(f"UAT_DEMO_EMAIL={DEMO_EMAIL}" + NL)
-    if "UAT_DEMO_PASSWORD" not in seen:
-        result.append(f"UAT_DEMO_PASSWORD={secrets_data['UAT_DEMO_PASSWORD']}" + NL)
-    if "POSTGRES_USER" not in seen:
-        result.append(f"POSTGRES_USER={DB_USER}" + NL)
-    if "POSTGRES_DB" not in seen:
-        result.append(f"POSTGRES_DB={DB_NAME}" + NL)
-    if "POSTGRES_PASSWORD" not in seen:
-        result.append(f"POSTGRES_PASSWORD={secrets_data['POSTGRES_PASSWORD']}" + NL)
+            result.append(f"{key}={assigned[key]}" + NL)
     return "".join(result)
 
 

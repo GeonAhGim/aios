@@ -96,10 +96,11 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def _handle_domain_or_unknown_exception(request: Request, exc: Exception) -> JSONResponse:
         return _domain_error_response(exc)
 
-    # Starlette는 `Exception` 핸들러를 ServerErrorMiddleware(모든 미들웨어 바깥)에서 실행한다.
-    # 그러면 응답이 CORSMiddleware를 거치지 않아 도메인 예외(401 등)에 Access-Control-Allow-Origin이
-    # 없고, 별도 오리진 프런트는 오류 본문을 읽지 못한 채 'Failed to fetch'만 본다.
-    # 같은 변환을 가장 안쪽 미들웨어에서 먼저 수행해 CORS를 통과시킨다(핸들러는 최후 안전망).
+    # Starlette runs the `Exception` handler in ServerErrorMiddleware, outside every other
+    # middleware. Such responses never pass through CORSMiddleware, so domain errors (401 etc.)
+    # lack Access-Control-Allow-Origin and a cross-origin frontend only sees "Failed to fetch".
+    # The same conversion runs first in the innermost middleware so CORS applies; the handler
+    # above remains the last-resort safety net.
     app.add_middleware(DomainErrorMiddleware)
 
 
@@ -132,9 +133,9 @@ def _domain_error_response(exc: Exception) -> JSONResponse:
 
 
 class DomainErrorMiddleware:
-    """처리되지 않은 예외를 봉투 응답으로 바꿔 바깥 미들웨어(CORS 등)를 통과시킨다.
+    """Turn unhandled exceptions into envelope responses that pass outer middleware (CORS).
 
-    이미 응답이 시작됐으면(스트리밍 도중) 건드리지 않고 다시 던진다.
+    If the response has already started (mid-stream) the exception is re-raised untouched.
     """
 
     def __init__(self, app: ASGIApp) -> None:
