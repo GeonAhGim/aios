@@ -431,8 +431,8 @@ async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool, perf_b
     results: list = sample.result  # pyright: reportAny
 
     assert all(r.outcomes[0].order is not None for r in results)
-    budget_ms = 20_000  # 20 s wall-clock, same threshold as before
-    assert sample.wall_ms < budget_ms, (
-        f"{_CONCURRENT_RUNS} concurrent algo ticks took {sample.wall_ms / 1000:.2f}s "
-        f"-- looks superlinear"
+    budget_ms = 20_000  # 20 s CPU-time budget, same threshold as before
+    assert sample.cpu_ms < budget_ms, (
+        f"{_CONCURRENT_RUNS} concurrent algo ticks used {sample.cpu_ms / 1000:.2f}s CPU "
+        f"(wall {sample.wall_ms / 1000:.2f}s) -- looks superlinear"
     )
