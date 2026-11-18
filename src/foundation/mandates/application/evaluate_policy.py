@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+from src.foundation.mandates.application.errors import NoActiveMandateError as NoActiveMandateError
 from src.foundation.mandates.contracts.v1 import PolicyDecisionView, PolicyEvaluationSubject
 from src.foundation.mandates.contracts.v1 import PolicyOutcome as ContractOutcome
 from src.foundation.mandates.domain.models import MandateRevisionState
@@ -40,10 +41,6 @@ DECISION_CACHE_TTL_SECONDS = 30
 """75번 §3 "short TTL" — 같은 tenant/fingerprint 재요청이 몰릴 때(예: UI가
 버튼 연타를 막지 못한 경우) 매번 재계산하지 않는다. 30초는 임의값이며,
 실제 배포 데이터로 조정 대상."""
-
-
-class NoActiveMandateError(Exception):
-    pass
 
 
 def _fingerprint(

@@ -18,13 +18,10 @@ from uuid import UUID
 from src.foundation.evidence.application.record_command_event import record_command_event
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
+from src.foundation.mandates.application.errors import NoActiveMandateError as NoActiveMandateError
 from src.foundation.mandates.contracts.v1 import MandateRevisionView
 from src.foundation.mandates.domain.models import MandateRevisionState
 from src.foundation.mandates.ports.repository import MandateRepository
-
-
-class NoActiveMandateError(Exception):
-    pass
 
 
 async def pause_mandate(
