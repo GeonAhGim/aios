@@ -117,6 +117,7 @@ def cmd_up(
         return rc
     print(f"Web: http://{host}:{WEB_PORT}")
     print(f"API: http://{host}:{API_PORT}")
+    print("Demo login: UAT_DEMO_EMAIL / UAT_DEMO_PASSWORD in .env.uat (local file, PAPER only)")
     print("Phone access (run these yourself):")
     for line in tailscale_commands():
         print(f"  {line}")

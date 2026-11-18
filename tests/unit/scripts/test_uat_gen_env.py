@@ -46,6 +46,7 @@ _SECRETS = {
     "CRED_HEX64": "b" * 64,
     "JWT_SECRET_KEY": "c" * 64,
     "CREDENTIAL_ENCRYPTION_KEY": "d" * 64,
+    "UAT_DEMO_PASSWORD": "demo-pass-xyz",
 }
 
 
@@ -390,3 +391,11 @@ def test_build_env_gate_red_reproduction_10x_virtual_delay(
             budget_ms=1.0,
             batch=1,
         )
+
+
+def test_demo_account_written_for_seed_and_user_login() -> None:
+    """데모 계정이 .env.uat에 있어야 사용자가 로그인할 수 있다(무작위 비번 유실 방지)."""
+    out = build_env(_MINIMAL_TEMPLATE, "http://x", _SECRETS)
+    env = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+    assert env["UAT_DEMO_EMAIL"].endswith("@demo.uat")
+    assert env["UAT_DEMO_PASSWORD"] == "demo-pass-xyz"

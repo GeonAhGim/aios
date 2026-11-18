@@ -70,6 +70,10 @@ def test_failure_register_exchange_500_yields_run_exit_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """_register_exchange가 500을 반환하면 run()이 exit code 1로 종료한다."""
+    for name in _seed_demo.BITGET_DEMO_ENV:
+        monkeypatch.setenv(name, "user-demo-value")
+    monkeypatch.setattr(_seed_demo, "_signup", lambda *a, **k: (201, "tok"))
+    monkeypatch.setattr(_seed_demo, "_list_exchanges", lambda *a, **k: (200, []))
     monkeypatch.setattr(
         _seed_demo,
         "_register_exchange",
@@ -178,3 +182,21 @@ def test_extract_token_reads_real_data_envelope_and_legacy_ok() -> None:
     assert _seed_demo._extract_token(legacy) == "tok-legacy"
     assert _seed_demo._extract_token({"data": {}, "meta": {}}) is None
     assert _seed_demo._extract_token("not a dict") is None
+
+
+def test_exchange_link_skipped_without_user_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """키가 없으면 가짜 키로 거래소를 건드리지 않고(서버는 실제 인증을 시도해 400) 건너뛴다."""
+    for name in _seed_demo.BITGET_DEMO_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(_seed_demo, "_env_value", lambda name: None)
+    monkeypatch.setattr(_seed_demo, "_signup", lambda *a, **k: (201, "tok"))
+
+    def _boom(*a: object, **k: object) -> tuple[int, str | None]:
+        raise AssertionError("키가 없으면 거래소 등록을 호출하면 안 된다")
+
+    monkeypatch.setattr(_seed_demo, "_register_exchange", _boom)
+    assert _seed_demo.run(base_url="http://127.0.0.1:1", email="a@demo.uat", password="pw") == 0
+    assert "skip exchange link" in capsys.readouterr().out

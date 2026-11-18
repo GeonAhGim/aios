@@ -31,6 +31,7 @@ DEFAULT_WEB_ORIGIN: str = "http://127.0.0.1:18080"
 DEFAULT_OUT: str = ".env.uat"
 DB_USER: str = "aios"
 DB_NAME: str = "aios"
+DEMO_EMAIL: str = "demo@demo.uat"
 
 # Keys that this script will fill in (order matters for readability).
 _TARGET_KEYS: list[str] = [
@@ -74,6 +75,7 @@ def make_secrets() -> dict[str, str]:
         "CRED_HEX64": secrets.token_hex(_KEY_BYTES),
         "JWT_SECRET_KEY": secrets.token_hex(_KEY_BYTES),
         "CREDENTIAL_ENCRYPTION_KEY": secrets.token_hex(_KEY_BYTES),
+        "UAT_DEMO_PASSWORD": secrets.token_urlsafe(16),
     }
 
 
@@ -172,6 +174,11 @@ def build_env(
     ):
         if key not in seen:
             result.append(f"{key}={value}" + NL)
+    # 체험용 데모 계정 -- seed_demo가 이 값으로 가입하고, 사용자는 .env.uat에서 확인해 로그인한다.
+    if "UAT_DEMO_EMAIL" not in seen:
+        result.append(f"UAT_DEMO_EMAIL={DEMO_EMAIL}" + NL)
+    if "UAT_DEMO_PASSWORD" not in seen:
+        result.append(f"UAT_DEMO_PASSWORD={secrets_data['UAT_DEMO_PASSWORD']}" + NL)
     if "POSTGRES_USER" not in seen:
         result.append(f"POSTGRES_USER={DB_USER}" + NL)
     if "POSTGRES_DB" not in seen:

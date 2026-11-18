@@ -23,6 +23,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -30,16 +31,35 @@ from typing import Any
 # ---------------------------------------------------------------------------
 DEFAULT_BASE_URL: str = "http://127.0.0.1:18000"
 DEFAULT_EMAIL_DOMAIN: str = "demo.uat"
-DEMO_EXCHANGES: list[dict[str, str]] = [
-    # J1의 데모 키 경로 — demoDataset.ts의 3종목에 대응하는 거래소
-    {"exchange": "bitget", "label": "BTC/USDT 데모"},
-    {"exchange": "bitget", "label": "ETH/USDT 데모"},
-    {"exchange": "bitget", "label": "SOL/USDT 데모"},
-]
+# 거래소 연결은 서버가 실제 거래소에 인증을 시도하므로(가짜 키는 400) 사용자가 본인 Bitget 데모 키를
+# 환경변수/.env.uat로 줬을 때만 등록한다. 키가 없으면 가입까지만 하고, 화면의 오프라인 데모
+# (/onboarding/demo, 서버 키 불필요)를 쓰면 된다.
+BITGET_DEMO_ENV: tuple[str, str, str] = (
+    "UAT_BITGET_DEMO_API_KEY",
+    "UAT_BITGET_DEMO_API_SECRET",
+    "UAT_BITGET_DEMO_API_PASSPHRASE",
+)
+ENV_FILE_NAME: str = ".env.uat"
 
 # ---------------------------------------------------------------------------
 # HTTP helpers (urllib only)
 # ---------------------------------------------------------------------------
+
+
+def _env_value(name: str) -> str | None:
+    """프로세스 환경변수 우선, 없으면 저장소 루트의 .env.uat에서 읽는다(값은 출력하지 않는다)."""
+    value = os.environ.get(name)
+    if value:
+        return value
+    path = Path(__file__).resolve().parents[2] / ENV_FILE_NAME
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, sep, raw = line.partition("=")
+            if sep and key.strip() == name and raw.strip():
+                return raw.strip()
+    except OSError:
+        return None
+    return None
 
 
 def _url(path: str, base: str) -> str:
@@ -145,14 +165,20 @@ def _register_exchange(
     base_url: str,
     token: str,
     exchange: str,
+    credentials: tuple[str, str, str] | None = None,
 ) -> tuple[int, str | None]:
     """Register a demo exchange credential. Returns (status, error_code_or_none)."""
     url = _url("/exchange-credentials", base_url)
+    api_key, api_secret, passphrase = credentials or (
+        _DEMO_API_KEY,
+        _DEMO_API_SECRET,
+        _DEMO_API_PASSPHRASE,
+    )
     body = {
         "exchange": exchange,
-        "api_key": _DEMO_API_KEY,
-        "api_secret": _DEMO_API_SECRET,
-        "api_passphrase": _DEMO_API_PASSPHRASE,
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "api_passphrase": passphrase,
     }
     status, resp = _request("POST", url, body=body, token=token)
     error_code: str | None = None
@@ -184,7 +210,7 @@ def _list_exchanges(
 
 def _resolve_password(cli_password: str | None) -> str:
     """Return password from env var UAT_DEMO_PASSWORD, falling back to CLI arg."""
-    env_pw = os.environ.get("UAT_DEMO_PASSWORD")
+    env_pw = _env_value("UAT_DEMO_PASSWORD")
     if env_pw:
         return env_pw
     if cli_password:
@@ -202,6 +228,8 @@ def run(
 ) -> int:
     """Seed demo user and exchange credentials. Returns 0 on success, 1 on failure."""
     pw = _resolve_password(password)
+    if email is None:
+        email = _env_value("UAT_DEMO_EMAIL")
     if email is None:
         import secrets
 
@@ -227,30 +255,26 @@ def run(
         print(f"FAIL status={status} body={token}")
         return 1
 
-    # Step 2: Register demo exchanges (idempotent — skip if already registered)
-    for demo in DEMO_EXCHANGES:
-        exchange = demo["exchange"]
-        label = demo["label"]
-        print(f"Step 2: check {label} ({exchange}) ...", end=" ")
-
-        # Check if already registered
+    # Step 2: 거래소 연결은 사용자가 본인 Bitget 데모 키를 준 경우에만(멱등)
+    values = [_env_value(name) for name in BITGET_DEMO_ENV]
+    if not all(values):
+        print("Step 2: skip exchange link (UAT_BITGET_DEMO_* not set); use /onboarding/demo")
+    else:
+        print("Step 2: check bitget ...", end=" ")
         status, creds = _list_exchanges(base_url, token)
         if status != 200:
             print(f"FAIL list status={status}")
             return 1
-
-        already = any(c.get("exchange") == exchange for c in creds)
-        if already:
+        if any(c.get("exchange") == "bitget" for c in creds):
             print("OK (already registered)")
-            continue
-
-        # Register
-        status, err = _register_exchange(base_url, token, exchange)
-        if status == 201:
-            print(f"OK (registered, {status})")
         else:
-            print(f"FAIL status={status} error={err}")
-            return 1
+            status, err = _register_exchange(
+                base_url, token, "bitget", (values[0] or "", values[1] or "", values[2] or "")
+            )
+            if status != 201:
+                print(f"FAIL status={status} error={err}")
+                return 1
+            print(f"OK (registered, {status})")
 
     print("Done.")
     return 0
