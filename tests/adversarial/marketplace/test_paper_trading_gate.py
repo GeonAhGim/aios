@@ -268,25 +268,20 @@ async def test_check_paper_trading_eligibility_denies_on_acquire_failure() -> No
 
 
 @pytest.mark.perf
-async def test_check_paper_trading_eligibility_p95_latency(pool) -> None:
-    """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s.
-
-    raw perf_counter 단언을 RelativeBudget.measure_async로 전환(task-10879).
-    비동기 I/O(DB 조회)이므로 process_time 기반 PerfBudget이 아닌
-    wall-clock 기반 RelativeBudget을 사용한다.
-    """
+async def test_check_paper_trading_eligibility_p95_latency(pool, perf_budget) -> None:
+    """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s."""
     seller = await create_test_user(pool)
     strategy_id, version = await _create_strategy(pool, seller)
     await _insert_execution(pool, strategy_id, version, seller, days_ago=120)
 
     eligibility_fn = partial(check_paper_trading_eligibility, pool, strategy_id, version, seller)
 
-    await RelativeBudget().assert_within_async(
-        eligibility_fn,
-        n=20,
-        max_ratio=40,
-        label="check_paper_trading_eligibility",
-    )
+    samples = await perf_budget.samples_async(eligibility_fn, n=20)
+    wall_latencies = [s.wall_ms for s in samples]
+    sorted_latencies = sorted(wall_latencies)
+    p95 = sorted_latencies[int(len(sorted_latencies) * 0.95)]
+
+    assert p95 <= 2000, f"p95 latency {p95:.1f}ms exceeds 2s budget"
 
 
 @pytest.mark.perf
