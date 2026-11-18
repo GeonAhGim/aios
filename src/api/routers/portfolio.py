@@ -1,6 +1,6 @@
 """Router 19 — unified portfolio API (FD-19.1/FD-19.2).
 
-Spec: functional_design_doc_v1.20.md#FD-19.1/FD-19.2, FD-3.2
+Spec: functional design doc v1.21 (FD-19.1/FD-19.2, FD-3.2)
 
 PortfolioService assumes total_cash_balance is "already consolidated into a
 single currency by the caller" (see services/portfolio_service.py module
