@@ -123,6 +123,66 @@ async def test_request_id_context_is_reset_after_downstream_exception():
 
 
 # ------------------------------------------------------------------ #
+#  Negative tests — ULID / oversized / invalid X-Request-ID values   #
+#  must not cause 500; they should be rejected and a fresh ID used.  #
+# ------------------------------------------------------------------ #
+
+
+async def test_ulid_x_request_id_does_not_cause_500():
+    """A browser-generated ULID (26-char base32) in `X-Request-ID` must
+    return 401 (or any normal status) — never 500. The old code passed
+    the raw header through; downstream ``UUID(hex=raw)`` in
+    envelope.py raised ``ValueError`` because ULID contains non-hex
+    characters (M, P, …). The middleware must validate before trusting
+    the value."""
+    transport = ASGITransport(app=_make_app())
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/echo-request-id",
+            headers={REQUEST_ID_HEADER: "01M7PM0JK2XG3E6P15WD6C7DKN"},
+        )
+
+    # Must NOT be 500 — ULID is a valid correlation ID format.
+    assert response.status_code != 500
+    # The middleware should echo it back (it's ≤128 chars, alphanumeric).
+    assert response.headers[REQUEST_ID_HEADER] == "01M7PM0JK2XG3E6P15WD6C7DKN"
+
+
+async def test_x_request_id_exceeding_128_chars_gets_replaced():
+    """An `X-Request-ID` longer than 128 characters must be rejected
+    and replaced with a freshly generated UUID hex — preventing
+    unbounded header sizes from polluting logs."""
+    transport = ASGITransport(app=_make_app())
+    long_id = "a" * 129
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/echo-request-id",
+            headers={REQUEST_ID_HEADER: long_id},
+        )
+
+    assert response.status_code == 200
+    echoed = response.headers[REQUEST_ID_HEADER]
+    assert echoed != long_id
+    # Should be a valid UUID hex (32 chars).
+    assert len(echoed) == 32
+
+
+async def test_x_request_id_with_invalid_characters_gets_replaced():
+    """A header containing slashes or other non-alphanumeric characters
+    must be rejected (not a valid correlation ID format)."""
+    transport = ASGITransport(app=_make_app())
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/echo-request-id",
+            headers={REQUEST_ID_HEADER: "has/slash"},
+        )
+
+    assert response.status_code == 200
+    echoed = response.headers[REQUEST_ID_HEADER]
+    assert echoed != "has/slash"
+
+
+# ------------------------------------------------------------------ #
 #  Numeric performance assertion                                     #
 # ------------------------------------------------------------------ #
 

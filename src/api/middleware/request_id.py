@@ -16,6 +16,7 @@ app assembly point in main.py (this file provides only the middleware itself).
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -26,13 +27,35 @@ from starlette.responses import Response
 from src.core.logging.request_context import request_id_var
 
 REQUEST_ID_HEADER = "X-Request-ID"
+_MAX_REQUEST_ID_LENGTH = 128
+
+# ULID: 26 characters, base32 alphabet (excludes I, L, O, U to avoid confusion)
+# Also accept UUID hex (32 hex chars) and any other alphanumeric/kebab string.
+_VALID_REQUEST_ID_RE = re.compile(r"^[0-9a-zA-Z_-]+$")
+
+
+def _is_valid_request_id(value: str) -> bool:
+    """Return True when *value* is a well-formed correlation ID.
+
+    Accepts:
+    - UUID hex (32 hex chars)
+    - ULID (26 base32 chars)
+    - Any non-empty alphanumeric/kebab/underscore string up to 128 chars.
+
+    Rejects anything that exceeds the length budget or contains characters
+    that would break log-correlation (whitespace, control chars, slashes).
+    """
+    if not value or len(value) > _MAX_REQUEST_ID_LENGTH:
+        return False
+    return bool(_VALID_REQUEST_ID_RE.match(value))
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        raw = request.headers.get(REQUEST_ID_HEADER)
+        request_id = raw if raw and _is_valid_request_id(raw) else uuid.uuid4().hex
         token = request_id_var.set(request_id)
         try:
             response = await call_next(request)
