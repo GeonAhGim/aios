@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-ExecutionControlPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독" (PERSONAS_AND_JOURNEYS.md §2) |
+| 목적(한 문장) | 전략 ID, 버전, 배분 자본, 거래소, 모드(PAPER/LIVE)를 입력해 새 실행(execution)을 생성하고, 생성된 실행 목록을 확인·제어한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:127` — `/executions` 라우트는 `protect(<ExecutionControlPage />)`로 `ProtectedRoute`가 적용됨. 로그인한 사용자만 접근 가능. |
+| 사용자 준비물 | 전략 ID(`label4`, `:245`), 전략 버전(`label5`, `:248`), 배분 자본 금액 USDT(`label6`, `:255`), 거래소 선택(`label7`, `:263`, 현재 bitget 고정), 모드 선택 PAPER/LIVE(`label8`, `:268`). LIVE 모드 선택 시 `LiveOrderConfirmDialog`(`:90`)에서 1회 확인 단계(`step: confirm`, `:170`)를 거침. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
