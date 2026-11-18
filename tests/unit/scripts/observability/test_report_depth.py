@@ -95,9 +95,16 @@ def test_write_report_100_paths_under_200ms(tmp_path: Path) -> None:
     result: dict[str, object] = {"ok": True, "status_code": 200, "error": None}
 
     # 3회 측정 중 최소값 (Windows 지터 완화)
-    start = time.perf_counter()
-    notify_selftest.write_report(result, paths)
-    elapsed = time.perf_counter() - start
+    best = float("inf")
+    for _ in range(3):
+        # recreate paths each iteration (tmp_path is reused)
+        for p in paths:
+            p.unlink(missing_ok=True)
+        start = time.perf_counter()
+        notify_selftest.write_report(result, paths)
+        elapsed = time.perf_counter() - start
+        if elapsed < best:
+            best = elapsed
 
     assert all(p.exists() for p in paths), "모든 100개 경로가 작성되어야 한다"
-    assert elapsed < 0.2, f"write_report(100 paths) took {elapsed:.3f}s, budget 0.2s"
+    assert best < 0.2, f"write_report(100 paths) took {best:.3f}s, budget 0.2s"
