@@ -7,7 +7,8 @@
 | `SCREEN_SPEC_TEMPLATE.md` | 화면 기능 명세 템플릿(FE-1) | 확정 |
 | `XCUT_RULES.md` | 횡단 규칙집(FE-2) | Phase 0 작성 중 |
 | `UNSPECIFIED_ACTIONS.md` | 미규정 액션 레지스트리(D4) | 시작 |
-| `PRO_WORKSPACE_DESIGN.md` | Pro Workspace 설계(FE-9): 패널·맥락 버스·다중 거래소 정규화·밀도 단계 | v0.1 초안(사용자 검토 대기) |
+| `PRO_WORKSPACE_DESIGN.md` | Pro Workspace 설계(FE-9): 패널·맥락 그룹·다중 거래소 정규화·밀도 단계 | v0.2(비교 분석 반영, 기본안 승인) |
+| `COMPETITIVE_ANALYSIS.md` | 경쟁 제품 비교와 설계 결정 근거 | 작성(출처 6건) |
 | `screens/` | 화면별 명세 — J1~J3 먼저(Phase 0), 나머지는 Phase 1 | 작성 중 |
 
 ## 규칙
