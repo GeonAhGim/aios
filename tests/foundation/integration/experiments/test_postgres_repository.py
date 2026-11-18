@@ -23,6 +23,7 @@ from src.foundation.experiments.adapters.postgres_repository import (
     PostgresExperimentRepository,
 )
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
+from tests._perf.relative_budget import RelativeBudget
 from tests.support.db import create_pool_with_retry
 from tests.support.perf_budget import PerfBudget
 from tests.support.perf_inject import delayed_async
@@ -107,31 +108,27 @@ async def test_append_parent_child_lineage_round_trip(
 
 @pytest.mark.perf
 async def test_append_parent_child_lineage_p95_within_budget(
-    repo: PostgresExperimentRepository, perf_budget: PerfBudget
+    repo: PostgresExperimentRepository,
 ) -> None:
     """numeric performance assertion: lineage append+get 왕복 p95 가 예산 내.
 
-    I/O 바인딩 연산이므로 wall_ms 로 측정 — `PerfBudget.sample_async` 사용.
-    정상 입력에서 녹색; 지연 주입 테스트(`test_..._goes_red_with_io_delay`)
-    에서 같은 단언이 적색으로 전환됨을 보장한다.
+    I/O 바인딩 연산이므로 `RelativeBudget.measure_async` 로 측정 — process_time 기반
+    비율(Ratio) 단언으로 호스트 부하 변동을 상쇄한다(ADR-2026-09-09-D Decision 2,
+    task-10889). 정상 입력에서 녹색; 지연 주입 테스트(
+    `test_..._goes_red_with_io_delay`) 에서 같은 단언이 적색으로 전환됨을 보장한다.
     """
-    samples_ms: list[float] = []
-    for _ in range(20):
+
+    async def _one_lineage_call() -> object:
         tenant_id = uuid4()
         parent = _experiment(tenant_id=tenant_id)
         child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+        await repo.append(parent)
+        await repo.append(child)
+        return await repo.get(tenant_id, child.experiment_id)
 
-        async def _one_lineage_call(p=parent, c=child, t=tenant_id) -> object:
-            await repo.append(p)
-            await repo.append(c)
-            return await repo.get(t, c.experiment_id)
-
-        sample = await perf_budget.sample_async(_one_lineage_call)
-        samples_ms.append(sample.wall_ms)
-
-    p95_ms = _p95(samples_ms)
-    print(f"[lineage append] p95={p95_ms:.2f}ms budget<{_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms")
-    assert p95_ms < _APPEND_LINEAGE_P95_BUDGET_MS
+    sample = await RelativeBudget().measure_async(_one_lineage_call, n=20, warmup=0)
+    print(f"[lineage append] ratio={sample.ratio:.2f}x budget<{_APPEND_LINEAGE_P95_BUDGET_MS:.1f}x")
+    assert sample.ratio < _APPEND_LINEAGE_P95_BUDGET_MS
 
 
 async def test_append_parent_child_lineage_orphan_parent_not_prevented(
