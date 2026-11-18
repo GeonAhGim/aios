@@ -125,29 +125,39 @@ def test_build_reference_validates_endpoint_schema_keys() -> None:
 # ── failure-injection (monkeypatch 의존성 예외 유발) ─────────────────────
 
 
-def test_probe_candidate_catches_oserror_and_drops_candidate(
-    monkeypatch,
-) -> None:
-    """_probe_rest가 OSError를 raise하면 probe_candidate가 예외를 전파하고
-    fetch_and_save가 해당 candidate를 dropped로 처리하는지를 확인한다."""
+def _raise_oserror(*args, **kwargs):
+    raise OSError("network unreachable")
+
+
+def test_probe_candidate_propagates_oserror(monkeypatch) -> None:
+    """_probe_rest가 OSError를 raise하면 probe_candidate는 예외를 삼키지 않고 전파한다.
+    (드롭 처리는 caller인 fetch_and_save의 책임 -- 아래 테스트에서 검증)"""
     import upbit_openapi_fetch as mod
 
-    def raise_oserror(*args, **kwargs):
-        raise OSError("network unreachable")
-
-    monkeypatch.setattr(mod, "_probe_rest", raise_oserror)
-
-    # probe_candidate는 OSError를 캐시하지 않고 전파한다 — caller(fetch_and_save)가
-    # except (OSError, UpbitOpenAPIFetchError)로 받는다.
-    from upbit_openapi_fetch import probe_candidate
+    monkeypatch.setattr(mod, "_probe_rest", _raise_oserror)
 
     candidate = _CandidateEndpoint("/v1/market/all", "GET", "REST", "마켓 코드 조회")
     try:
-        probe_candidate(candidate)
+        mod.probe_candidate(candidate)
     except OSError:
         pass  # 정상 경로: 예외가 전파됨
     else:
         raise AssertionError("probe_candidate should have raised OSError")
+
+
+def test_fetch_and_save_drops_all_on_probe_oserror_and_writes_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """실패 주입: 모든 probe가 OSError를 던지면 fetch_and_save는 전부 드롭하고,
+    확인된 엔드포인트가 0개이므로 return 1, 기준 파일은 쓰지 않는다."""
+    import upbit_openapi_fetch as mod
+
+    monkeypatch.setattr(mod, "_probe_rest", _raise_oserror)
+    monkeypatch.setattr(mod, "_probe_ws", _raise_oserror)  # 네트워크 차단
+
+    output = tmp_path / "reference.json"
+    assert mod.fetch_and_save(output) == 1
+    assert not output.exists()
 
 
 # ── performance assertion (perf_budget fixture 사용) ─────────────────────
