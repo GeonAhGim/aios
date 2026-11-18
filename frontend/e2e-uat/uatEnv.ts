@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // UAT stack web entrypoint; override with UAT_WEB_URL.
 export const UAT_WEB_URL = process.env.UAT_WEB_URL ?? "http://127.0.0.1:18080";
@@ -37,7 +38,7 @@ export function demoAccount(): DemoAccount {
   let email = process.env.UAT_DEMO_EMAIL;
   let password = process.env.UAT_DEMO_PASSWORD;
   if (!email || !password) {
-    const envPath = resolve(__dirname, "..", "..", ".env.uat");
+    const envPath = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".env.uat");
     if (existsSync(envPath)) {
       const file = parseEnvFile(envPath);
       email = email || file.UAT_DEMO_EMAIL;
