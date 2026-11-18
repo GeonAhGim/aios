@@ -192,3 +192,20 @@ def test_generate_talib_specs_subset_performance(perf_budget: PerfBudget) -> Non
         budget_ms=100.0,
         label=f"generate_talib_specs({len(installed)} names)",
     )
+
+
+def test_talib_crash_injection_independent_of_warm_cache() -> None:
+    """Warm cache is reset by the autouse fixture, so the crash still propagates."""
+    from src.core.indicators import generate_specs
+
+    generate_specs._get_talib_metadata_cache()
+    assert generate_specs._TALIB_METADATA_CACHE is not None
+
+    # Simulate the next test's setup: the autouse fixture clears the warm cache.
+    generate_specs._TALIB_METADATA_CACHE = None
+    with patch(
+        "src.core.indicators.generate_specs.talib.get_functions",
+        side_effect=RuntimeError("simulated TA-Lib C-library crash"),
+    ):
+        with pytest.raises(RuntimeError, match="simulated TA-Lib C-library crash"):
+            generate_talib_specs()
