@@ -45,7 +45,9 @@ def test_up_order_and_args(capsys):
     assert cmds[0][-2:] == ["postgres", "redis"] and "--build" in cmds[0]
     assert cmds[1][-5:] == ["--profile", "migrate", "run", "--rm", "migrate"][-5:]
     assert cmds[2][-3:] == ["api", "worker", "web"]
-    assert cmds[3][1].endswith("seed_demo.py")
+    assert cmds[3][-6:-1] == ["exec", "-T", "api", "python", "-m"]
+    assert cmds[3][-1].endswith("market_data.application.uat_seed")
+    assert cmds[4][1].endswith("seed_demo.py")
     env = rec.calls[0][1]
     assert env["UAT_WEB_ORIGIN"] == "http://100.1.2.3:18080"
     assert env["UAT_API_BASE_URL"] == "http://100.1.2.3:18000"
@@ -176,3 +178,15 @@ def test_perf_cmd_up_goes_red_with_10x_virtual_delay(perf_budget):
     slow = virtual_delayed_sync(lambda: _up(Recorder()), 0.5)
     with pytest.raises(AssertionError):
         perf_budget.assert_within(slow, budget_ms=50.0, n=3, warmup=1, label="cmd_up_10x")
+
+
+def test_market_data_seed_failure_only_warns(capsys):
+    class FailSeed(Recorder):
+        def __call__(self, cmd, env=None) -> int:
+            super().__call__(cmd, env)
+            return 1 if "uat_seed" in cmd[-1] else 0
+
+    rec = FailSeed()
+    assert _up(rec) == 0
+    assert any("seed_demo" in " ".join(c) for c, _ in rec.calls)
+    assert "WARNING: market-data seed failed" in capsys.readouterr().err
