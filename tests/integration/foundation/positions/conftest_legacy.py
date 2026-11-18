@@ -1,7 +1,7 @@
 # loc-allow: shared fixtures/helpers for legacy_positions_projection integration tests
 """Shared fixtures and helpers for LegacyPositionsProjection tests.
 
-Imported by test_legacy_compat.py and test_legacy_compat_edge_cases.py.
+Imported by test_legacy_compat.py.
 """
 
 from __future__ import annotations
