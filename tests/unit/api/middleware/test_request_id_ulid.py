@@ -81,3 +81,10 @@ def test_current_trace_id_defensive_on_bad_value() -> None:
         assert isinstance(current_trace_id(), UUID)
     finally:
         request_id_var.reset(token)
+
+
+@pytest.mark.parametrize(
+    "bad", [ULID + "\n", "a" * 32 + "\n", "12345678-1234-1234-1234-123456789abc\n"]
+)
+def test_trailing_newline_is_invalid(bad: str) -> None:
+    assert not is_valid_request_id(bad)
