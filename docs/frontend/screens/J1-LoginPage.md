@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-LoginPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — `PERSONAS_AND_JOURNEYS.md` §2 P1, §3 여정 J1 "시작·온보딩" [확인] |
+| 목적(한 문장) | 이메일·비밀번호(+MFA)로 인증해 AIOS 세션을 시작하고, `?next`로 저장된 원경로 또는 `/dashboard`로 이동 [확인] |
+| 진입 조건 | 비로그인 상태 — `router.tsx:86` `/login` 라우트는 `protect()`/`FeatureFlagGate` 없이 직접 렌더, `ProtectedRoute.tsx:20~21` 토큰 없으면 `/login?next=...`로 리다이렉트 [확인] |
+| 사용자 준비물 | 계정(이메일+비밀번호 설정 완료), MFA 설정(첫 로그인 시 `ProtectedRoute.tsx:32~33` 이후 온보딩 강제) [확인] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
