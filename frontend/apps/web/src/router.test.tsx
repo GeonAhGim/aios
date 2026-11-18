@@ -48,7 +48,7 @@ vi.mock("@aios/shared-hooks", () => ({
 const { router } = await import("./router");
 
 function renderRouter() {
-  return render(<RouterProvider router={router} future={{ v7_startTransition: true }} />);
+  return render(<RouterProvider router={router} />);
 }
 
 function loginFullyOnboarded() {
