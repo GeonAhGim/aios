@@ -1,5 +1,7 @@
 # J1 화면 명세 -- 가입·로그인·MFA 설정·위험성향
 
+> **UNVERIFIED (2026-11-19, 기계 검증)**: 이 문서는 로컬 워커가 작성했고 `scripts/frontend_spec/verify_spec.py` 검증에서 인용 42건·식별자 17건 중 **근거 불일치 5건**이 나왔다(코드에 없는 필드·틀린 줄 번호 포함). **사실로 사용하지 말 것.** 검증기가 0건이 되도록 다시 쓰면 이 안내를 지운다.
+
 > 생성일: 2026-11-19 | 작업자: claude-local-1 | Task: task-25738
 > 명세 기준: `docs/frontend/SCREEN_SPEC_TEMPLATE.md` | ADR-2026-11-18-B §5
 

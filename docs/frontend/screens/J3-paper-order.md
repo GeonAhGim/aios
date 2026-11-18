@@ -1,5 +1,7 @@
 # J3 — 모의 주문·리스크 판정·체결·포지션
 
+> **UNVERIFIED (2026-11-19, 기계 검증)**: 이 문서는 로컬 워커가 작성했고 `scripts/frontend_spec/verify_spec.py` 검증에서 인용 64건·식별자 53건 중 **근거 불일치 42건**이 나왔다(코드에 없는 필드·틀린 줄 번호 포함). **사실로 사용하지 말 것.** 검증기가 0건이 되도록 다시 쓰면 이 안내를 지운다.
+
 > **UX 여정**: [UX_JOURNEYS.md §3](../specs/UX_JOURNEYS.md#j3-모의-주문부터-포지션-관리까지) · **스펙**: [L4-71](../specs/L4_execution_oms_and_exchange_v1.0.md#L4-71) · **ADR**: [ADR-2026-11-18-B](../design/ADR-2026-11-18-B-global-grade-frontend-program.md)
 
 ---

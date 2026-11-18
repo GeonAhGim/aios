@@ -1,0 +1,12 @@
+{
+ "findings_by_file": {
+  "docs/frontend/screens/J1-auth-onboarding.md": 10,
+  "docs/frontend/screens/J1-first-run-dashboard.md": 18,
+  "docs/frontend/screens/J2-discover-backtest.md": 6,
+  "docs/frontend/screens/J3-paper-order.md": 44,
+  "docs/frontend/xcut/DATA_FRESHNESS_AND_REALTIME.md": 4,
+  "docs/frontend/xcut/ERRORS_AND_TRACE.md": 5,
+  "docs/frontend/xcut/MONEY_ACTIONS.md": 6,
+  "docs/frontend/xcut/SESSION_AND_MFA.md": 38
+ }
+}
