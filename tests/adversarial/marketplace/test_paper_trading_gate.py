@@ -287,19 +287,14 @@ async def test_check_paper_trading_eligibility_p95_latency(pool, perf_budget) ->
 @pytest.mark.perf
 async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
     pool,
+    perf_budget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현 — 동일한 성능 단언이 충분히 큰 지연 주입 시 실제로 적색(AssertionError)
-    으로 전환되는지 확인한다.
+    """게이트 적색 재현 — 동일한 p95<=2s 단언이 충분히 큰 지연 주입 시 실제로 위반되는지 확인.
 
-    첫 번째로 정상 입력에서 녹색 통과를 검증한 뒤, asyncpg.Connection.fetchval 에
-    지연을 주입하고 동일한 단언이 실패하는지 확인한다.
+    먼저 정상 입력에서 p95 <= 2000ms를 검증(녹색), 이후 fetchval에 15초 지연을 주입해
+    p95 > 2000ms 위반을 포착(적색)한다.
     (task-11539: 검출력 확인 — 주입 지연 테스트 없으면 단언이 허울일 수 있음)
-
-    RelativeBudget.assert_within_async는 ratio 기반(보정 루프 대비 연산 시간 비율)이므로,
-    보정 루프(~80ms)의 40배(=3.2s)를 넘는 지연을 주입해야 ratio > max_ratio가 된다.
-    best-of-N 샘플 중 최소값이 예산을 넘게 하려면 지연이 충분히 커야 한다.
-    n=5에 15초 지연 → best-of-5 최소값 ~15s, 보정 ~80ms, ratio ~187x > 40x.
     """
     seller = await create_test_user(pool)
     strategy_id, version = await _create_strategy(pool, seller)
@@ -307,15 +302,15 @@ async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
 
     eligibility_fn = partial(check_paper_trading_eligibility, pool, strategy_id, version, seller)
 
-    # 녹색 제어군 — 정상 입력에서 통과해야 함
-    await RelativeBudget().assert_within_async(
-        eligibility_fn,
-        n=20,
-        max_ratio=40,
-        label="check_paper_trading_eligibility",
-    )
+    # 녹색 제어군 — 정상 입력에서 p95 <= 2000ms 통과
+    samples = await perf_budget.samples_async(eligibility_fn, n=20)
+    wall_ms_list = [s.wall_ms for s in samples]
+    sorted_wall = sorted(wall_ms_list)
+    p95 = sorted_wall[int(len(sorted_wall) * 0.95)]
 
-    # 적색 주입 — fetchval에 15초 지연을 가상으로 주입하여 ratio 예산을 넘게 함
+    assert p95 <= 2000, f"p95 latency {p95:.1f}ms exceeds 2s budget"
+
+    # 적색 주입 — fetchval에 15초 지연을 가상으로 주입하여 p95 > 2000ms 위반 유도
     from tests.support.perf_inject import virtual_delayed_async
 
     original_fetchval = asyncpg.Connection.fetchval
@@ -325,15 +320,14 @@ async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
 
     monkeypatch.setattr(asyncpg.Connection, "fetchval", delayed_fetchval)
 
-    with pytest.raises(AssertionError) as exc_info:
-        await RelativeBudget().assert_within_async(
-            eligibility_fn,
-            n=5,
-            max_ratio=40,
-            label="check_paper_trading_eligibility(injected)",
-        )
+    samples_red = await perf_budget.samples_async(eligibility_fn, n=5)
+    wall_ms_list_red = [s.wall_ms for s in samples_red]
+    sorted_wall_red = sorted(wall_ms_list_red)
+    p95_red = sorted_wall_red[int(len(sorted_wall_red) * 0.95)]
 
-    assert "ratio" in str(exc_info.value), "AssertionError가 'ratio' 단언에서 발생해야 함"
+    assert p95_red > 2000, (
+        f"p95 latency {p95_red:.1f}ms should exceed 2s budget with injected delay"
+    )
 
 
 @pytest.mark.perf
