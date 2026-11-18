@@ -137,7 +137,9 @@ class TestFailureInjectionGetRequestIdException:
         """ULID 등 비-UUID request_id 는 500 대신 같은 값 -> 같은 trace_id 로 결정적 매핑된다."""
         from src.api.contracts import envelope
 
-        monkeypatch.setattr(envelope, "get_current_request_id", lambda: "not-hex-value")
+        monkeypatch.setattr(
+            envelope, "get_current_request_id", lambda: "01M7PM0JK2XG3E6P15WD6C7DKN"
+        )
 
         first, second = ok(_Payload(value=1)), ok(_Payload(value=1))
         assert first.meta.trace_id == second.meta.trace_id
