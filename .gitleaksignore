@@ -20,3 +20,9 @@ c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-
 # 고정 예시 문자열("token: ghp_...")이며 실제 자격 증명 아님. 해당 파일은 현재 HEAD에는
 # 존재하지 않고 이력에만 남아 gitleaks 전체 이력 스캔에서 검출된다.
 1d805a01d3a1c77fb9b559f3ac4377c565f4c742:tests/test_cloud_queue_bridge.py:generic-api-key:101
+# 2026-11-18 CTO: 48b00b2e3(UAT-4 seed_demo 최초판) 36~38행 -- 패턴이 뻔한 가짜 데모 키 기본값(주석에도 실제 키 아님 명시).
+# HEAD에서는 이미 제거됐고(사용자 키는 환경변수로만), 이력 지문만 허용한다. 값 자체는 여기 적지 않는다.
+# 로컬 CI의 gitleaks(8.30.1)는 이 항목을 못 잡고 Actions(gitleaks-action 기본 8.24.3)만 잡았다 -- 버전 불일치가 반복 적색의 원인.
+48b00b2e3362c3246b6236edb62d9c98794c3dc2:scripts/uat/seed_demo.py:generic-api-key:36
+48b00b2e3362c3246b6236edb62d9c98794c3dc2:scripts/uat/seed_demo.py:generic-api-key:37
+48b00b2e3362c3246b6236edb62d9c98794c3dc2:scripts/uat/seed_demo.py:generic-api-key:38
