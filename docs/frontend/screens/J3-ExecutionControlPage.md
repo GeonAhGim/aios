@@ -13,10 +13,10 @@
 <!-- BLOCK:J3-ExecutionControlPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독" (PERSONAS_AND_JOURNEYS.md §2) |
-| 목적(한 문장) | 전략 ID, 버전, 배분 자본, 거래소, 모드(PAPER/LIVE)를 입력해 새 실행(execution)을 생성하고, 생성된 실행 목록을 확인·제어한다. |
-| 진입 조건 | `frontend/apps/web/src/router.tsx:127` — `/executions` 라우트는 `protect(<ExecutionControlPage />)`로 `ProtectedRoute`가 적용됨. 로그인한 사용자만 접근 가능. |
-| 사용자 준비물 | 전략 ID(`label4`, `:245`), 전략 버전(`label5`, `:248`), 배분 자본 금액 USDT(`label6`, `:255`), 거래소 선택(`label7`, `:263`, 현재 bitget 고정), 모드 선택 PAPER/LIVE(`label8`, `:268`). LIVE 모드 선택 시 `LiveOrderConfirmDialog`(`:90`)에서 1회 확인 단계(`step: confirm`, `:170`)를 거침. |
+| 주 페르소나(P1~P11) | P1(개인 트레이더/투자자) — J1~J6 전체의 핵심 페르소나. 백테스트·검증(J2)을 거친 전략을 실제 실행(PAPER 또는 LIVE)으로 등록하고, 실행 목록을 감시·관리함 [PERSONAS_AND_JOURNEYS.md §2] |
+| 목적(한 문장) | 전략 ID·버전·배분 자본·거래소·모드(PAPER/LIVE)를 입력해 실행을 생성하고, 생성된 실행 목록을 감시하며, LIVE 모드는 1회 확인 단계(UX_JOURNEYS.md §6.3)를 거쳐 실자금 주문을 제출한다 |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:127` — `/executions` 경로, `protect()` 래퍼(`ProtectedRoute`)로 인증된 세션 필수. LIVE 모드 선택 시 `Alert tone="warning"`으로 실제 자금 사용 경고 표시(`ExecutionControlPage.tsx:284~288`). FF_J3_RISK_PANEL 플래그 기본 OFF(`featureFlags.ts:16`) — 활성화 시 PRE_SUBMIT 위험 평가 배선(`ExecutionControlPage.tsx:205~207`) |
+| 사용자 준비물 | 로그인 세션, 실행할 전략의 ID 및 버전, 배분할 자본 금액(USDT), 거래소 선택(bitget 현재 단일). LIVE 모드는 관리자 승인 대기 중일 수 있음(`approvalRequestId` 표시, `ExecutionControlPage.tsx:304~309`) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
