@@ -55,10 +55,10 @@
 <!-- BLOCK:J1-RiskAssessmentPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | mutation 훅이 423(LOCKED) 또는 429(RATE_LIMIT_EXCEEDED)를 반환. `classifyRetry`(`shared-types/retryable.ts:40`)가 `RATE_LIMIT_EXCEEDED`를 `kind: "backoff"`로 분류. 423은 `classifyRetry`에 없으므로 `kind: "none"` 수렴. `routeApiError`(`shared-types/errorRouting.ts:88`)는 backoff면 `backoff_retry`, 나머지는 하위 분류기 매핑 실패 후 `classifyRetry(kind: "none")` → 기본 `not_found` 갈래를 타지 않고 `ErrorMessage`의 `errorCode`로 전달됨. | `ErrorMessage`(`RiskAssessmentPage.tsx:69-74`) 배너: `getApiErrorMessage`(`shared-types/apiError.ts`)가 `RATE_LIMIT_EXCEEDED`→"요청이 너무 많습니다. 잠시 후 다시 시도해 주세요." 문구 표시. `retryAfterSec`이 있으면 초 카운트다운(`:41-43`, `:49-53`)과 비활성화 재시도 버튼(`:66`). 카운트다운 0이 되면 버튼 활성화. 423(LOCKED)은 `kind: "none"` → 재시도 버튼 없음. | backoff_retry면 카운트다운 후 재시도 버튼 클릭. 423은 재시도 버튼 없음(같은 키로 잠김이 해소될 때까지 대기 후 새로고침). | 구현됨 (`:69-74`, `ErrorMessage.tsx:38-69`, `shared-types/retryable.ts:27-31`, `shared-types/errorRouting.ts:119-121`) |
+| 서버 오류(5xx) | mutation 훅이 500~503 반환. `classifyServerError`(`shared-types/serverError.ts:39`)가 503(EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY)을 `retryable`, 500(EXCHANGE_FATAL/INTERNAL_ERROR)을 `fatal`로 분류. `routeApiError`(`:115-117`)는 retryable→`backoff_retry`, fatal→`server_fatal`. | `ErrorMessage` 배너: `getApiErrorMessage`가 errorCode에 따른 한국어 문구 표시. `fatal`(`server_fatal`)은 `traceId`를 `legacy.errorMessage.t1`로 `:60`에 표시. `retryable`(`backoff_retry`)은 `retryAfterSec` 카운트다운과 재시도 버튼(`:63-68`). | backoff_retry면 카운트다운 후 재시도. server_fatal은 traceId만 표시, 재시도 버튼 없음(서버 측 조치 필요). | 구현됨 (`:69-74`, `ErrorMessage.tsx:36-69`, `shared-types/serverError.ts:25-30`, `shared-types/errorRouting.ts:115-117`) |
+| 네트워크 단절 | axios/fetch가 연결 실패, 타임아웃, DNS 실패 등을 반환. `err instanceof ApiError`가 false (`:120`). | `ErrorMessage` 배너: 상태 설정 함수가 `new Error(t("legacy.riskAssessmentPage.t12"))`로 감싸서 전달(`:120`). `errorCode`는 undefined, `traceId`는 undefined. `getApiErrorMessage(undefined, err.message)`가 fallback 문구("알 수 없는 오류가 발생했습니다.") 표시. 재시도 버튼 없음(classification.kind === "none"). | "제출하기" 버튼 재클릭. 네트워크 복구 후 동일 폼 값으로 재시도(초안 sessionStorage에 자동 저장됨 `:97-104`). | 구현됨 (`:119-121`, `:69-74`, `ErrorMessage.tsx:36-69`, `:97-104`) |
+| 부분 실패(일부 데이터만 실패) | 해당 없음. 이 화면은 단일 POST `/api/v1/account/risk-assessment`(`frontend/packages/api-client/src/clients/account.ts:26`)로 5개 필드를 원자적으로 제출한다. 서버 단에서 일부만 기록되는 아키텍처가 아니다. | — | — | 없음(원자적 제출 아키텍처 — 부분 실패 경로 없음) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
