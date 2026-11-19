@@ -37,10 +37,10 @@
 <!-- BLOCK:J1-ExchangeManagementPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `useExchangeCredentials`가 `isLoading: true` (`useExchanges.ts:5-9`의 `useQuery` 기본 로딩, `ExchangeManagementPage.tsx:21`에서 `isLoading` destructured) | `CredentialListCard.tsx:33-34` — `<LoadingState />` 표시. i18n 키 없음(LoadingState 컴포넌트 내부 고정 문구) | 없음(로딩 완료 대기) | 구현됨(`CredentialListCard.tsx:33-34`) |
+| 빈 상태 | `credentials`가 빈 배열(`CredentialListCard.tsx:35`의 `credentials.length > 0` 조건 거짓) | `CredentialListCard.tsx:79` — `<EmptyState>{t("legacy.credentialListCard.t5")}</EmptyState>` | 없음(등록 폼으로 이동) | 사실 시트 누락 — `legacy.credentialListCard.t5`는 facts.md에 없음. `legacy.credentialListCard.*` 키 전체가 시트에 등재되지 않음(생성기가 자식 컴포넌트 파일을 훑지 않음). 코드상 구현은 있으나 사실 시트 미등재 |
+| 정상 | `credentials.length > 0`(`CredentialListCard.tsx:35`의 `length > 0` 조건 참) | `CredentialListCard.tsx:36-76` — 거래소 목록 행(거래소명, 활성/비활성 배지, 연결일, withdrawalPermissionWarning, LIVE_BLOCKED_NOTICE). 페이지 제목 `legacy.exchangeManagementPage.title1` "거래소 연동"(`ExchangeManagementPage.tsx:135`) | 해지 버튼(`CredentialListCard.tsx:65-72`, `t("legacy.credentialListCard.t4")`), 거래소 선택(`onSelectExchange`, `ExchangeManagementPage.tsx:145` → `setSelectedExchange`), 등록 폼(`RegisterCredentialForm`, `ExchangeManagementPage.tsx:152-167`) | 구현됨(목록 행: `CredentialListCard.tsx:36-76`, 제목: `ExchangeManagementPage.tsx:135`, 해지: `CredentialListCard.tsx:65-72`, 선택: `ExchangeManagementPage.tsx:145`) |
+| 낡은 데이터(신선도 초과) | `useExchanges.ts:5-10`에 staleTime, refetchInterval, gcTime 옵션이 없음(기본값 staleTime=0, gcTime=300000). 수동 새로고침 UI 없음(CredentialListCard에 리프레시 버튼 없음) | 신선도 표시(마지막 갱신 시각 등) 없음. 검색 결과: `exchanges/` 전체에 stale, updatedAt, 마지막, 갱신 키워드가 없음(`ExchangePositionsCard.test.tsx:49`의 updatedAt은 테스트 데이터 필드일 뿐) | 등록 성공 시 `useExchanges.ts:16` — `qc.invalidateQueries({ queryKey: ["exchangeCredentials"] })`로 자동 refetch. 해지 성공 시 `useExchanges.ts:24` — 동일 무효화. 수동 새로고침 버튼 없음 | 구현됨(자동 무효화 경로: `useExchanges.ts:16,24`). 낡은 데이터 신선도 표시: 없음(`exchanges/` 전체 검색 결과 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
