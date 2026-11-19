@@ -1,5 +1,4 @@
 [
-  "apps/web/src/commandPalette/CommandPalette.depth1.test.tsx",
   "apps/web/src/commandPalette/matchCommands.test.ts",
   "apps/web/src/components/CoverageBadge.test.tsx",
   "apps/web/src/components/CoverageFreshnessPanel.test.tsx",

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 
 const navigateSpy = vi.fn();
 
@@ -109,28 +109,26 @@ describe("CommandPalette.depth1 failure injection", () => {
 
 describe("CommandPalette.depth1 performance", () => {
   it("[perf] 팔레트 열기 — 최선 5회 중 최소값이 예산 내 (실측 ≈ 5ms, 예산=실측*30=150ms, 커버리지 3x → 450ms)", () => {
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
+    const best = bestOfMs(() => {
       const { unmount } = render(tree());
       const startedAt = performance.now();
       openPalette();
-      best = Math.min(best, performance.now() - startedAt);
       unmount();
-    }
+      return performance.now() - startedAt;
+    });
     // 실측 ≈ 5ms (로컬 M2 Mac, 2026-11). 예산 = 실측 * 30 이상.
     expect(best).toBeLessThan(perfBudgetMs(150));
   });
 
   it("[perf] 검색어 입력 재렌더 — 최선 5회 중 최소값이 예산 내 (실측 ≈ 3ms, 예산=실측*30=90ms, 커버리지 3x → 270ms)", () => {
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
+    const best = bestOfMs(() => {
       const { unmount } = render(tree());
       openPalette();
       const startedAt = performance.now();
       typeQuery("포트");
-      best = Math.min(best, performance.now() - startedAt);
       unmount();
-    }
+      return performance.now() - startedAt;
+    });
     // 실측 ≈ 3ms (로컬 M2 Mac, 2026-11). 예산 = 실측 * 30 이상.
     expect(best).toBeLessThan(perfBudgetMs(90));
   });
