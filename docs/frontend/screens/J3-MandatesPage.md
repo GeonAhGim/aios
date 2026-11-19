@@ -80,7 +80,16 @@
 <!-- BLOCK:J3-MandatesPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 금전·위험 행동: 있음 | 활성화·일시정지·재개·위임장 초안/개정안 제출 — 활성화는 활성 리비전을 LIVE 상태로 전환하여 자동 주문을 개방한다. 일시정지/재개는 주문 실행 흐름의 상태 전이다. 위임장 변경(초안/개정안)은 규칙 정의 변경이지만 자체적으로 주문을 생성하지는 않는다. |
+| 활성화 | 있음 — `MandatesPage.tsx:107-120`(handleActivate)가 `activate.mutate({ revisionId })`를 호출(`useMandates.ts:36-37`). pendingRevision 카드의 "활성화" 버튼(`:169-170`)에서 trigger. 서버 측 LIVE 주문 개방 여부는 미확인. |
+| LIVE 전환 | 입력 경로: `MandateRuleForm.tsx:10`의 `AUTONOMY_OPTIONS`에 `"LIMITED_LIVE"` 옵션, 드롭다운 `:82-91`(`:86` map). 페이지에서는 `handleCreate`(`MandatesPage.tsx:101-105`)가 초안/개정안을 서버에 POST하고, 활성화(`:107-120`)가 별도 버튼으로 LIVE 전환을 트리거한다. 활성화가 실제 LIVE 전환인지는 미확인. |
+| 위임장 변경 (초안/개정안) | 있음 — `handleCreate`(`MandatesPage.tsx:101-105`)가 `activeRevision` 존재 여부로 초안(createDraft) vs 개정안(proposeAmendment)을 분기. `MandateRuleForm.tsx:82-91`에서 allowedAutonomy 드롭다운 선택 가능. |
+| 일시정지·재개 | 있음 — `MandatesPage.tsx:65-67`에서 `activeRevision.state === "ACTIVE"`일 때 "일시정지" 버튼을, `:69-71`에서 `"PAUSED"`일 때 "재개" 버튼을 렌더. `:153`에서 `pause.mutate()`, `:154`에서 `resume.mutate()` 호출. `useMandates.ts:45`, `:53`에서 `apiClient.pauseMandate()`, `apiClient.resumeMandate()`로 전달. |
+| 주문/실행 생성 | 없음 — 이 화면에 주문 제출 버튼은 없다. `MandatePolicyPanel.tsx:16`, `:23`의 `ORDER_SUBMIT`은 정책 평가 호출일 뿐 실제 주문을 생성하지 않는다. `useMandates.ts:58-65`의 policy:evaluate는 "부수효과: PolicyDecision 기록은 있지만 이벤트는 없음". |
+| 출금 | 없음 — `frontend/apps/web/src/routes/mandates/` 내 `withdraw|출금` 검색 결과 0건. 공유 훅·API 클라이언트도 미확인. |
+| 확인 절차 | 없음 — 활성화(`:107-120`), 일시정지(`:153`), 재개(`:154`) 모두 확인 단계 없이 한 번 클릭으로 mutation 호출. `routes/mandates/` 내 `confirm|Dialog|확인` 검색 결과 0건. |
+| 멱등성 | 미확인 — `useMandates.ts`의 activate/pause/resume/draft/amendment 훅 모두 idempotencyKey 인자를 받지 않는다(`useMandates.ts:20`, `:28`, `:36-37`, `:45`, `:53`). `frontend/packages/api-client/src/clients/mandates.ts`의 activateMandateRevision은 `body?: ActivateRevisionRequest = {}`만 받고 idempotency 헤더 설정 없음. 다른 훅(usePaperControl, usePortfolio 등)은 idempotencyKey를 받지만 mandate 훅은 받지 않음. |
+| 불확실 결과 표시 | 있음 — 네트워크 오류 시 `MandatesPage.tsx:75-77`(lifecycleError), `:174-177`(activateError), `:188-190`(createError)에서 `<MandateActionError>` 배너 노출. 409 동시성 충돌 시 `:116`에서 `classifyStateConflict` → `refetch_retry`이면 즉시 `refetch()`로 최신 activeRevision 반영. `MandateActionError`가 `ErrorMessage`에 `error.traceId`를 전달(`MandateActionError.tsx:21`), ErrorMessage가 `legacy.errorMessage.t1`로 trace_id 표시. 타임아웃 후 "처리 여부 모름" 표시는 없음. st-c 블록과 재시도 버튼 부재는 일치. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
