@@ -84,7 +84,11 @@
 <!-- BLOCK:J1-OnboardingFlowPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| TODO | | |
+| `useExchangeCredentials()` 조회 실패 (`credentials.isError === true`, react-query default `retry: 3` 소진 후) | 미정의 — 화면에 에러 메시지 미표시. `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.tsx:46` 훅 내부 에러 처리 없음. `frontend/apps/web/src/routes/onboarding/onboardingProgress.ts:65` `hasNonEmptyList`가 `isError` 시 `false` 반환(fail-closed) | 화면에 아무 표시 없음(빈 상태 또는 로딩 중인 데이터로 동작). 수동 재시도 버튼 없음. 윈도우 포커스 시 `refetchOnWindowFocus: true`로 자동 재조회 (`shared-hooks/src/useExchanges.ts:6-9` react-query 기본 옵션) | 미노출 — ErrorMessage 컴포넌트 호출 없음 (`:50-54`에서 `credentials.isError`를 progress 계산에만 사용) |
+| `useMyStrategies()` 조회 실패 (`strategies.isError === true`) | 미정의 — 화면에 에러 메시지 미표시. `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.tsx:47` 훅 내부 에러 처리 없음. `onboardingProgress.ts:65` fail-closed | 화면에 아무 표시 없음. 전략 생성 Mutation(`useCreateStrategy`, `useGenerateWizardStrategy`, `useGenerateFromPrompt`)의 `onSuccess` 콜백이 `["myStrategies"]` 키 무효화 콜백을 보내지 않아 — 전략 생성 후 목록이 자동 갱신되지 않음(`shared-hooks/src/useStrategyBuilder.ts:31-35` mutation 정의에 `onSuccess` 없음; `shared-hooks/src/useExchanges.ts:16`과 `shared-hooks/src/usePaperControl.ts:24`의 `onSuccess`는 각각 `exchangeCredentials`/`paperDeployments` 키만 무효화) | 미노출 — progress 계산에만 사용, UI 렌더링에 에러 정보 전달 안 함 |
+| `usePaperDeployments()` 조회 실패 (`deployments.isError === true`) | 미정의 — 화면에 에러 메시지 미표시. `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.tsx:48` 훅 내부 에러 처리 없음. `onboardingProgress.ts:65` fail-closed | 화면에 아무 표시 없음. Mutation(`useRequestPaperDeployment`, `useDeploymentCommand`)은 `onSuccess`에서 수동 무효화(`shared-hooks/src/usePaperControl.ts:24`) — 하지만 initial query 실패 시 재시도는 react-query default `retry: 3`에만 의존 | 미노출 — progress 계산에만 사용 |
+| `deriveOnboardingProgress` 전체 실패 (3개 훅 중 2개 이상 `isError`) | 미정의 —同上 | fail-closed: 모든 실패 단계가 "미완료"로 처리됨. `currentStepId`는 첫 `complete === false` 단계(보통 `connectExchange`)로 고정. 사용자가 문제를 인지할 수 없는 상태 | 미노출 |
+| react-query 네트워크 오류 (전체 훅 공통) | `errors.retryAfterSeconds` (`catalog.en.ts:38`, `catalog.ko.ts:30`) — 하지만 현재 화면에서 이 키를 호출하는 코드 없음 (`OnboardingFlowPage.tsx:44-55`에 error 관련 `t()` 호출 없음) | react-query 기본 `retry: 3`, `retryDelay: 1000, 2000, 4000ms`. 3회 소진 후 `isError`로 전이. 백그라운드에서 네트워크 복구 시 `refetchOnWindowFocus: true` 또는 `refetchOnMount: true`로 자동 재시도 | 미노출 — traceId 추출/표시 코드 없음 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
