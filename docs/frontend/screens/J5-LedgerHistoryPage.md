@@ -13,10 +13,10 @@
 <!-- BLOCK:J5-LedgerHistoryPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더) — 원장 내역으로 자신의 모든 거래·배분·수수료 이력을 조회. P11(감사자)도 읽기 전용으로 접근 가능(PERSONAS_AND_JOURNEYS.md §2). |
+| 목적(한 문장) | 원장(ledger)의 모든 엔트리를 커서 기반 페이지네이션으로 조회하고 이전/다음으로 탐색한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:142` — `/wallet/ledger` 경로, `protect()` HOC로 인증 요구. |
+| 사용자 준비물 | 로그인된 세션(protect HOC 필요). |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
