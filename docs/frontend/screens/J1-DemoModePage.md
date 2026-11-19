@@ -33,10 +33,10 @@
 <!-- BLOCK:J1-DemoModePage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | 컴포넌트에 로딩 분기 없음(`DemoModePage.tsx:9~41`에 조건부 렌더링 부재). 데이터는 모듈 상수(`demoDataset.ts:13~17`). i18n 지연 로드 중 동작 | 없음 | 없음 | 없음(근거: 로딩 분기 부재 `DemoModePage.tsx:9~41`). i18n 지연 로드 중 동작은 `미확인` |
+| 빈 상태 | `DEMO_INSTRUMENTS`는 길이 3의 고정 배열(`demoDataset.ts:13~17`). 빈 배열일 때 안내 문구 없음. 사실 시트에 빈 상태 문구 키 없음(사실 시트 10~16줄) | 빈 `<ul>`만 남음 | 없음 | 없음(근거: 고정 길이 3 배열, 빈 상태 처리 부재 `DemoModePage.tsx:19~36`) |
+| 정상 | 페이지 렌더링. `DEMO_INSTRUMENTS`의 3개 종목 렌더링 | 제목 `demoMode.pageTitle`("데모 모드", `DemoModePage.tsx:15`), 설명 `demoMode.description`(`:16`), "샘플 종목" 라벨 `demoMode.instrumentListLabel`(`:18`), 종목별 "(샘플)" 태그 `demoMode.sampleTag`(`:27`), "데모 시작" 버튼 `demoMode.startCta`(`:31`) | 종목별 "데모 시작" 버튼 클릭 시 `/onboarding/demo/{id}`로 이동 (`DemoModePage.tsx:29~32`), 테스트 ID `demo-start-{id}`(사실 시트 44줄) | 구현됨(`DemoModePage.tsx:15~32`, 사실 시트 12~16줄) |
+| 낡은 데이터(신선도 초과) | 페이지는 `Date.now()`를 쓰지 않음. 데이터셋은 고정 원점 `2025-01-01 UTC`로 결정론적 생성(`demoDataset.ts:21~23`). "낡음" 조건·문구 없음 | 없음 | 없음 | 없음(근거: 신선도 검사 부재 `DemoModePage.tsx:9~41`). 앱 전체 신선도 처리는 `미확인` |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
