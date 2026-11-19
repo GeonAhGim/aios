@@ -36,10 +36,10 @@
 <!-- BLOCK:J1-DemoChartPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | 백테스트 실행 중(`isRunning=true`, `DemoChartPage.tsx:29`). 초기 진입은 동기 계산(`DemoChartPage.tsx:21-22`)이라 로딩 UI 없음. | 버튼이 `loading` 상태(`<Button loading={isRunning}>`, `:66`), 버튼 아래 `<LoadingState />` 표시(`:70`). | 로딩 완료(`isRunning=false`)까지 대기. | 구현됨(`:70` `<LoadingState />`, `:66` `loading={isRunning}`) |
+| 빈 상태 | 종목 미등록(`!instrument`, `:37`). `findDemoInstrument(instrumentId)`가 `null` 반환(`demoDataset.ts:52-53`). 캔들 0개(`getDemoDailyCandles`가 `[]` 반환, `:62`)일 때는 별도 빈 문구 없음. | EmptyState 컴포넌트 + demoMode.chart.unknownInstrument("알 수 없는 데모 종목입니다.", `:51`). 하단에 demoMode.chart.backLink("데모 종목 목록으로") 버튼(`:45-47`). | /onboarding/demo로 돌아가기(`:44`). | 구현됨(`:42-52` EmptyState + `:44-48` Link+Button) |
+| 정상 | 종목 등록, 캔들 데이터 존재. 차트 `demo-chart-canvas`(`:62-63`), 결과 섹션 `demo-backtest-summary`(`:71-84`). | `CandlestickChart` 차트(`:63`), "백테스트 요약"(`demoMode.chart.summary.heading`, `:73`), "최종 자산"(`:76`), "거래 횟수"(`:80`), "최대 낙폭"(`:81`). "지금 백테스트 실행" 버튼(`:67`). 하단 `backLink` 링크(`:86`). | 백테스트 재실행(버튼 클릭, `:66`), 데모 종목 목록으로 이동(`:85-87`). | 구현됨(`:62-87`) |
+| 낡은 데이터(신선도 초과) | 없음. 데모 데이터는 정적 결정론적 PRNG(`demoDataset.ts:59-61`), 타임스탬프 기반 신선도 표시/캐시 무효화 없음. | — | — | 없음 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
@@ -47,10 +47,10 @@
 <!-- BLOCK:J1-DemoChartPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 없음. 모든 데이터가 로컬 함수(`facts` Data hooks: `findDemoInstrument`, `getDemoDailyCandles`, `runDemoBacktest` 모두 로컬). 네트워크 호출 없음. | — | — | 없음 |
+| 인증 필요/세션 만료(401) | 없음.同上. `router.tsx:108`의 `protect(...)` 가드가 라우트 단위로 처리. | — | — | 없음(`router.tsx:108` 라우트 가드) |
+| 권한 없음/MFA 필요(403) | 없음.同上. | — | — | 없음 |
+| 충돌/상태 불일치(409) | 없음.同上. | — | — | 없음 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
@@ -58,10 +58,10 @@
 <!-- BLOCK:J1-DemoChartPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 없음. 모든 데이터가 로컬 함수(`facts` Data hooks). 서버 API 호출 없음. | — | — | 없음 |
+| 서버 오류(5xx) | 없음.同上. | — | — | 없음 |
+| 네트워크 단절 | 없음.同上. | — | — | 없음 |
+| 부분 실패(일부 데이터만 실패) | 없음.同上. | — | — | 없음 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
