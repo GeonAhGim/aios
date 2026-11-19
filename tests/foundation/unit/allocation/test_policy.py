@@ -232,7 +232,8 @@ def test_allocate_by_weight_hot_path_performance(perf_budget):
     targets = _equal_weights(*(uuid4() for _ in range(5)))
     perf_budget.assert_within(
         lambda: allocate_pro_rata(Decimal("1000"), targets, Decimal("1")),
-        budget_ms=1000.0,
+        # budget_ms는 호출당 값(cpu_ms/batch 비교) — 원본 10k회 합계 1.0s 미만 = 호출당 0.1ms.
+        budget_ms=0.1,
         n=5,
         batch=10_000,
         label="allocate_by_weight",
@@ -247,7 +248,8 @@ def test_allocate_manual_hot_path_performance(perf_budget):
     total = sum((t.quantity for t in targets), Decimal("0"))
     perf_budget.assert_within(
         lambda: allocate_manual(total, targets),
-        budget_ms=1000.0,
+        # budget_ms는 호출당 값(cpu_ms/batch 비교) — 원본 10k회 합계 1.0s 미만 = 호출당 0.1ms.
+        budget_ms=0.1,
         n=5,
         batch=10_000,
         label="allocate_manual",
