@@ -66,7 +66,7 @@
 <!-- BLOCK:J1-DemoModePage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/DemoModePage.tsx:30`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/onboarding/DemoModePage.tsx:30`) — "데모 시작" 클릭 | 1. `ProtectedRoute` 통과(로그인, `router.tsx:70~72`). 2. `onboarding_demo_mode` FeatureFlag 활성화(`router.tsx:101`). 3. 사용자가 3종목 중 하나 선택 | `react-router-dom`의 `<Link to>`(`DemoModePage.tsx:29`)가 브라우저 네비게이션 발생. `/onboarding/demo/{instrument.id}` 라우트 매칭 → `DemoChartPage` 렌더(`router.tsx:107~113`). `instrument.id`는 URL 파라미터(`:instrumentId`)로 `DemoChartPage`에 전달 | 1. 비로그인 → `ProtectedRoute`가 로그인 페이지로 리디렉션(이 화면 진입 불가). 2. FeatureFlag 비활성 → `FeatureFlagGate`가 `<DemoModePage />`를 렌더하지 않음(`router.tsx:101`). 두 경우 모두 버튼 클릭 전 차단 | `/onboarding/demo/:instrumentId` → `DemoChartPage` (`router.tsx:107~113`, `frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx`) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
