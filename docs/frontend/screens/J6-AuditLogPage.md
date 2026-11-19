@@ -95,7 +95,7 @@
 |---|---|---|
 | 접근성(WCAG 2.2 AA) | 그랜트 ID Input에 `aria-label`(`AuditLogPage.tsx:76`). 나머지 3 Input(label3~5)에 aria-label 존재(`AuditLogPage.tsx:83,90,97`). Button에 label은 i18n(`t6`="조회", `AuditLogPage.tsx:110`). | `data-testid="audit-log-list"`(`AuditLogPage.tsx:121`)는 있으나 `LoadingState`/`EmptyState`에 testid 없음. |
 | i18n/지역화 | 모든 사용자 문구 `t("legacy.auditLogPage.*")` 키 사용(`AuditLogPage.tsx:72~143`, 총 13개 키). `new Date().toLocaleString()`(`AuditLogPage.tsx:126`)은 브라우저 locale 의존. | 날짜 포맷이 locale 의존적(`AuditLogPage.tsx:126`). `toLocaleString()` 대신 i18n 또는 ISO 문자열 권장. |
-| 성능 예산 | `DEFAULT_PAGE_SIZE = 20`(`AuditLogPage.tsx:14`). 페이지당 20항목 렌더링. React Query 기본 `staleTime=0` → 즉시 stale. | staleTime 미설정 — 매 렌더 시마다 stale 재검사로 불필요 리페치 가능성. `gcTime` 기본값도 확인 필요. |
+| 성능 예산 | `DEFAULT_PAGE_SIZE = 20`(`AuditLogPage.tsx:14`). 페이지당 20항목 렌더링. React Query 기본 `staleTime=0` → 즉시 stale. | staleTime 미설정 — 매 렌더 시마다 stale 재검사로 불필요 리페치 가능성. |
 | 텔레메트리 | TODO | TODO | 확인한 텔레메트리(로깅·애널리틱스·RUM) 없음. `AuditLogPage.tsx` 전체에 telemetry 호출 없음. |
 <!-- /BLOCK -->
 
@@ -116,7 +116,7 @@
 |---|---|---|---|---|
 | G1 | 날짜 포맷이 locale 독립적이어야 함(WCAG i18n) | `new Date(entry.createdAt).toLocaleString()`(`AuditLogPage.tsx:126`) — 브라우저 locale 의존 | 중 | i18n 키 또는 ISO 8601 문자열로 교체 |
 | G2 | `LoadingState`/`EmptyState`에 `data-testid` 미부여 | `audit-log-list`만(testid, `AuditLogPage.tsx:121`) | 경 | 테스트 커버리지를 위해 `loading-state`/`empty-state` testid 추가 |
-| G3 | React Query `staleTime`/`gcTime` 명시 부재 | 기본값 사용(`staleTime=0` → 즉시 stale, `gcTime=5min`) | 경 | 명시적 `staleTime` 설정으로 불필요 리페치 방지 |
+| G3 | React Query `staleTime` 명시 부재 | 기본값 사용(`staleTime=0` → 즉시 stale) | 경 | 명시적 `staleTime` 설정으로 불필요 리페치 방지 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
