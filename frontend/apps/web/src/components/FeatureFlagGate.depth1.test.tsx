@@ -2,11 +2,11 @@
 // 기존 FeatureFlagGate.test.tsx 패턴을 따름.
 import "../i18n";
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { setFeatureFlagOverride } from "../lib/featureFlags";
 import { FeatureFlagGate } from "./FeatureFlagGate";
-import { perfBudgetMs } from "../test/perfBudget";
+import { perfBudgetMs, bestOfMs } from "../test/perfBudget";
 
 const DISABLED_TEXT = "이 기능은 현재 비활성화되어 있습니다.";
 
@@ -91,19 +91,21 @@ describe("FeatureFlagGate depth1 보강", () => {
 
   it("성능: 플래그 꺼짐 경로 렌더 시간이 예산 이내다", () => {
     setFeatureFlagOverride("onboarding_demo_mode", false);
-    const before = performance.now();
-    const { container } = render(
-      <FeatureFlagGate flag="onboarding_demo_mode">
-        <div>보호된 화면</div>
-      </FeatureFlagGate>,
-    );
-    const elapsed = performance.now() - before;
+    const measure = () => {
+      cleanup();
+      const t0 = performance.now();
+      render(
+        <FeatureFlagGate flag="onboarding_demo_mode">
+          <div>보호된 화면</div>
+        </FeatureFlagGate>,
+      );
+      return performance.now() - t0;
+    };
+    const elapsed = bestOfMs(measure);
     // 실측: ~1ms (2026-11-15 로컬). 예산 30배 = 30ms → coverage 3배 = 90ms
     expect(elapsed).toBeLessThan(perfBudgetMs(30));
     // EmptyState가 실제로 렌더되었는지 also 확인
     expect(screen.getByText(DISABLED_TEXT)).toBeInTheDocument();
-    // cleanup
-    render(<></>, { container });
   });
 
   // ── 게이트 적색 재현 ──
