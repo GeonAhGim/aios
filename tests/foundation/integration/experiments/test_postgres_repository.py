@@ -25,7 +25,6 @@ from src.foundation.experiments.adapters.postgres_repository import (
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
 from tests._perf.relative_budget import RelativeBudget
 from tests.support.db import create_pool_with_retry
-from tests.support.perf_budget import PerfBudget
 from tests.support.perf_inject import delayed_async
 
 _NOW = datetime.now(UTC)
@@ -184,15 +183,12 @@ async def test_append_parent_child_lineage_goes_red_with_io_delay(
     pool: asyncpg.Pool,
     repo: PostgresExperimentRepository,
     monkeypatch: pytest.MonkeyPatch,
-    perf_budget: PerfBudget,
 ) -> None:
-    """gate-red reproduction: asyncpg.Connection.fetchrow 에 IO 지연(delayed_async,
-    2.0s) 을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
-
-    `conn.fetchrow` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
-    주입 — lineage append+get 는 I/O 바인딩 연산이므로 wall-clock
-    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
-    (trivial pass) 가 아님을 보장한다. 단언/마커 삭제와 예산 완화 금지.
+    """gate-red reproduction: inject 2s IO delay via delayed_async on
+    asyncpg.Connection.fetchrow; the same performance assertion must flip
+    red — a 2s injected wait on an I/O-bound op will certainly exceed the
+    budget when measured with wall-clock RelativeBudget.  Deleting the
+    assertion/marker or relaxing the budget is prohibited.
     """
     original_fetchrow = asyncpg.Connection.fetchrow
     monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_async(original_fetchrow, 2.0))
@@ -206,11 +202,11 @@ async def test_append_parent_child_lineage_goes_red_with_io_delay(
         await repo.append(child)
         return await repo.get(tenant_id, child.experiment_id)
 
-    sample = await perf_budget.sample_async(_one_lineage_call_with_delay, batch=1)
-    assert sample.wall_ms >= _APPEND_LINEAGE_P95_BUDGET_MS, (
-        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
-        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
-        f"budget={_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms)"
+    sample = await RelativeBudget().measure_async(_one_lineage_call_with_delay, n=1, warmup=0)
+    assert sample.op_ms >= _APPEND_LINEAGE_P95_BUDGET_MS, (
+        f"delay-injected op time {sample.op_ms:.3f}ms — "
+        f"unexpectedly green: measurement/assertion is hollow "
+        f"(budget={_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms)"
     )
 
 
