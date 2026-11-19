@@ -111,10 +111,10 @@ async def test_append_parent_child_lineage_p95_within_budget(
 ) -> None:
     """numeric performance assertion: lineage append+get round-trip p95 within budget.
 
-    I/O-bound operation measured with RelativeBudget.measure_async (process_time
-    based) to avoid wall-clock flake from host load contention. The ratio
-    (op_ms / calibration_ms) normalises for host speed, so a 2x slower CI
-    runner produces a 2x slower measurement and the ratio stays stable.
+    I/O-bound operation measured with RelativeBudget.measure_async (wall clock
+    based, using time.perf_counter()) so the ratio (op_ms / calibration_ms)
+    normalises for host speed: a 2x slower CI runner produces a 2x slower
+    calibration and a 2x slower measurement, keeping the ratio stable.
     """
     rb = RelativeBudget()
 
