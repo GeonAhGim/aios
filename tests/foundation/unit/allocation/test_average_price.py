@@ -128,6 +128,7 @@ def test_blended_average_price_hot_path_performance(perf_budget):
         lambda: blended_average_price(fills, Decimal("0.01")),
         budget_ms=1000.0,
         n=5,
+        batch=10_000,
     )
 
 
@@ -146,6 +147,7 @@ def test_apply_average_price_hot_path_performance(perf_budget):
         ),
         budget_ms=1000.0,
         n=5,
+        batch=10_000,
     )
 
 
