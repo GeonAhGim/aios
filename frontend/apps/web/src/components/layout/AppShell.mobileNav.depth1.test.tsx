@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { perfBudgetMs } from "../../test/perfBudget";
+import { bestOfMs } from "../../test/perfBudget";
 import { AppShell } from "./AppShell";
 
 // task-25150 UX-21 D2 보강: negative 3종 + 실패 주입 + 성능 단언 + gate red.
@@ -86,21 +86,28 @@ describe("AppShell mobileNav — 실패 주입(task-25150 D2)", () => {
 
 describe("AppShell mobileNav — 성능 단언(task-25150 D2)", () => {
   // 실측 렌더 ~20ms, 토글 10회 ~5ms(로컬 jsdom). 예산은 실측의 30배 이상.
+  // bestOfMs로 공유 호스트 부하에 흔들리지 않도록 최솟값 판정.
   it("성능: 초기 렌더가 1500ms 미만", () => {
-    const start = performance.now();
-    render(tree());
-    const elapsed = performance.now() - start;
-    expect(menuToggle()).toBeInTheDocument();
-    expect(elapsed).toBeLessThan(perfBudgetMs(1500));
+    const measured = () => {
+      const start = performance.now();
+      render(tree());
+      cleanup();
+      return performance.now() - start;
+    };
+    const elapsed = bestOfMs(measured);
+    expect(elapsed).toBeLessThan(1500);
   });
 
   it("성능: 토글 10회 클릭이 1000ms 미만", () => {
     render(tree());
-    const start = performance.now();
-    for (let i = 0; i < 10; i++) fireEvent.click(menuToggle());
-    const elapsed = performance.now() - start;
+    const measured = () => {
+      const start = performance.now();
+      for (let i = 0; i < 10; i++) fireEvent.click(menuToggle());
+      return performance.now() - start;
+    };
+    const elapsed = bestOfMs(measured);
     expect(menuToggle()).toHaveAttribute("aria-expanded", "false");
-    expect(elapsed).toBeLessThan(perfBudgetMs(1000));
+    expect(elapsed).toBeLessThan(1000);
   });
 });
 
