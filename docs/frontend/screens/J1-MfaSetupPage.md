@@ -33,10 +33,12 @@
 <!-- BLOCK:J1-MfaSetupPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `qrDataUrl === null`인 동안(초기 마운트, `MfaSetupPage.tsx:40`) | QR 이미지 대신 회색 영역에 `legacy.mfaSetupPage.t3` "QR코드 생성 중..." 문구(:90-91). 제출 버튼 `disabled={!qrDataUrl}`(:109)로 비활성. `loading={verifyMfa.isPending}`(:109) — 설정 발급 중이 아니라 제출 버튼의 로딩 상태. | 없음(제출 버튼 비활성). 서버는 useEffect(:51-65)에서 `setupRequested` ref 가드와 함께 `setupMfa.mutate` 1회 호출. | `구현됨` — 로딩 문구(:87-92), 버튼 비활성(:109). 다만 로딩 표시의 시각 형태(회색 영역, h-40 div)는 ui-web 확인 전이므로 '미확인'. 제출 중 로딩(`loading={verifyMfa.isPending}`)은 `구현됨`. |
+| 로딩(제출 중) | `verifyMfa.isPending === true`(:109) | 버튼에 로딩 인디케이터 표시. | 없음(버튼 disabled 대체로 로딩 상태). | `구현됨`(:109). |
+| 빈 상태 | 목록형 데이터가 없는 화면이므로 빈 상태 전용 UI 없음. `MfaSetupPage.tsx:87-92`에 빈 상태 분岐가 없음. `onSuccess`의 `QRCode.toDataURL`(:57)이 실패하면 try/catch 없으므로 `qrDataUrl`이 null로 남고 "QR코드 생성 중..."이 계속 보임 — 해석: 이 경로는 코드로 읽은 해석. | — | — | 없음. (해석: `QRCode.toDataURL` 실패 시 예외가 잡히지 않아 "QR코드 생성 중..."이 영구 표시됨. `미확인(코드 추론)`.) |
+| 정상 | `qrDataUrl`과 `secret`이 모두 설정된 상태(`MfaSetupPage.tsx:40-41`). `setupMfa.mutate` onSuccess(:55-58)에서 `setSecret`(:56)과 `setQrDataUrl`(:57) 호출 후 진입. | QR 이미지 `alt` = `legacy.mfaSetupPage.alt2` "MFA QR 코드"(:88). 수동 입력 코드 영역: `legacy.mfaSetupPage.t4` "수동 입력용 코드: {{secret}}"(:95). 입력 필드 placeholder: `legacy.mfaSetupPage.placeholder5` "6자리 코드"(:103). 제출 버튼: `legacy.mfaSetupPage.t6` "인증 완료"(:110). | 6자리 코드 입력 후 제출, QR 스캔 또는 수동 코드 입력. | `구현됨` — QR 이미지(:88), 수동 코드 표시(:95), 입력 필드(:103), 버튼(:110). |
+| 정상(제출 성공) | `verifyMfa.mutateAsync(totpCode)`(:71) 성공 후 | `/onboarding/risk-assessment`로 이동(:72). `["me"]` 무효화(`useAuth.ts:74`). | — | `구현됨`(:72, `useAuth.ts:74`). |
+| 낡은 데이터(신선도 초과) | `useSetupMfa`는 `useMutation`이며 staleTime·refetch 설정이 없다(`useAuth.ts:66-68`). shared-hooks에서 `staleTime`은 이 화면 외에 `SweepResultsPage.tsx:225`에만 `Infinity`로 설정됨. QR과 secret은 컴포넌트 state(`MfaSetupPage.tsx:40-41`)에만 보관되고 재조회 경로가 없음. 주석상 setup 재호출은 서버 secret을 덮어쓴다(:46-48). | 다른 탭·세션에서 재발급하면 화면의 QR이 낡음. 그러나 재조회 경로가 없어 사용자가 이를 인지할 수 없음. | 재발급 요청 버튼 없음. 페이지 새로고침 시 useEffect가 다시 동작하지만 React StrictMode(dev)에서는 `setupRequested` 가드가 있더라도 두 번 실행될 수 있음(:46-48 주석). | 신선도 로직 `없음`(`useAuth.ts:66-68`). 다른 탭·세션에서 재발급 시 화면의 QR이 낡을 수 있으나 실측하지 않았으므로 `미확인`. |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
