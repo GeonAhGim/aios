@@ -32,6 +32,6 @@
     "test:uat": "playwright test -c playwright.uat.config.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.65.1"
   }
 }
