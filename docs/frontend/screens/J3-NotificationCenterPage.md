@@ -24,7 +24,7 @@
 <!-- BLOCK:J3-NotificationCenterPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | TODO | TODO |
+| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | `useQuery` 1회 조회(mount 시). `queryKey: ["notificationHistory", eventType]`, `queryFn: apiClient.getNotificationHistory(eventType)` — 자동 폴링/재조회 설정 없음. 수동 갱신은 `refetch()`(`NotificationCenterPage.tsx:39`) 호출(재시도 버튼)로만 가능. | `isError` 참 → `HistoryError` 컴포넌트 렌더링(`NotificationCenterPage.tsx:71`). `classifyForbidden(error)`(`shared-types`)로 403 판별: true → `<ForbiddenNotice>`(`:19`), false → `<ErrorMessage>`(`:23`)에 `errorCode`, `message`, `traceId` 전달. `onRetry={() => refetch()}`으로 수동 재조회 지원. `refetch()`는 동일 `queryFn` 재실행. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
