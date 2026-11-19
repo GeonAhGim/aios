@@ -65,7 +65,10 @@
 <!-- BLOCK:J1-LoginPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/auth/LoginPage.tsx:111`) | TODO | TODO | TODO | TODO |
+| 로그인 제출 버튼(`<Button type="submit">`, `frontend/apps/web/src/routes/auth/LoginPage.tsx:111`) | `locked`가 false(`:32`, `:111` `disabled={locked}`). 브라우저 `required` 검증 통과(`:70` email, `:81` password). TOTP(`:88~97`)는 비필수. | `login.mutateAsync` 성공(`:43`) → `navigate(sanitizeNextPath(searchParams.get("next")))`(`:44`). `sanitizeNextPath`(`:14~17`): `next`가 `/`로 시작하고 `//`가 아니면 `next`, 아니면 `/dashboard`. | `catch`(`:45~48`): `setError`(:46), `setLockoutRemainingSec(deriveLockout(err).retryAfterSec)`(:47). `navigate` 호출 없음. `locked`가 true가 되면 입력창·버튼이 `disabled`(:73, :84, :94, :111)되고 카운트다운(:34~38) 시작. | 성공: `next` 또는 `/dashboard`(`router.tsx:114` `protect(<DashboardPage />)`). 실패: `/login` 유지. |
+| Enter 키 제출(이메일/비밀번호/MFA 입력창 내에서 Enter 누름) | 같은 form(`:65`) 내 입력창(`:66~97`) 중 하나에 포커스. 브라우저가 Enter를 form 제출으로 변환. | `handleSubmit`(`:51~55`) → `attemptLogin`(`:40~49`) 실행. 행 1과 동일한 경로(`:43~44`). | 행 1과 동일한 실패 경로(`:45~48`). | 행 1과 동일(`:44`→`router.tsx:114`). |
+| 회원가입 링크(`<Link to="/signup">`, `frontend/apps/web/src/routes/auth/LoginPage.tsx:115`) | 항상 렌더링(`:113~117`). `disabled`/`locked` 조건 없음(확인: `:113~117`에 조건문 없음). | `/signup` 페이지로 이동(`:115` `to="/signup"`). | 해당 없음 (단순 탐색 이동). | `/signup`(`router.tsx:85` `SignupPage`). 폼 입력값(`:21~24` useState)은 리다이렉트 시 소멸(확인: `navigate` 시 React 상태 초기화). |
+| 재시도 버튼(ErrorMessage 내부, `frontend/apps/web/src/routes/auth/LoginPage.tsx:103~104`) | `routed.kind === "backoff_retry"`(429)이며 `canRetry`(`:61`). `ErrorMessage.tsx:61`: `canRetry && onRetry`가 truthy일 때 재시도 버튼 영역 렌더. `LoginPage.tsx:103~104`: `retryAfterSec`는 `routed?.kind === "backoff_retry" ? routed.afterSec : undefined`, `onRetry`는 `canRetry ? () => attemptLogin() : undefined`. `ErrorMessage.tsx:38~39`: `classifyRetry`가 "none"이 아니면 `canRetry=true`. | `attemptLogin()` 재실행(`:104`). 행 1과 동일한 성공 경로(`:43~44`). | 행 1과 동일한 실패 경로(`:45~48`). `ErrorMessage`가 다시 렌더되어 오류 표시. | 성공: `next` 또는 `/dashboard`(`router.tsx:114`). 실패: `/login` 유지. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
