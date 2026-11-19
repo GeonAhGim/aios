@@ -13,10 +13,10 @@
 <!-- BLOCK:J2-ScriptEditorPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P2(전략 생산자) — "전략·스크립트를 만들고 백테스트·검증" (§2 P2 행, "스크립트 편집기·전략 빌더·백테스트·AI 스튜디오 화면 [확인]") |
+| 목적(한 문장) | DSL 스크립트를 컴파일해 해시·명령 수를 확인하고, 같은 스크립트로 빠른 백테스트를 돌리거나 차트로 넘긴다 (`ScriptEditorPage.tsx:157-161`, `:189-199`, `:133-141`) |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:118` `{ path: "/scripts/editor", element: protect(<ScriptEditorPage />) }` — `protect`(:70-72)는 `<ProtectedRoute>`로 감싸 미로그인 시 리다이렉트. 메뉴 진입점 `frontend/apps/web/src/components/layout/navItems.ts:24`. 라우트 자체에 플래그 조건 없음. ProtectedRoute 세부 동작 미확인 |
+| 사용자 준비물 | (a) 로그인된 세션(`router.tsx:118` protect), (b) DSL 소스 — 기본 예제 `ScriptEditorPage.tsx:33-40`에 미리 들어 있음, (c) 백테스트 시 URL `instrument_id` 파라미터(`:160`, 없으면 `:163` 오류), 최근 7일 구간(`:165`) — 해당 종목 시장 데이터 존재 여부 미확인 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
