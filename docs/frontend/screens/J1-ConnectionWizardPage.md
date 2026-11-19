@@ -24,7 +24,7 @@
 <!-- BLOCK:J1-ConnectionWizardPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useBeginConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:20` | TODO | TODO |
+| `useBeginConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:20` | mutation(`useMutation` `:22`); `onSuccess`에서 `qc.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY })`(`:24`) → `["connections"]` 키 무효화(GET 재조회); 1회 조회 아님·폴링 없음(폴링/만료 설정 옵션 전역 정의 없음 `useConnections.ts` 전역 0건) | mutation 시 `onError` → `setSubmitError(err)`(`ConnectionWizardPage.tsx:68`); review 단계(`step==="review"` `:168`)에서 `submitError` truthy → `<WizardActionError error={submitError} />` 렌더(`:188`); `WizardActionError`(`:19-30`) — `classifyForbidden(error)` 참이면 `<ForbiddenNotice error={error} />`(`:20`), 아니면 `<ErrorMessage>`(`:23-28`, `errorCode`/`message`/`traceId` 전달, `retryAfterSec`는 `routed.kind==="backoff_retry"`일 때만 `:27`); 화면 상태 `succeeded`는 false 유지, 재시도는 연결하기 버튼(`:193`) 클릭; 미확인: `ForbiddenNotice`/`ErrorMessage` 내부 렌더 내용, `apiClient.beginConnection` 던지는 오류 형태, QueryClient mutation 재시도 기본값 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
