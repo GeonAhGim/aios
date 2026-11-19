@@ -70,9 +70,9 @@
 <!-- BLOCK:J3-MandatesPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:66`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:70`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:169`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:66`) [`일시정지`] | `activeRevision`이 non-null이고 `activeRevision.state === "ACTIVE"` (`:65`). `ActiveRevisionCard` 컴포넌트 내부(`:35-86`). | `pause.mutate()` 호출(`:153`). mutation `onSuccess`에서 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:46`). 상태 재조회(`MandatesPage.tsx:90`)로 `activeRevision.state`가 `"PAUSED"`로 바뀜. | `pause.mutate`의 `onError: setLifecycleError`(`:153`). `lifecycleError`가 채워져 `<MandateActionError error={lifecycleError} />` 배너 노출(`:75-77`). | 동일 화면 `/mandates` 유지 — 파일 전체(`:1-200`)에 라우팅/네비게이션 호출 없음. 상태 재조회로 UI 재렌더. |
+| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:70`) [`재개`] | `activeRevision`이 non-null이고 `activeRevision.state === "PAUSED"` (`:69`). `ActiveRevisionCard` 내부(`:35-86`). | `resume.mutate()` 호출(`:154`). mutation `onSuccess`에서 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:54`). 상태 재조회(`:90`)로 `activeRevision.state`가 `"ACTIVE"`로 바뀜. | `resume.mutate`의 `onError: setLifecycleError`(`:154`). 동일하게 `lifecycleError` → `<MandateActionError>` 배너(`:75-77`). | 동일 화면 `/mandates` 유지 — 파일 전체(`:1-200`)에 라우팅/네비게이션 호출 없음. 상태 재조회로 UI 재렌더. |
+| `<Button>` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:169`) [`활성화`] | `pendingRevision`이 non-null (`:162`). `pendingRevision.state`는 `"PROPOSED"`(`:165`). | `activate.mutate({ revisionId })` 호출(`:109-111`). mutation `onSuccess`에서 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:38`). 상태 재조회(`:90`)로 `pendingRevision`이 사라지고 `activeRevision`이 갱신됨. | `handleActivate` 내 `onError: setActivateError`(`:113`). `classifyStateConflict(err) === "refetch_retry"`이면 즉시 `refetch()`(`:116`). `activateError` → `<MandateActionError error={activateError} onRetry={() => refetch()} />` 배너(`:175-177`). | 동일 화면 `/mandates` 유지 — 파일 전체(`:1-200`)에 라우팅/네비게이션 호출 없음. 상태 재조회로 UI 재렌더. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
