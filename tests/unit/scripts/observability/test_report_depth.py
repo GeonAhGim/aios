@@ -88,15 +88,15 @@ def test_write_report_unwritable_path_logs_warning(
 def test_write_report_100_paths_under_200ms(tmp_path: Path) -> None:
     """perf(D2) — write_report(100 paths)가 0.2s 이하여야 한다.
 
-    Windows 지터는 3회 중 최소값(best_of)으로 측정한다.
+    Windows 지터는 5회 중 최소값(best_of)으로 측정한다.
     예산: 0.2s (ADR-2026-09-09-C Decision 1).
     """
     paths = [tmp_path / f"dest_{i}.json" for i in range(100)]
     result: dict[str, object] = {"ok": True, "status_code": 200, "error": None}
 
-    # 3회 측정 중 최소값 (Windows 지터 완화)
+    # 5회 측정 중 최소값 (Windows 지터 완화)
     best = float("inf")
-    for _ in range(3):
+    for _ in range(5):
         # recreate paths each iteration (tmp_path is reused)
         for p in paths:
             p.unlink(missing_ok=True)

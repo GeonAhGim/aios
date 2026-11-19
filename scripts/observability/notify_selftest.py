@@ -60,9 +60,12 @@ async def run_selftest(adapter: NotifyPort) -> dict[str, object]:
 
 def write_report(result: dict[str, object], paths: list[Path]) -> None:
     payload = json.dumps(result, ensure_ascii=False, indent=2)
+    made_dirs: set[Path] = set()
     for p in paths:
         try:
-            p.parent.mkdir(parents=True, exist_ok=True)
+            if p.parent not in made_dirs:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                made_dirs.add(p.parent)
             p.write_text(payload, encoding="utf-8")
         except OSError as e:
             print(f"경고: {p}에 결과를 쓰지 못했다: {e}", file=sys.stderr)
