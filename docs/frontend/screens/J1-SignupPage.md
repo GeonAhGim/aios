@@ -24,8 +24,8 @@
 <!-- BLOCK:J1-SignupPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | TODO | TODO |
-| `useSignup` | `frontend/packages/shared-hooks/src/useAuth.ts:20` | TODO | TODO |
+| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | 폼 로컬 상태(`useState` :16). 갱신: `setFromError`(:18-20)가 `extractFieldErrors(err)` 결과를 `setFieldErrors`로 세팅(서버 조회 아님, 폴링 없음). `clearField`(:22-29)로 필드 수정 시 해당 키만 삭제(`delete next[field]` :26, 나머지 필드 오류 유지). 실패 전달 경로: `SignupPage.tsx:61`(제출 전 `setFromError(null)`로 초기화) → `:67`(`setFromError(err)`로 `SignupError.fieldErrors`에 전달) → `:75`/`:89`의 `<Field error={...}>`가 인라인 오류로 표시(`fieldErrors.email`/:75, `fieldErrors.password`/:89). |
+| `useSignup` | `frontend/packages/shared-hooks/src/useAuth.ts:20` | `useMutation`(:23) 기반 1회 변경 요청(사용자 가입 버튼 제출). `mutationFn`은 `apiClient.register(body)`(:24). 성공 시 `onSuccess`(:25-28)에서 `setToken(data.accessToken)` 후 `qc.invalidateQueries({ queryKey: ["me"] })`(:27). 폴링 없음(query 옵션에 refetchInterval 설정 없음, :23-29에서 확인). mutation의 `retry` 옵션은 이 훅에 명시되지 않음(미확인). 실패 시 경로: 훅은 에러를 잡지 않고 던짐 → `SignupPage.tsx:63-68`의 `try/catch`가 받음. `ApiError`면 그대로 `error` 상태(:66), 아니면 `t("legacy.signupPage.t8")` 메시지의 `Error`로 감쌈(:66). 이어서 `setLockoutRemainingSec(deriveLockout(err).retryAfterSec)`(:69). 화면 표시: `SignupError` 컴포넌트(:25-38)가 400(`classifyBadRequest` :26) → `BadRequestNotice`(:26), 403(`classifyForbidden` :27) → `ForbiddenNotice`(:27), 그 외 → `ErrorMessage`(:30-36). `ErrorMessage`에 `message`로 `error.message`(:32)가 전달되는 점의 실제 표시 방식은 미확인. `deriveLockout`의 423 판정 로직은 미확인. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
