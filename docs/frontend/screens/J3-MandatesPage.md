@@ -48,10 +48,10 @@
 <!-- BLOCK:J3-MandatesPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | mutation(`:104`)에서 서버가 400 반환. `MandateActionError`(`:188-190`)가 `classifyBadRequest`(`MandateActionError.tsx:14`) true 시 `<BadRequestNotice>` 렌더 | `BadRequestNotice` 컴포넌트(서버 메시지 노출, `MandateActionError.tsx:3`, `:14`) | 제출 폼 수정 후 수동 재제출. mutation `onError`(`:104`)는 `onRetry` 전달 안 함 | 구현됨(`:104`, `:188-190`, `MandateActionError.tsx:14`) |
+| 인증 필요/세션 만료(401) | `:90`에서 401 반환 시 에러 경로(`:122`) 진입. 라우트 `protect(<MandatesPage />)`(`frontend/apps/web/src/router.tsx:136`)가 미인증 시 로그인 리다이렉트 | 에러 경로(`:122-131`)에서 제목 행(`:126`)과 `<MandateActionError error={error} onRetry={() => refetch()} />`(`:127`) — 제목 문구 키는 legacy.mandatesPage.title12 | `onRetry={() => refetch()}`(`:127`) — 재조회. 401이면 재조회도 실패하므로 수동 로그인 재시도 필요 | 구현됨(`:90`, `:122-131`, `:127`). 구체적인 401 처리 호출명: 없음(전체 isError 경로로 통합) |
+| 권한 없음/MFA 필요(403) | mutation(`:153-154`)에서 서버가 403 반환. `MandateActionError`(`:75-77`, `:174-177`)가 `classifyForbidden`(`MandateActionError.tsx:15`) true 시 `<ForbiddenNotice>` 렌더 | `<ForbiddenNotice error={error} />`(`MandateActionError.tsx:5`, `:15`) | `ForbiddenNotice`에 `onRetry` 없음(권한 문제이므로 재시도 무의미) | 구현됨(`:75-77`, `:174-177`, `MandateActionError.tsx:15`). 구체적인 403 처리 호출명: `classifyForbidden` (`MandateActionError.tsx:15`) |
+| 충돌/상태 불일치(409) | `useActivateMandateRevision`(`:93`)에서 409 반환. `classifyStateConflict(err) === "refetch_retry"`(`:116`)이면 즉시 `refetch()`(`:90`) | `activateError`(`:98`)가 채워져 `<MandateActionError error={activateError} onRetry={() => refetch()} />`(`:176`) | `onRetry={() => refetch()}`(`:176`) — 최신 `activeRevision`(`:36`) 재조회. `classifyStateConflict`(`:116`)가 "refetch_retry" 반환 시 자동 재조회 | 구현됨(`:107-120`, `:116`, `:174-178`). 구체적인 409 처리 호출명: `classifyStateConflict` (`:116`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
