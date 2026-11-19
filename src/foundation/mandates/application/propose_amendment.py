@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 from src.foundation.evidence.application.record_command_event import record_command_event
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
+from src.foundation.mandates.application.errors import NoActiveMandateError as NoActiveMandateError
 from src.foundation.mandates.contracts.v1 import MandateRevisionView, MandateRuleInput
 from src.foundation.mandates.domain.models import Autonomy as DomainAutonomy
 from src.foundation.mandates.domain.models import MandateRevision as DomainRevision
@@ -40,11 +41,6 @@ from src.foundation.mandates.ports.repository import MandateRepository
 # Single source of truth for both sides of the wiring (avoids a typo'd
 # duplicate literal drifting between the two modules).
 PROPOSED_ACTION = "mandate_revision_proposed"
-
-
-class NoActiveMandateError(Exception):
-    """75번 §1 "active mandate가 없으면 개정할 대상이 없다" — 최초 설정은
-    create_draft_mandate + activate_revision을 쓴다."""
 
 
 async def propose_amendment(
