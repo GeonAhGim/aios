@@ -67,7 +67,10 @@
 <!-- BLOCK:J3-PortfolioPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:173`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:173`) — `handleRebalance` (`:65-83`) | 포트폴리오 로드 성공(`:110`), `allocations.length > 0`(`:123`, `:136-138`)일 때만 버튼 렌더링. 입력 칸(`:157-165`) 중 하나 이상이 공백 아닌 값이어야 요청 나감(`:67-73`). 버튼 `loading={rebalance.isPending}`(`:173`)은 요청 중 표시만 — `Button` 구현상 비활성화 여부는 미확인 | `submit`(`:75`) → `rebalance.mutateAsync`(`:76`) 성공 시 `setDrafts({})`(`:78`)로 입력 비움. `onSuccess`(`usePortfolio.ts:25`)에서 `["portfolio"]` 쿼리 무효화해 목록 갱신. `rebalance.data` 있으면 `legacy.portfolioPage.t12`(`:175-177`, "적용됨 {{adjusted}}건, 승인대기 {{pendingApproval}}건") 표시 | `DuplicateSubmitError`(연타): `:80` 조용히 무시. `ApiError`: `setError`(`:81`) → `RebalanceError`(`:30-42`, `:172`)가 400이면 `BadRequestNotice`, 403이면 `ForbiddenNotice`, 그 외 `ErrorMessage`. 그 외 오류: `t("legacy.portfolioPage.t14")`("재조정에 실패했습니다.", `:81`)로 설정된 `Error`를 `ErrorMessage` 표시. 입력값(`drafts`) 실패 시 유지(`:78`은 성공 경로에서만 실행). 키 처리: 4xx는 키 폐기(`useIdempotentSubmit.ts:17-19`, `:58-60`), 5xx·네트워크 오류는 키 유지(`:58-60`) | 이동 없음. `handleRebalance`에 navigate 호출 없고(`:65-83`), 라우트 `/portfolio`(`router.tsx:133`)에 머김 |
+| 입력 없음(모든 입력 칸 공백) | `Object.entries(drafts).filter(...)` 결과 `adjustments.length === 0` (`:67-73`) | `return`(`:73`) — 요청 없이 함수 종료, 메시지 없음 | 없음 | 이동 없음 |
+| 중복 제출(버튼 연타) | `inFlightRef.current === true` (`useIdempotentSubmit.ts:36-38`) → `DuplicateSubmitError` 던짐 | — | `catch`(`:79-80`)에서 `instanceof DuplicateSubmitError` 확인 후 `return` — 조용히 무시, setError 안 함 | 이동 없음 |
+| 401 응답 | `ApiError` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:2`) `statusCode === 401` | — | classifyBadRequest/classifyForbidden 모두 null → routeApiError(`:33`) → ErrorMessage(`:35-40`) 표시. 전역 401 처리 `useAuthStore.ts:49`에서 logout() 호출. 로그아웃 후 이동 대상은 미확인(ProtectedRoute 가드, `router.tsx:70-72`) | 이동 대상 미확인 |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
