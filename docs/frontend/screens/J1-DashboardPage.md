@@ -37,10 +37,10 @@
 <!-- BLOCK:J1-DashboardPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | executions·portfolio·notifications 중 하나 이상이 `isLoading` true (`executionsLoading`, `portfolioLoading`, `notificationsLoading`) | 포트폴리오 섹션: `<LoadingState />` (:187). 전략 섹션: `<LoadingState />` (:211). 알림 섹션: `<LoadingState />` (:249). OperationStatusBar 로딩 인디케이터 (:160). | 없음 — 데이터 로딩 중에는 상호작용 비활성. | 구현됨 (`DashboardPage.tsx:160`, `:186`, `:210`, `:248`) |
+| 빈 상태 | executions가 빈 배열 또는 null이고, portfolio가 null | 긴급 정지 패널: "현재 실행 중인 운용이 없습니다." (`legacy.dashboardPage.emergencyStopEmpty`, :114). 전략 섹션: "실행 중인 전략이 없습니다." (`legacy.dashboardPage.t8`, :236) + "온보딩 시작하기" 버튼 (`onboarding.emptyStateCta`, :231). 포트폴리오 섹션: 내용 없음 (:205 `: null`). | "온보딩 시작하기" 클릭 시 `/onboarding/first-run`으로 이동 (:229). | 구현됨 (`DashboardPage.tsx:114`, `:227-237`, `:231`, `:205`) |
+| 정상 | executions·portfolio·notifications 모두 데이터 있고, 에러 없음 | 포트폴리오 요약: 총 가치/미배분 현금/배분 수 Stat 3개 (:191-193), AllocationBarChart (:196). 실행 중인 전략 목록 (:213-224). 최근 알림 목록 (:254-259). 긴급 정지 패널: 실행 중 전략 목록 + 정지/재개 버튼 (:88-128). | 전체 정지 (:124), 개별 재개 (:104), 전략/알림 확인. | 구현됨 (`DashboardPage.tsx:188-204`, `:212-225`, `:252-260`, `:87-128`) |
+| 낡은 데이터(신선도 초과) | executions는 5초 폴링 (:42)이지만, portfolio는 staleTime 기본 (QueryClient 기본값, 보통 staleTime=0) | `DataFreshness` 컴포넌트 (:174)가 `asOf={null}`으로 전달됨 — 서버가 `meta.as_of`를 제공하지 않아 항상 "확인 불가". stale 배지 절대 안 뜨 (:169-173 주석 참조). | 없음 (신선도 표시 비기능) | 부분 구현 (`:174`, `asOf=null`로 stale detection 비활성, PLT-19 예정) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
