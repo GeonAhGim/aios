@@ -69,9 +69,15 @@
 <!-- BLOCK:J3-ExecutionControlPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:134`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:136`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:279`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:134`) [취소] | `mode === "LIVE"`이고 `step === "confirm"`일 때 다이얼로그가 렌더된다(`ExecutionControlPage.tsx:289`). | `cancelLiveConfirm`(`:227~229`)이 `step`을 `"form"`으로 되돌려 다이얼로그가 닫힌다. 입력값은 유지된다. 비동기 호출 없음. | 같은 `/executions`. |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:136`) [확정] | 다이얼로그가 열려 있을 때(`step === "confirm"`, LIVE). | `submitExecution`(`:199`)이 `setError(null)`, `setStep("form")`으로 다이얼로그를 닫고, `createExecutionWithRetry`(`:181~197`, `:208~209`)를 통해 POST를 보낸다. 성공 시 `strategyId`를 비운다(`:210`). `createExecution.data?.approvalRequestId`가 있으면 승인 대기 Alert(`:304~309`). | 같은 페이지. |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:136`) [확정, 실패] | — | `DuplicateSubmitError`는 무시(`:212`). 그 외 `ApiError`면 `setError(err)`, 그 외 `t("legacy.executionControlPage.t15")`로 `setError` → `CreateExecutionError`(`:299-303`)가 `classifyBadRequest`→`BadRequestNotice`(`:44`), `classifyForbidden`→`ForbiddenNotice`(`:45`), 그 외 `ErrorMessage`(`:47-54`). 다이얼로그는 이미 닫혀 있음. 409는 `useConflictRetry`(`:181~197`)가 `refetch` 후 1회 재시도. | 재시도하려면 사용자가 다시 `실행 생성`(:279)을 눌러 확인 단계 열어야 함. |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:279`) [제출] | `step === "form"`일 때만 버튼 렌더(`:278`). 필수 입력 `strategyId`/`strategyVersion`/`allocatedCapital`은 `required`(`:246`, `:250`, `:256`)라 브라우저가 빈 값 제출을 막음. | `handleSubmit`(`:217~225`)가 `submitExecution`을 호출. LIVE 첫 클릭은 `setStep("confirm")`만(`:219~222`). PAPER는 `submitExecution`이 바로 POST(`:224`). | 같은 페이지. |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:279`) [제출, 실패] | — | 위 `CreateExecutionError` 경로(`:299-303`). | 재시도 필요. |
+| `<Button>` (`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:279`) [로딩] | `step === "form"`일 때. | `loading={createExecution.isPending}`(`:279`). | 미확인 — ui-web `Button`의 `loading` 동작 확인 안 함. |
+| `Esc 키` (다이얼로그 닫기) | 다이얼로그 열림(`step === "confirm"`). | `useDialogFocusTrap`의 `onClose: onCancel`(`:107`) → `cancelLiveConfirm`(`:227~229`) → `setStep("form")`. | 다이얼로그 닫힘. |
+| `Enter 키` (폼 제출) | `step === "form"`, 폼에 필수 입력 채움. | `onSubmit={handleSubmit}`(`:244`, `:217~225`) → LIVE면 `setStep("confirm")`(`:219~222`), PAPER면 `submitExecution`(`:224`). | 같은 페이지. |
+| `handleModeChange` (`:172~175`) | 모드 변경(PAPER ↔ LIVE). | `setMode(next)`, `setStep("form")`으로 확인 단계 취소. | 같은 페이지. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
