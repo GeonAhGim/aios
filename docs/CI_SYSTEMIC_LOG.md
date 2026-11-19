@@ -3975,3 +3975,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - task-25437: 실제 실패는 `test_check_collection_determinism.py::test_frozenset_parametrize_is_flagged_and_sorted_list_is_not`(원인 0278e7ae5). HEAD에서 로컬 재현 시 **2 passed** — 이미 정정·병합됨(merge-queue 2a5806140).
 - 판정: 저장소 측 신규 설계 결함 없음. 기준선/임계값/ignore 변경 없음(DECISION_GUIDELINES B-2). 재발 시 실패 nodeid가 실제로 `FAILED` 줄을 가진 카드인지 먼저 확인하고, replay 진단 문구만이면 비회귀로 닫는다.
 - D2: N/A(조사·기록 리프, 실행 코드 변경 없음).
+
+## task-25817 — npm_audit 24h 4회 반복 systemic 묶음 (task-25577/25789/25811/25816), 설계 결함 재조사 (2026-11-19)
+
+- `scripts/run_npm_audit.py` 규칙은 설계대로 동작한다: 예외 GHSA-fc5q-39xc-vjpf가 감사 결과에서 사라지면 "쓸모없어진 예외" 실패. 판정이 커밋이 아니라 npm 레지스트리 상태(시간)에 따라 뒤집히는 것이 반복 발행의 구조적 원인이다(외부 advisory DB 변동). 임계값/기준선 결함은 아니다.
+- 반복 원인: task-25789/25811/25816이 같은 정정(예외 항목 삭제, 029b21543/d2c21aa2d/e477e72f7)을 각자 다른 task 브랜치에서 만들었으나 origin/main에는 하나도 착륙하지 않았다(HEAD `.npm-audit-ignore`에 항목 잔존, 로컬 재현 시 게이트 적색). 동일 라인을 지우는 중복 리프가 머지 큐에서 겹침으로 걸러진 것으로 보인다(큐 로그는 fleet 영역이라 확인 불가).
+- 조치: 029b21543을 이 리프에서 다시 적용(예외 비움 + 저장소 예외 파일 테스트 단언 정정). 로컬 `run_npm_audit.py` 통과(예외 0건), `test_run_npm_audit.py` 14 passed.
+- 기준선/임계값/규칙 완화 없음(DECISION_GUIDELINES B-2). 후속 권고: main 착륙 확인 전에는 npm_audit 정정 리프를 중복 발행하지 않는다. D2: N/A(예외 데이터 삭제 + 조사 기록).
