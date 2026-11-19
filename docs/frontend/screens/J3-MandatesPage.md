@@ -24,12 +24,12 @@
 <!-- BLOCK:J3-MandatesPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useMandateStatus` | `frontend/packages/shared-hooks/src/useMandates.ts:10` | TODO | TODO |
-| `useCreateMandateDraft` | `frontend/packages/shared-hooks/src/useMandates.ts:17` | TODO | TODO |
-| `useProposeMandateAmendment` | `frontend/packages/shared-hooks/src/useMandates.ts:25` | TODO | TODO |
-| `useActivateMandateRevision` | `frontend/packages/shared-hooks/src/useMandates.ts:33` | TODO | TODO |
-| `usePauseMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:42` | TODO | TODO |
-| `useResumeMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:50` | TODO | TODO |
+| `useMandateStatus` | `frontend/packages/shared-hooks/src/useMandates.ts:10` | 1회 조회(mount 시 useQuery 단 한 번). react-query 기본값: refetchInterval 미설정, staleTime 미설정(0). 수동 refetch() 호출: MandatesPage.tsx:176에서 onRetry 클릭 시. | react-query의 isError/error 플래그를 통해 MandatesPage.tsx:90에서 분해. 화면에 별도 에러 배너로 연결되지 않음(전체 페이지 렌더링 불가 시 대응 없음). |
+| `useCreateMandateDraft` | `frontend/packages/shared-hooks/src/useMandates.ts:17` | 이벤트 트리거(수정 요청). `MandatesPage.tsx:101` `handleCreate`에서 `createDraft.mutate(rules)` 호출. 성공 시 `onSuccess` 훅이 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:21`). | `MandatesPage.tsx:105` `try/catch`에서 `setCreateError(error)`. 에러 상태는 `MandatesPage.tsx:187-191` `MandateActionError`가 `MandateActionError.tsx:14-16` `classifyBadRequest`→`BadRequestNotice`, `classifyForbidden`→`ForbiddenNotice`, 그 외 `routeApiError`→`ErrorMessage`로 분류 노출. |
+| `useProposeMandateAmendment` | `frontend/packages/shared-hooks/src/useMandates.ts:25` | 이벤트 트리거(수정 요청). `MandatesPage.tsx:109` `handleCreate`에서 `proposeAmendment.mutate(rules)` 호출. 성공 시 `onSuccess` 훅이 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:29`). | `MandatesPage.tsx:110` `setCreateError(error)`. `useCreateMandateDraft`와 동일한 에러 경로(`MandatesPage.tsx:187-191` `MandateActionError` via `createError` state). |
+| `useActivateMandateRevision` | `frontend/packages/shared-hooks/src/useMandates.ts:33` | 이벤트 트리거(수정 요청). `MandatesPage.tsx:121` `handleActivate`에서 `activate.mutate({ revisionId, body })` 호출. 성공 시 `onSuccess` 훅이 `MANDATE_STATUS_QUERY_KEY` 무효화(`useMandates.ts:38`). | `MandatesPage.tsx:124` `try/catch`에서 `setActivateError(error)`. 에러 상태는 `MandatesPage.tsx:174-178` `MandateActionError`가 동일 분류 방식으로 노출. `onRetry`로 `refetch()` 호출. |
+| `usePauseMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:42` | 이벤트 트리거(수명 주기 변경). MandatesPage.tsx:139 handlePause에서 pause.mutate() 호출. 성공 시 onSuccess 훅이 MANDATE_STATUS_QUERY_KEY 무효화(useMandates.ts:46). | MandatesPage.tsx:142 try/catch에서 setLifecycleError(error). 에러는 MandatesPage.tsx:74-78 ActiveRevisionCard의 lifecycleError prop을 거쳐 MandateActionError가 분류 노출. |
+| `useResumeMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:50` | 이벤트 트리거(수명 주기 변경). MandatesPage.tsx:145 handleResume에서 resume.mutate() 호출. 성공 시 onSuccess 훅이 MANDATE_STATUS_QUERY_KEY 무효화(useMandates.ts:54). | MandatesPage.tsx:147 try/catch에서 setLifecycleError(error). usePauseMandate와 동일한 에러 경로(lifecycleError → MandatesPage.tsx:74-78 MandateActionError). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
