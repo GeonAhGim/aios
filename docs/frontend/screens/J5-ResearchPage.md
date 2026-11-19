@@ -13,10 +13,10 @@
 <!-- BLOCK:J5-ResearchPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) — J5 여정의 주 페르소나, 공시·뉴스·거시·대안데이터를 검색해 투자 판단 자료로 활용 [확인: PERSONAS_AND_JOURNEYS.md §3 표에서 J5의 주 페르소나 P1] |
+| 목적(한 문장) | P1이 공시·뉴스·거시경제·대안데이터를 검색하고, 결과를 차트와 연결하며 소스 상태를 확인하는 리서치 화면 |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:122` — `path: "/research"` 라우트, `protect(<ResearchPage />)`로 래핑되어 ProtectedRoute 컴포넌트(동 파일:4)를 통해 로그인 세션 필요 |
+| 사용자 준비물 | 로그인 세션, 리서치 데이터 API 접근 권한 (ResearchDataClient prop 주입으로 테스트 가능, source: ResearchPage.tsx:47) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
