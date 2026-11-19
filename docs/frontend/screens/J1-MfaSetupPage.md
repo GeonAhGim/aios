@@ -24,8 +24,8 @@
 <!-- BLOCK:J1-MfaSetupPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useSetupMfa` | `frontend/packages/shared-hooks/src/useAuth.ts:66` | TODO | TODO |
-| `useVerifyMfa` | `frontend/packages/shared-hooks/src/useAuth.ts:70` | TODO | TODO |
+| `useSetupMfa` | `frontend/packages/shared-hooks/src/useAuth.ts:66` | 변경 요청(mutation), 화면 마운트 시 1회 호출 (`frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:51-65` useEffect에서 setupRequested ref 가드와 함께 setupMfa.mutate 1회 호출) | onError(59-61줄): ApiError면 그대로, 아니면 t("legacy.mfaSetupPage.t7")로 감싸 setSetupError 저장. 저장된 오류는 MfaError(86줄)가 렌더링 — classifyBadRequest(shared-types/src/badRequest.ts:34) → BadRequestNotice, classifyForbidden(shared-types/src/forbidden.ts:31) → ForbiddenNotice, 그 외 ErrorMessage(MfaSetupPage.tsx:25). **403 AUTH_MFA_REQUIRED는 http.ts:93에서 handleRequestFailure가 가로채 handleMfaStepUp(137-141줄)으로 step-up을 시도하므로, onError에 도달하기 전에 자동 step-up이 동작함.** |
+| `useVerifyMfa` | `frontend/packages/shared-hooks/src/useAuth.ts:70` | 사용자 제출 시 변경 요청, 성공하면 ["me"] 무효화 (onSuccess에서 qc.invalidateQueries({ queryKey: ["me"] }) 호출, useAuth.ts:74) | handleSubmit(67-76줄) catch: verifyMfa.mutateAsync(totpCode) 실패 시 ApiError면 그대로, 아니면 t("legacy.mfaSetupPage.t8")로 감싸 setVerifyError 저장. 저장된 오류는 MfaError(108줄)가 동일 분기 렌더링. **403 AUTH_MFA_REQUIRED는 http.ts:93에서 동일하게 가로채 step-up 시도.** |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
