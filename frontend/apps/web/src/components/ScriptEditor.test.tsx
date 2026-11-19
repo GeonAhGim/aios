@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScriptEditor } from "./ScriptEditor";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 
 afterEach(cleanup);
 
@@ -106,10 +106,17 @@ describe("ScriptEditor", () => {
       message: `SCRIPT_ERROR_${i}`,
     }));
 
-    const start = performance.now();
-    render(<ScriptEditor value={value} onChange={vi.fn()} markers={markers} rows={20} />);
-    const elapsed = performance.now() - start;
+    // bestOfMs로 여러 번 측정해 공유 호스트 부하에 흔들리지 않도록 한다.
+    // 각 iteration은 render → cleanup을 완주하므로 DOM이 누적되지 않는다.
+    const elapsed = bestOfMs(() => {
+      const start = performance.now();
+      render(<ScriptEditor value={value} onChange={vi.fn()} markers={markers} rows={20} />);
+      cleanup();
+      return performance.now() - start;
+    });
 
+    // 최종 렌더는 bestOfMs 바깥에서 한 번만 하고, DOM assertions은 여기서 확인한다.
+    render(<ScriptEditor value={value} onChange={vi.fn()} markers={markers} rows={20} />);
     expect(screen.getByTestId("script-editor-marker-199")).toHaveTextContent("SCRIPT_ERROR_199");
     // PortfolioPage.test.tsx의 40장 카드 케이스와 동일한 관용(15s급) 예산 안에서,
     // O(n^2)로 퇴행하면(1000줄 x 200마커) 수 초를 넘어가므로 그 전에 잡힌다.
