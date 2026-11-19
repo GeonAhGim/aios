@@ -24,7 +24,7 @@
 <!-- BLOCK:J1-RiskAssessmentPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useSubmitRiskAssessment` | `frontend/packages/shared-hooks/src/useSuitability.ts:15` | TODO | TODO |
+| `useSubmitRiskAssessment` | `frontend/packages/shared-hooks/src/useSuitability.ts:15` | `useMutation` — 폼 제출(`RiskAssessmentPage.tsx:110`) 시 1회 POST `/api/v1/account/risk-assessment`(`frontend/packages/api-client/src/clients/account.ts:26`). `mutateAsync`로 동기 호출, 성공 시 `onSuccess` 훅(`useSuitability.ts:19`)이 `queryKey: ["riskProfile"]` 무효화. 폴링 없음(단일 POST). | `handleSubmit` catch(`RiskAssessmentPage.tsx:119`): `ApiError`면 그대로 `setError`, 아니면 `t("legacy.riskAssessmentPage.t12")`로 감싸서 `setError`. `SubmitError` 컴포넌트(`RiskAssessmentPage.tsx:64-76`)가 `classifyBadRequest`→`BadRequestNotice`, `classifyForbidden`→`ForbiddenNotice`, 나머지는 `routeApiError`→`ErrorMessage`(trace_id, retry_after 지원). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
