@@ -24,9 +24,9 @@
 <!-- BLOCK:J3-PortfolioPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | TODO | TODO |
-| `useRebalancePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:15` | TODO | TODO |
-| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | TODO | TODO |
+| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | `useQuery`로 `["portfolio"]` 쿼리 키를 통해 `apiClient.getPortfolio()`를 마운트 시 1회 조회. `refetchInterval` 없음(폴링 안 함). 재시도는 `refetch()` 수동 호출(`PortfolioPage.tsx:53`, `:106`) | `isError`가 true가 되면 `PortfolioPage.tsx:61`에서 `routeApiError(portfolioError)`로 분류. `refetch_retry` 또는 `backoff_retry`일 때만 재시도 버튼(`onRetry`, `:106`) 표시. `EXCHANGE_FATAL`은 안내만(`:63`). 전역 `QueryClient` 기본 설정(`frontend/apps/web/src/main.tsx:15`)은 react-query 기본값 사용 |
+| `useRebalancePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:15` | `useMutation`로 `apiClient.rebalancePortfolio(body, idempotencyKey)`를 `mutateAsync`로 호출(`PortfolioPage.tsx:76`). 성공 시 `onSuccess`에서 `["portfolio"]` 쿼리 무효화(`usePortfolio.ts:25`)로 포트폴리오 데이터 갱신 | `handleRebalance`(`:79-82`)에서 `catch` → `DuplicateSubmitError`면 무시(`:80`). `ApiError`면 `setError(err)`, 아니면 번역 문구 `t("legacy.portfolioPage.t14")`로 `setError`(`:81`). 실패 시 `PortfolioPage.tsx:172`의 `<RebalanceError error={error} />`로 에러 표시. `drafts`는 성공 경로(`:78`)에서만 비워지므로 실패 시 입력값 유지. 전역 `QueryClient` 기본 `retry`는 기본값(미설정) |
+| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | 재시도 시 같은 `idempotencyKey` 재사용. 성공(`:43`) 또는 4xx 실패(`:17-19`, `isNonRetryableFailure`) 시 `discardKey`로 키 폐기. 5xx·네트워크 실패 시 키 유지(`:58-60`). `inFlightRef`로 중복 제출 가드 — `DuplicateSubmitError` 던짐(`:36-38`) | `DuplicateSubmitError`는 호출부가 조용히 무시(`PortfolioPage.tsx:80`). 그 외 오류는 `catch`로 올라가 `setError`로 화면 전달(`:81`). 키 폐기 후 재시도 가능(새 키 발급). `missing_header`(400/409)는 `console.warn` 후 키 폐기(`:51-57`) |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
