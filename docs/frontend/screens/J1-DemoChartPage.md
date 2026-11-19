@@ -87,7 +87,10 @@
 <!-- BLOCK:J1-DemoChartPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| TODO | | |
+| 미등록 종목 (unknown instrument) | `demoMode.chart.unknownInstrument` (`DemoChartPage.tsx:51`, catalog.ko.ts:366 "알 수 없는 데모 종목입니다.") | `demoMode.chart.backLink` 버튼(`DemoChartPage.tsx:46`) + `Link to=/onboarding/demo`(`:44-47`)로 데모 종목 목록으로 복귀 | 노출 안 함 — 이 경로는 API 오류가 아니라 `findDemoInstrument`가 `undefined` 반환(`demoDataset.ts:52`) |
+| 기능 플래그 꺼짐 | `common.featureDisabled` (`FeatureFlagGate.tsx:17`, catalog.ko.ts:19 "이 기능은 현재 비활성화되어 있습니다.") — 출처: `router.tsx:109-110`에서 `FeatureFlagGate flag="onboarding_demo_mode"`로 감싸서 적용 | 없음 — `FeatureFlagGate.tsx:17`은 `EmptyState`만 렌더링하고 액션/재시도 버튼을 넘기지 않음 | 노출 안 함 — `FeatureFlagGate` props에 `traceId` 없음, `EmptyState`도 traceId prop 받지 않음 |
+| 백테스트 실행 중 예외 | 미구현 — 키 없음 | 미구현 — `DemoChartPage.tsx:28-35` catch 없음, `demoBacktest.ts:28` 순수 동기 함수로 예외 던짐 없음 확인 | 해당 없음 |
+| 401/403/409/5xx/네트워크 오류 | 해당 없음 (로컬 함수, 네트워크 호출 없음) | 해당 없음 | 해당 없음 — `DemoChartPage.tsx:1-7` import에 `ApiError`/`ErrorMessage`/`traceId` 없음, try/catch 없음. `router.tsx:108` `protect()` 가드가 인증 처리(이 페이지의 오류 UI 아님) |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
