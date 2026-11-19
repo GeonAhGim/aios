@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-ConnectionWizardPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | P1 (개인 트레이더) — J1 온보딩 여정의 첫 화면, P1~P11 전체가 자기 버전을 가진다(§2, §3) [확인] |
-| 목적(한 문장) | 거래소/증권사 공급자의 API 키를 입력하고 읽기 전용 권한 범위를 선택·확인한 뒤 연결 요청을 발송한다 [확인] |
-| 진입 조건 | `/onboarding/connect` 라우트; `router.tsx:70-72`의 `protect()`로 ProtectedRoute 가드 + `router.tsx:93-94`의 `FeatureFlagGate flag="onboarding_connection_wizard"` 필요 [확인] |
-| 사용자 준비물 | 발급받은 공급자 코드(providerCode), 계정 키(opaqueAccountRef) [확인] |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더). 근거 `PERSONAS_AND_JOURNEYS.md:40` — 시작·온보딩(J1) 주 페르소나는 P1만 있음. |
+| 목적(한 문장) | 공급자 코드와 계정 키로 공급자 계정을 연결하고, 읽기 전용 권한(READ_BALANCE/READ_POSITION/READ_ACTIVITY) 중 선택해 연결 요청을 보내는 3단계 마법사 (`ConnectionWizardPage.tsx:12-14,96-198`). 성공 시 "연결 요청을 보냈습니다. 설정 > 연결에서 상태를 확인하세요." (`:87`). |
+| 진입 조건 | `router.tsx:91-97` — `/onboarding/connect`는 `protect()`(`router.tsx:70-72`, `ProtectedRoute`로 로그인·MFA·적합성평가 필수)와 `FeatureFlagGate flag="onboarding_connection_wizard"`로 감겨 있음. `FeatureFlagGate` 구현 확인: 플래그 꺼짐 시 `EmptyState` + `common.featureDisabled` 표시 (`FeatureFlagGate.tsx:16-17`). `navItems.ts:14`에 메뉴 링크 있으나 메뉴 노출이 플래그에 묶였는지는 미확인. |
+| 사용자 준비물 | 공급자 코드(자유 입력, `ConnectionWizardPage.tsx:99-100`, 목록 선택 없음), 공급자가 발급한 계정 키(opaque_account_ref, `ConnectionWizardPage.tsx:102-110`, password 타입 입력), 요청할 권한 1개 이상(`READ_BALANCE`/`READ_POSITION`/`READ_ACTIVITY`, `:12, :56`). 키 발급 절차와 MFA 필요 여부는 미확인. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
