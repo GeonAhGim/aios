@@ -37,10 +37,10 @@
 <!-- BLOCK:J3-MandatePage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading === true` 또는 `data === null` (`useMandateStatus` 초기 조회 중) | `mandatePage.pageTitle`("위임장 편집·승인") 페이지 제목 + `<LoadingState />` 로딩 인디케이터 | 없음(조회 완료까지 대기) | 구현됨 (`MandatePage.tsx:94~103`: `isLoading \|\| !data` 조건 분기, `LoadingState` 렌더) |
+| 빈 상태 | `data` 조회 완료, `activeRevision`도 `pendingRevision`도 없음(`listItems.length === 0`) | `mandatePage.listTitle`("위임장 목록") 제목 + `mandatePage.listEmpty`("등록된 위임장이 없습니다.") 안내 문구 + `legacy.mandatesPage.t8`("위임장 미설정(주문 차단)") 경고 배지(활성 리비전 없을 시) | 초안 작성 또는 개정안 제안: `<MandateRuleForm>` 제출(`mandatePage.draftSubmitLabel` 또는 `mandatePage.amendSubmitLabel`) | 구현됨 (`MandatePage.tsx:120~121`: 빈 목록 렌더, `MandatePage.tsx:118`: t8 배지, `MandatePage.tsx:184~188`: MandateRuleForm) |
+| 정상 | `data` 조회 완료, `activeRevision` 또는 `pendingRevision` 중 최소 1건 존재 | `mandatePage.listTitle` + 목록 항목(각 항목: `mandatePage.activeLabel`/`mandatePage.pendingLabel` 라벨 + `StatusBadge` + 한도 정보 `t1~t5` + 금지 자산 `t6`) + 활성 리비전 카드(`legacy.mandatesPage.t7` + pause/resume 버튼) + 대기 리비전 카드(`legacy.mandatesPage.t15` + activate 버튼 또는 초안/개정안 폼) | pause(`legacy.mandatesPage.t9`), resume(`legacy.mandatesPage.t10`), activate(`legacy.mandatesPage.t16`), 개정안 제안/초안 작성 | 구현됨 (`MandatePage.tsx:107~108`: 목록 빌드, `MandatePage.tsx:124~126`: 목록 렌더, `MandatePage.tsx:131~162`: 활성 리비전 카드, `MandatePage.tsx:164~197`: 대기 리비전 카드) |
+| 낡은 데이터(신선도 초과) | `useMandateStatus`는 캐시 신선도 옵션 없이 1회 조회만 수행 — 명시적 신선도 검사 없음 | 해당 없음 | 해당 없음 | 없음 (`useMandates.ts:11~14`: 캐시 신선도 옵션 설정 없음, `MandatePage.tsx:48`: 기본 `useQuery` 사용) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
