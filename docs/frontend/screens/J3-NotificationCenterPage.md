@@ -24,7 +24,7 @@
 <!-- BLOCK:J3-NotificationCenterPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | TODO | TODO |
+| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | `useQuery` 기본 설정 — 1회 조회. `queryKey: ["notificationHistory", eventType]` (`shared-hooks/src/useAccountSettings.ts:47`). 폴링 옵션 미설정(shared-hooks/src/useAccountSettings.ts:46-49), stale/gc 시간 모두 React Query 기본값(0/5분). `refetchOnWindowFocus: undefined`(기본값 true) — 창 포커스 시 자동 재조회. `channel` 필터는 클라이언트 측 `useMemo`로 처리(`apps/web/src/routes/notifications/NotificationCenterPage.tsx:41-44`), 서버 재요청 없음. | `isError` 상태 확인 후 `HistoryError` 컴포넌트 렌더(`apps/web/src/routes/notifications/NotificationCenterPage.tsx:70-71`). `HistoryError`는 `classifyForbidden(error)`로 403 판별 시 `ForbiddenNotice` 표시(`apps/web/src/routes/notifications/NotificationCenterPage.tsx:19`), 그 외 `routeApiError(error)`로 분류: `refetch_retry`/`backoff_retry`면 `ErrorMessage`에 retry 버튼 노출(`apps/web/src/routes/notifications/NotificationCenterPage.tsx:21-28`). `onRetry={() => refetch()}`로 수동 재시도 지원(`apps/web/src/routes/notifications/NotificationCenterPage.tsx:71`). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
