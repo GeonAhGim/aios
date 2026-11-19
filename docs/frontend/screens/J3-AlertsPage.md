@@ -57,10 +57,10 @@
 <!-- BLOCK:J3-AlertsPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 알림 생성 시 서버가 423(`AUTH_ACCOUNT_LOCKED`) 또는 429(`RATE_LIMIT_EXCEEDED`) 반환 | `ErrorMessage` 컴포넌트가 `retryAfterSec` 카운트다운을 보여주고, 카운트가 0이 되면 "다시 시도" 버튼 활성화 (`ErrorMessage.tsx:41-53`). 423의 기본 카운트다운은 60초 (`accountLockout.ts:14`). | "다시 시도" 버튼 클릭 (`ErrorMessage.tsx:66`, `onRetry` props). 단, `CreateAlertError`가 `onRetry`를 전달하지 않으므로 버튼은 항상 비활성화 상태 — 실제로 재시도할手段 없음. | `구현됨(표시)` — 423/429 분류와 카운트다운 표시는 `errorRouting.ts:125-126`, `errorRouting.ts:119-121`, `ErrorMessage.tsx:38-43`에서 처리. **갭**: `CreateAlertError`가 `onRetry`를 전달하지 않아 재시도 불가(`AlertsPage.tsx:38-44`). 목록 조회(423/429)는 `useMyAlerts.error`를 읽지 않아 미처리(`AlertsPage.tsx:77`). |
+| 서버 오류(5xx) | 알림 생성 시 서버가 502/503/500 반환 | `ErrorMessage`가 "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요." 안내 (`shared-types/apiError.ts` 매핑). `traceId` 노출 (`ErrorMessage.tsx:60`). 재시도 버튼 없음(`classifyRetry`가 5xx에 "none"). | 없음(수동 새로고침만). | `구현됨(생성 경로)` — 5xx는 `errorRouting.ts:115-117`에서 `server_fatal`로 분류, `ErrorMessage` 표시. **갭**: 목록 조회(5xx)는 `useMyAlerts.error` 미처리 — 빈 상태로 표시될 뿐. |
+| 네트워크 단절 | fetch 실패, timeout, DNS 실패 등 | 알림 생성: `ApiError`가 아닌 `Error`捕获 → `ErrorMessage`가 fallback 문구 "알림 생성에 실패했습니다." 표시 (`AlertsPage.tsx:41`, `legacy.alertsPage.t18`). 네트워크 — traceId 없음. | 없음(수동 재시도만). | `구현됨(생성 경로)` — `Error` 객체는 `ErrorMessage`에서 안전한 fallback으로 수렴(`AlertsPage.tsx:41`). **갭**: 목록 조회 실패(`useMyAlerts` 네트워크 오류)는 `error` 구조분해 미포함(`AlertsPage.tsx:77`) — 빈 상태 문구("등록된 알림이 없습니다.")와 구분 불가. |
+| 부분 실패(일부 데이터만 실패) | 페이지네이션 중 일부 페이지만 실패, 또는 일부 alert 행만 데이터 불완전 | 없음(부분 실패를 알리는 메커니즘 없음). `useMyAlerts`는 단일 조회로 all-or-nothing. 클라이언트 측 페이지네이션(`derivePageState:92`)은 전체 데이터 수신 후 슬라이싱 — 조회 자체는 성공/실패 이분법. | 없음. | `없음` — 아키텍처상 부분 실패 시나리오가 존재하지 않음. 단일 `useQuery` 조회 + 클라이언트 슬라이싱으로 부분 실패가 발생할 수 없음. |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
