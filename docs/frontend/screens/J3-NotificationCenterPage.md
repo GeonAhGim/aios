@@ -32,10 +32,10 @@
 <!-- BLOCK:J3-NotificationCenterPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `history`가 로드되지 않은 상태(`!history`, `:72-73`) | `LoadingState` 컴포넌트 표시. 별도 문구 없음. | 채널 필터 변경(`:57`) — 필터는 동작함. | 구현됨 (`NotificationCenterPage.tsx:72-73`) |
+| 빈 상태 | `history`는 로드됐지만 `digest.length === 0`(`:74`). 채널 필터 결과가 비어도 같은 분기. | "표시할 알림 이력이 없습니다." (`notificationCenter.empty`, `:75`) | 채널 필터 변경(`:57`) — 다른 채널 선택 시 목록 변경 가능. | 구현됨 (`:74-75`) |
+| 정상 | `digest.length > 0`(`:76`) | 날짜별 카드: 날짜 제목(`group.date`, 날짜 미상 시 "날짜 미상" `notificationCenter.unknownDate`, `:82`), "{{count}}건" (`notificationCenter.totalCount`, `:85`), 통계 3개(전체 `stat.total` / 발송됨 `stat.sent` / 실패 `stat.failed`, `:89-91`), 항목 목록(eventType, 채널 라벨, `StatusBadge`, `:94-102`) | 채널 필터 변경(`:57`) | 구현됨 (`:76-105`). 채널 옵션 라벨 `notificationCenter.channel.${c}`(`:63`)과 `StatusBadge` 문구는 facts 시트에 없어 미확인. |
+| 낡은 데이터(신선도 초과) | `useNotificationHistory`(`frontend/packages/shared-hooks/src/useAccountSettings.ts:46-49`)는 `useQuery` 기본 설정만 사용 — 폴링/스탤 옵션 미설정. `main.tsx:15`에서 `QueryClient`도 옵션 없이 생성. | 없음 | 없음 | 없음 — 폴링·자동 갱신·신선도 표시 모두 미구현. 창 포커스 시 재조회만 기본 동작. |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
