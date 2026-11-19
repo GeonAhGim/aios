@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 56건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 9건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-09-17-A, ADR-2026-09-29-A, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
+전체 57건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 9건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-09-17-A, ADR-2026-09-29-A, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -62,3 +62,4 @@
 | ADR-2026-11-19-A | 종결 지표 재오픈은 같은 원인의 재발만 센다 | Accepted | 2026-11-19 |  |  |  | ADR-2026-11-19-A-reopen-counts-same-cause-only.md |
 | ADR-2026-11-20-A | MVP-2 범위 확정과 두 관문(T2/U2) — 내장 전략 엔진은 MVP-3으로 | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-A-mvp2-scope-and-two-gate-closeout.md |
 | ADR-2026-11-20-B | BYOAI 커넥터 보강 — 사용자가 쓰는 어떤 AI 에이전트(Claude·ChatGPT·Gemini·Copilot·로컬 LLM)도 붙는 구조 | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-B-byoai-multi-agent-compatibility.md |
+| ADR-2026-11-20-C | 인프라 자가개선 루프 — 운영 데이터로 비효율을 찾아 스스로 개선 (DevEngine 핵심 기능, 이식 자산) | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-C-infra-self-improvement-loop.md |
