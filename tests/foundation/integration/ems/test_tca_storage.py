@@ -257,17 +257,22 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
     감지한다. batch=32로 여러 호출을 묶으면 양자화 오차가 줄어 CPU 시간을
     정상 측정한다. task-11539 감사: 0 수렴이면 batch로 정정.
     """
-    sample = await perf_budget.sample_async(
+    # Windows process_time ticks at ~15.6ms; a lightly loaded batch can land
+    # entirely inside one tick and read 0. Re-sample a bounded number of
+    # rounds (each a fresh batch) and judge by the largest CPU reading.
+    samples = await perf_budget.samples_async(
         lambda: repo.insert_or_get(
             parent_id=uuid4(),
             revision=1,
             result=_result(),
             computed_at=datetime.now(UTC),
         ),
-        batch=32,
+        n=5,
+        batch=64,
     )
+    sample = max(samples, key=lambda s: s.cpu_ms)
     assert sample.cpu_ms > 0, (
-        f"단일 호출 CPU시간이 0ms (batch=32 기준) — 측정 버그: "
+        f"단일 호출 CPU시간이 0ms (batch=64 x5 기준) — 측정 버그: "
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
     )
 
