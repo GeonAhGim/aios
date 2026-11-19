@@ -54,10 +54,10 @@
 <!-- BLOCK:J1-LoginPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | `AUTH_ACCOUNT_LOCKED`(423): `deriveLockout(err).retryAfterSec > 0`(`LoginPage.tsx:47`) → `locked=true`(`:32`). 429(`RATE_LIMIT_EXCEEDED`): `routeApiError`(`:60`) → `backoff_retry`(`shared-types/errorRouting.ts:124`). `retryAfterSec` 존재 | 423: `lockoutRemainingSec` 카운트다운(`:34~38`), 안내 문구(`:107~110`), 모든 입력창·버튼 `disabled`(`:73,:84,:94,:111) — 재시도 불가. 429: `ErrorMessage` 재시도 버튼(`:103~104`), 카운트다운 후 활성화 | 423 구현됨(잠금+카운트다운, `LoginPage.tsx:25~38`). 429 구현됨(`routeApiError`→`backoff_retry`, `ErrorMessage` 재시도 버튼, `LoginPage.tsx:60~61,:103~104`) |
+| 서버 오류(5xx) | `EXCHANGE_UNAVAILABLE`(503)/`DEPENDENCY_NOT_READY`(503): `classifyServerError`(`shared-types/serverError.ts:42`) → `retryable` → `routeApiError`(`:119`) → `backoff_retry`(`afterSec`). `EXCHANGE_FATAL`(502)/`INTERNAL_ERROR`(500): `classifyServerError`(`:47`) → `fatal` → `routeApiError`(`:120`) → `server_fatal`(`shared-types/errorRouting.ts:120`, `traceId`) | retryable(503): `ErrorMessage`에 재시도 버튼(`LoginPage.tsx:103~104`), 카운트다운. fatal(502/500): `ErrorMessage`에 traceId 노출(`:102`), 재시도 버튼 없음(`canRetry=false`, `:61`). 모든 경우 `locked`는 안 됨(`deriveLockout`은 423만 봄, `:47`) | 503 구현됨(`classifyServerError` retryable, `routeApiError`→`backoff_retry`, `ErrorMessage` 재시도). 502/500 구현됨(`classifyServerError` fatal, `routeApiError`→`server_fatal`, traceId 표시). 구체적인 5xx 문구: `EXCHANGE_UNAVAILABLE`→"거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요."(`shared-types/apiError.ts:79`), `INTERNAL_ERROR`→"일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요."(`:83`) |
+| 네트워크 단절 | fetch/axios가 네트워크 오류(연결 실패, 타임아웃) 발생 → `ApiError`가 아님(plain Error). `LoginPage.tsx:46`: `err instanceof ApiError` false → `new Error(t("legacy.loginPage.t9"))` 생성. `deriveLockout`(`:47`)은 `isAccountLockoutLike`(`shared-types/accountLockout.ts:27`)가 `statusCode` 검사 → false → `{ locked: false, retryAfterSec: 0 }`. `routeApiError`(`:60`)는 `isErrorCodeLike`(`shared-types/errorRouting.ts:24`, `errorCode` 프로퍼티 필요) → false → `{ kind: "unknown" }` | `ErrorMessage`(`:99~106`): `errorCode=null`, `message="로그인에 실패했습니다."`, `traceId=null`. `getApiErrorMessage(null, "로그인에 실패했습니다.")`(`shared-types/apiError.ts:117`) → fallback "로그인에 실패했습니다." 표시. 재시도 버튼 없음(`canRetry=false`). 입력창·버튼은 잠기지 않음(`locked=false`) | 구현됨(plain Error → "로그인에 실패했습니다." 표시, 재시도 버튼 없음). 단, 네트워크 복수 시 수동 재제출만 가능(자동 재시도 없음) — 명세 갭 아님(로그인은 멱등성 요청이 아니므로 자동 재시도 위험) |
+| 부분 실패(일부 데이터만 실패) | 로그인 요청은 단일 mutation(`useAuth.ts:35`): `{ email, password, totpCode }` 한 번에 전송. 일부 필드만 실패하는 개념 없음. 서버 400 중 `AUTH_MFA_INVALID`(`shared-types/apiError.ts:18`)는 MFA 필드만 해당되나, 전체 제출이 실패한 것이므로 "부분"이 아님 | 없음 — 로그인 성공/실패의 이분법만 존재 | 없음(단일 mutation이므로 부분 실패 개념 적용 대상 아님) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
