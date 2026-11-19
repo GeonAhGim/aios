@@ -82,7 +82,16 @@
 <!-- BLOCK:J1-DemoModePage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| TODO | | |
+| 입력 오류(400/검증) | 해당 없음 — 입력 폼 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 인증 필요/세션 만료(401) | 해당 없음 — API 호출 없음(`DemoModePage.tsx:9~41`, `DemoModePage.facts.md:35~38`) | 해당 없음 | 해당 없음 |
+| 권한 없음/MFA 필요(403) | 해당 없음 — 권한 체크 호출 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 충돌/상태 불일치(409) | 해당 없음 — 상태 변경 API 호출 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 잠김/속도 제한(423/429) | 해당 없음 — HTTP 호출 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 서버 오류(5xx) | 해당 없음 — 서버 통신 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 네트워크 오류(offline) | 해당 없음 — fetch/axios 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| 부분 실패/병렬 호출 실패 | 해당 없음 — 병렬 호출 없음(`DemoModePage.tsx:9~41`) | 해당 없음 | 해당 없음 |
+| i18n 키 누락 | react-i18next 기본 동작: 키 문자 그대로 표시(`DemoModePage.tsx:10`) | 키 누락 시 화면 렌더 차단 없음 — 누락된 키 문자열이 그대로 보임 | 해당 없음 |
+| 데이터셋 무결성 | `DEMO_INSTRUMENTS`는 고정 상수 배열(`demoDataset.ts:13~17`) — 검증 없음 | 배열이 비어 있으면 빈 `<ul>`만 표시(`DemoModePage.tsx:19~36`) | 해당 없음 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
