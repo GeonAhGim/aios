@@ -55,10 +55,10 @@
 <!-- BLOCK:J1-SignupPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423(`AUTH_ACCOUNT_LOCKED`): `setError(err)`(:66) → `deriveLockout(err)`(:68)가 `retryAfterSec` 리턴 → `lockoutRemainingSec`(:45)가 0보다 큼 → `locked=true`(:49). 429(`RATE_LIMIT_EXCEEDED`): `setError`(:66) → `ErrorMessage`(:30-37) 렌더 | 423: `legacy.signupPage.t4` 카운트다운(:108-109). Button `disabled={locked}`(:111), 입력 필드 `disabled={locked}`(:82,:97). 429: `ErrorMessage`(:30-37) 렌더 | 423: 잠김 해제 후 "가입하기" 재시도. 429: `ErrorMessage` 재시도 버튼 클릭 시 재전송 가능(SignupPage에서는 `onRetry` 없음) | 423 구현됨(`lockoutRemainingSec`(:45), 카운트다운 useEffect(:51-55), `locked`(:49), `disabled={locked}`(:111,:82,:97), `t4`(:108-109)). 429: `setError`(:66) → `ErrorMessage`(:30-37) 렌더 |
+| 서버 오류(5xx) | 서버가 5xx 반환 → `setError(error)`(:66) → `ErrorMessage`(:30-37) 렌더. `traceId` 있으면 `legacy.errorMessage.t1`로 trace_id 노출(:60) | `ErrorMessage`(:30-37) 렌더, 재시도 버튼과 카운트다운 표시 | 재시도 버튼 클릭 시 재전송 가능(SignupPage에서는 `onRetry` 없음). fatal은 수동 재시도 필요 | `setError`(:66) → `ErrorMessage`(:30-37) 렌더. 재시도 버튼 `onRetry` props 없음 |
+| 네트워크 단절 | `apiClient.register`(:24) 네트워크 오류 → `catch`에서 `err instanceof ApiError` false → `new Error(t("legacy.signupPage.t8"))`(:66) | `ErrorMessage`(:30-37) 렌더. `errorCode` undefined, `message="회원가입에 실패했습니다."`(:66). `traceId` 없음. 재시도 버튼 없음 | "가입하기" 버튼 재클릭으로 재시도 | `ErrorMessage`에 `message` 전달. 재시도 버튼 없음. 수동 재시도만 가능 |
+| 부분 실패(일부 데이터만 실패) | 해당 없음 — 회원가입은 단일 POST `/auth/register`(:24). `useSignup` 훅(`useAuth.ts:24`)은 `mutationFn` 하나만 정의 | N/A | N/A | 해당 없음(단일 요청 화면) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
