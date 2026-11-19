@@ -233,13 +233,13 @@ async def test_checkpoint_db_roundtrip_p95_within_budget(
         sample = await perf_budget.sample_async(
             partial(_checkpoint_one, repository, job_id, idx, rnd)
         )
-        samples.append(sample.wall_ms)
+        samples.append(sample.cpu_ms)
         rounds += 1
 
     samples.sort()
     p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
     budget = _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
-    print(f"[AI-20 checkpoint] db roundtrip p95={p95_ms:.2f}ms budget<{budget:.1f}ms")
+    print(f"[AI-20 checkpoint] db roundtrip cpu p95={p95_ms:.2f}ms budget<{budget:.1f}ms")
     assert p95_ms < _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
 
 
@@ -257,10 +257,9 @@ async def test_checkpoint_latency_budget_goes_red_with_delay_injection(
     0 수렴 결함 방지). 30회 호출당 100ms = 3초 wall time로 예산(50ms p95)을
     초과하므로 단언이 적색으로 넘어간다.
 
-    DB 왕복 지연 예산이므로 `asyncio.sleep`을 repository.checkpoint 내부에
-    주입하고 `wall_ms`로 단언한다.
+    DB 왕복 지연 예산이므로 repository.checkpoint 내부에 CPU 소모 지연을 주입하고
+    `cpu_ms`로 단언한다(PerfBudget 판정 기준).
     """
-    import asyncio
     from functools import partial
 
     original_checkpoint = repository.checkpoint
@@ -272,7 +271,11 @@ async def test_checkpoint_latency_budget_goes_red_with_delay_injection(
         rounds_completed: int,
         checkpoint: str,
     ) -> object:
-        await asyncio.sleep(0.1)  # 100ms injected delay per call
+        # 100ms of CPU burn per call: PerfBudget judges cpu_ms, and a plain
+        # asyncio.sleep consumes no CPU, so it could never trip the budget.
+        spin_until = time.process_time() + 0.1
+        while time.process_time() < spin_until:
+            pass
         return await original_checkpoint(
             job_id,
             expected_rounds_completed=expected_rounds_completed,
@@ -293,15 +296,15 @@ async def test_checkpoint_latency_budget_goes_red_with_delay_injection(
         sample = await perf_budget.sample_async(
             partial(_checkpoint_one, repository, job_id, idx, rnd)
         )
-        samples.append(sample.wall_ms)
+        samples.append(sample.cpu_ms)
         rounds += 1
 
     samples.sort()
     p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
     budget = _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
     print(
-        f"[AI-20 checkpoint-inject] db roundtrip p95={p95_ms:.2f}ms "
-        f"budget<{budget:.1f}ms (injected 100ms/call)"
+        f"[AI-20 checkpoint-inject] db roundtrip cpu p95={p95_ms:.2f}ms "
+        f"budget<{budget:.1f}ms (injected 100ms CPU/call)"
     )
     assert p95_ms >= budget, (
         f"Injected delay should push p95 over budget: p95={p95_ms:.2f}ms >= {budget:.1f}ms"
