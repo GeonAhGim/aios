@@ -66,7 +66,7 @@
 <!-- BLOCK:J1-SignupPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/auth/SignupPage.tsx:111`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/auth/SignupPage.tsx:111`) | 이메일·비밀번호 입력 후 `<form onSubmit={handleSubmit}>` (:74) 제출. `locked`가 false (:59 조기 반환, :111 `disabled={locked}`). 비밀번호 `minLength={12}` (:94)와 `required` (:79, :93)는 브라우저 검증. `loading`은 `signup.isPending` (:111). ui-web Button.tsx:39에서 `disabled={disabled || loading}`이 DOM `disabled` 속성에 전달. `type="submit"`은 ButtonProps가 ButtonHTMLAttributes를 확장하므로 `<button>`으로 전달됨. | `handleSubmit` (:57-70)의 `signup.mutateAsync({ email, password })` (:63) 완료 후 `navigate("/onboarding/mfa-setup")` (:64). `useSignup.onSuccess` (shared-hooks/useAuth.ts:25-27)에서 `setToken(data.accessToken)` + `qc.invalidateQueries({ queryKey: ["me"] })` 실행. | catch (:65-68)에서 `setError` (:66), `setFromError` (:67), `setLockoutRemainingSec(deriveLockout(err).retryAfterSec)` (:68). `navigate` 없으므로 `/signup` 유지. `SignupError` (:106)가 400/403/그 외 분기 (:26-37). 423(`AUTH_ACCOUNT_LOCKED`)이면 `locked`가 되어 `useEffect` (:51-55)의 1초 간격 카운트다운 (:107-110) 표시. 423 외 오류는 `deriveLockout`이 `{ locked: false, retryAfterSec: 0 }` 반환 (shared-types/accountLockout.ts:47) — 잠금 없음. | 성공: `/onboarding/mfa-setup` (router.tsx:87 `{ path: "/onboarding/mfa-setup", element: protect(<MfaSetupPage />) }`). 실패: `/signup` 유지. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
