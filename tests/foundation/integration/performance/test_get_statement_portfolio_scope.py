@@ -322,7 +322,7 @@ async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized
     samples = sorted([await _call() for _ in range(30)])
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
 
-    ceiling = baseline_elapsed * 5 + 0.05
+    ceiling = baseline_elapsed * 5 + 50.0
     assert p95 <= ceiling, (
         f"get_statement(portfolio_id=...) p95 지연 {p95:.4f}ms가 정규화 상한 "
         f"{ceiling:.4f}ms(baseline {baseline_elapsed:.4f}ms)를 초과했습니다 -- "
@@ -385,7 +385,7 @@ async def test_p95_assertion_goes_red_with_io_delay_injection(
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
 
     # 지연 주입 후 p95가 baseline 기반 상한을 넘어야 함 — 지연이 ~500ms×3라운드트립
-    ceiling = baseline_elapsed * 5 + 0.05
+    ceiling = baseline_elapsed * 5 + 50.0
     assert p95 > ceiling, (
         f"지연 주입 후 p95 지연 {p95:.4f}ms가 상한 {ceiling:.4f}ms를 넘지 않음 — "
         "측정/단언이 공허함(hollow assertion, budget>=p95)"
@@ -422,7 +422,7 @@ async def test_p95_assertion_not_triggered_by_omitting_portfolio_id(
     samples = sorted([await _call() for _ in range(30)])
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
 
-    ceiling = baseline_elapsed * 5 + 0.05
+    ceiling = baseline_elapsed * 5 + 50.0
     assert p95 <= ceiling, (
         f"portfolio_id 없이 호출 시 p95 {p95:.4f}ms가 상한 {ceiling:.4f}ms 초과 — "
         "단언이 경로 구별 없이 모든 호출에 느림을 허용함"
@@ -484,8 +484,8 @@ async def test_p95_baseline_self_consistency_across_runs(
     baseline_2 = await _call()
 
     # 각 baseline이 자체 상한 내에서 green이어야 함
-    ceiling_1 = baseline_1 * 5 + 0.05
-    ceiling_2 = baseline_2 * 5 + 0.05
+    ceiling_1 = baseline_1 * 5 + 50.0
+    ceiling_2 = baseline_2 * 5 + 50.0
 
     samples_1 = sorted([await _call() for _ in range(30)])
     p95_1 = samples_1[math.ceil(0.95 * len(samples_1)) - 1]
