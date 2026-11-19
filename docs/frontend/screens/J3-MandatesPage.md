@@ -24,12 +24,12 @@
 <!-- BLOCK:J3-MandatesPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useMandateStatus` | `frontend/packages/shared-hooks/src/useMandates.ts:10` | TODO | TODO |
-| `useCreateMandateDraft` | `frontend/packages/shared-hooks/src/useMandates.ts:17` | TODO | TODO |
-| `useProposeMandateAmendment` | `frontend/packages/shared-hooks/src/useMandates.ts:25` | TODO | TODO |
-| `useActivateMandateRevision` | `frontend/packages/shared-hooks/src/useMandates.ts:33` | TODO | TODO |
-| `usePauseMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:42` | TODO | TODO |
-| `useResumeMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:50` | TODO | TODO |
+| `useMandateStatus` | `frontend/packages/shared-hooks/src/useMandates.ts:10` | 1회 조회 — `useQuery`에 폴링 옵션(refetchInterval)과 staleTime 옵션이 설정되지 않음(`useMandates.ts:11-14`). 서버 상태 변경은 mutation의 `onSuccess` → `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 캐시 무효화 후 수동 재조회(`MandatesPage.tsx:90`). | `isError`/`error`가 truthy하면(`MandatesPage.tsx:122`), `<MandateActionError error={error} onRetry={() => refetch()} />`로 에러 배너 표시 + 수동 refetch 버튼(`MandatesPage.tsx:127`). |
+| `useCreateMandateDraft` | `frontend/packages/shared-hooks/src/useMandates.ts:17` | 변경 요청(POST) — mutation. 성공 시 `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 status 캐시 무효화(`useMandates.ts:21`). | `onError: setCreateError`(`MandatesPage.tsx:104`). `createError` 상태가 채워져 `<MandateActionError error={createError} />`로 노출(`MandatesPage.tsx:188-190`). |
+| `useProposeMandateAmendment` | `frontend/packages/shared-hooks/src/useMandates.ts:25` | 변경 요청(POST) — mutation. 성공 시 `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 status 캐시 무효화(`useMandates.ts:29`). | `onError: setCreateError`(`MandatesPage.tsx:104`). 동일하게 `createError` → `<MandateActionError>`(`MandatesPage.tsx:188-190`). |
+| `useActivateMandateRevision` | `frontend/packages/shared-hooks/src/useMandates.ts:33` | 변경 요청(POST) — mutation. 성공 시 `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 status 캐시 무효화(`useMandates.ts:38`). | `onError`에서 `setActivateError`(`MandatesPage.tsx:113`). 추가로 `classifyStateConflict(err) === "refetch_retry"`이면 즉시 `refetch()`로 최신 `activeRevision` 반영(`MandatesPage.tsx:116`). `activateError` → `<MandateActionError error={activateError} onRetry={() => refetch()} />`(`MandatesPage.tsx:175-177`). |
+| `usePauseMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:42` | 변경 요청(POST) — mutation. 성공 시 `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 status 캐시 무효화(`useMandates.ts:46`). | `onError: setLifecycleError`(`MandatesPage.tsx:153`). `lifecycleError` → `<MandateActionError error={lifecycleError} />`(`MandatesPage.tsx:75-77`). |
+| `useResumeMandate` | `frontend/packages/shared-hooks/src/useMandates.ts:50` | 변경 요청(POST) — mutation. 성공 시 `qc.invalidateQueries({ queryKey: MANDATE_STATUS_QUERY_KEY })`로 status 캐시 무효화(`useMandates.ts:54`). | `onError: setLifecycleError`(`MandatesPage.tsx:154`). 동일하게 `lifecycleError` → `<MandateActionError>`(`MandatesPage.tsx:75-77`). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
