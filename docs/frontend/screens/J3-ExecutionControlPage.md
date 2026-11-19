@@ -36,10 +36,10 @@
 <!-- BLOCK:J3-ExecutionControlPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading`이 true(153, 322). executions 훅에서 가져온 `isLoading`(153)은 react-query 기본값으로 첫 렌더 시 true이다. | 목록 영역에는 LoadingState(ui-web 컴포넌트) 렌더(322~323). 문구 키 없음. `OperationStatusBar`(236~240)가 `isLoading`을 받아 `summary === null`일 때 "알 수 없음"으로 표시한다(OperationStatusBar.tsx:66, 82~104). | 목록 영역에는 없음. 생성 폼(242~283)은 로딩과 무관하게 입력 가능. | 목록 LoadingState: `구현됨`(322~323행). `OperationStatusBar` "알 수 없음": `구현됨`(OperationStatusBar.tsx:66, 82~104). |
+| 빈 상태 | 에러 아님, 로딩 아님, `executions`가 없거나 길이 0(324, 330). | 섹션 제목 `t13` "실행 목록"(319). 본문 `EmptyState`에 `t14` "실행 중인 전략이 없습니다."(331). | 목록에서는 없음. 위 폼으로 실행을 생성하는 것이 유일한 경로. | `구현됨`(330~331행). |
+| 정상 | `executions.length > 0`(324). | 2열 그리드에 `ExecutionCard` 나열(325~328). 각 카드: 전략ID(`:72`), 교환/모드/자본 문구(`t1`, `:74`), 실현 PnL(`t2`, `:81`), 미실현 PnL(`t3`, `:83`), `StatusBadge`(`:77`), 시작/정지/재시작/LIVE전환/노출확대/은퇴 버튼(`:87~:177`). | 시작(`handleStart`, `:58~:66`), 정지(`pause.mutate`, `:143`), 재시작(`start.mutateAsync`, `:104`), LIVE 전환(`showLiveConversion`, `:148~:157`), 노출 확대(`showExposureExpand`, `:158~:167`), 은퇴(`retire.mutate`, `:168~:177`). | `구현됨`. 목록 렌더(325~328행), 카드 세부 모두 `ExecutionCard.tsx` 전체에서 확인. |
+| 낡은 데이터(신선도 초과) | 이 파일에 stale·freshness 관련 참조가 없다(Grep 확인). | 보이는 낡음 표시 없음. `useExecutions` 훅이 `refetchInterval: 5000`(5초 폴링)을 설정(`usePortfolio.ts:42`). | 수동 갱신 경로 두 개: 목록 에러 재시도 `refetch`(321), 충돌 재조회 `refetch`(196). 새로고침 버튼 없음. | 화면 측 신선도 표시: `없음`(이 파일에 해당 참조 없음). 훅 측 자동 갱신: `구현됨`(`refetchInterval: 5000`, `usePortfolio.ts:42`). |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
