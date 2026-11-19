@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-SessionsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 — 개인 트레이더(투자자). PERSONAS_AND_JOURNEYS.md §3: J6(설정·승인·감사) 여정의 주 페르소나. |
+| 목적(한 문장) | 사용자가 로그인한 활성 세션(기기)을 확인하고, 의심 세션을 폐기하거나 전체 로그아웃하여 계정 접근을 관리한다. |
+| 진입 조건 | `router.tsx:151` — 경로 `/settings/sessions`, `protect(<SessionsPage />)`으로 `ProtectedRoute` 가드 적용(로그인 필요). |
+| 사용자 준비물 | 로그인 상태(access token 보유). `SessionsPage.tsx:51` — `VITE_API_BASE_URL` 환경 변수(기본 `http://localhost:8000`). |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
