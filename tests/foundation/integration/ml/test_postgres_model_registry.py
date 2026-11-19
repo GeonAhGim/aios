@@ -202,11 +202,6 @@ _REGISTER_CPU_BUDGET_MS = 5.0
 설정 — 양자화 오차 범위 내의 cpu_ms면 통과."""
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
 async def test_register_db_roundtrip_p95_within_budget(
     registry: PostgresModelRegistry, perf_budget: Any
