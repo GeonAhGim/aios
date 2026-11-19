@@ -44,10 +44,10 @@
 <!-- BLOCK:J1-SignupPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `handleSubmit` catch(`SignupPage.tsx:65`)에서 서버가 400 반환 → `setError(err)`(`:66`), `setFromError(err)`(`:67`). `SignupError` 컴포넌트(`:106`)가 `classifyBadRequest(error)`(`:26`) true 시 `<BadRequestNotice>` 렌더 | `BadRequestNotice` 컴포넌트(서버 메시지 노출, `BadRequestNotice.tsx:40-81`). `classifyBadRequest`가 "field"일 때 `details.fields` 비어 있으면 배너로 폴백(`BadRequestNotice.tsx:48-51`). `VALIDATION_INVALID_FIELD` → 필드별 인라인 오류(`Field.error` :75, :89) | 이메일/비밀번호 수정 시 `clearField("email")`(`:85`)/`clearField("password")`(`:100`)로 해당 필드 오류 제거 후 재제출 | 구현됨 (`SignupPage.tsx:65-68`, `:26`, `:106`, `BadRequestNotice.tsx:40-81`). 구체적인 400 처리 호출명: `classifyBadRequest` (`:26`), `BadRequestNotice` (`:26`) |
+| 인증 필요/세션 만료(401) | 서버가 401 반환 → `classifyBadRequest` false(401이 아님), `classifyForbidden` false(403 아님) → `routeApiError(error)`(:28) 경로. `routeApiError`에서 `isSessionExpiredErrorCode` 확인 → `auth_required` 반환 또는 `classifyServerError`/`classifyRetry`로 전달 | `ErrorMessage` 컴포넌트 렌더(:28-37). `errorCode`/`message`/`traceId` 전달. `fieldErrors`도 전달되어 비어 있으면 배너 표시 | 로그인 링크 `legacy.signupPage.t7` "로그인"으로 `/login` 이동 (:115-116). `ErrorMessage`의 재시도 버튼은 `onRetry`가 없으므로 표시 안 됨 | `routeApiError`(:28)로 분기, `ErrorMessage`(:28-37) 렌더. 구체적인 401 처리 호출명: `routeApiError` (`:28`), `ErrorMessage` (`:30`). 401 전용 배선 없음(전체 catch 경로 통합) |
+| 권한 없음/MFA 필요(403) | 서버가 403 반환 → `classifyForbidden(error)`(:27) true. errorCode에 따라 `mfa_required`/`tenant_mismatch`/`policy`/`forbidden` 분류 | `ForbiddenNotice` 컴포넌트 렌더(:27). `getApiErrorMessage`로 메시지 표시. `policy`일 때 `DenialReasons` 표시. `mfa_required`일 때 `onStepUp` 버튼(SignupPage에서는 없음) | 권한 문제이므로 재시도 무의미. 로그인 링크로 이동 가능 (:115-116) | 구현됨 (`:27`). 구체적인 403 처리 호출명: `classifyForbidden` (`:27`), `ForbiddenNotice` (`:27`) |
+| 충돌/상태 불일치(409) | 서버가 409 반환 → `classifyBadRequest` false, `classifyForbidden` false → `routeApiError(error)`(:28). `routeApiError`에서 `classifyStateConflict` 확인 → `refetch_retry` 또는 `invalid_transition` 반환 | `ErrorMessage` 컴포넌트 렌더(:28-37). `classifyRetry`가 "refetch"이면 재시도 버튼 표시 가능(SignupPage에서는 `onRetry` 없음) | 이메일 중복 시 다른 이메일로 재입력 또는 로그인 링크 (:115-116). `ErrorMessage`에 `onRetry` 없음 | `routeApiError`(:28)로 분기, `ErrorMessage`(:28-37) 렌더. 구체적인 409 처리 호출명: `routeApiError` (`:28`). 409 전용 배선 없음(전체 catch 경로 통합) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
