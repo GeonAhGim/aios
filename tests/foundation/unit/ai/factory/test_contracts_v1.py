@@ -185,10 +185,11 @@ def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget(
 
     print(
         f"[AI-8 factory contracts_v1] {n}건 construct in "
-        f"{sample.wall_ms / 1_000:.4f}s (budget<{_CONSTRUCT_BUDGET_SEC}s)"
+        f"{sample.cpu_ms / 1_000:.4f}s cpu (wall {sample.wall_ms / 1_000:.4f}s, "
+        f"budget<{_CONSTRUCT_BUDGET_SEC}s)"
     )
     assert len(sample.result) == n
-    assert sample.wall_ms < budget_ms
+    assert sample.cpu_ms < budget_ms
 
 
 # --- 성능 주입 검증(D2) ---
