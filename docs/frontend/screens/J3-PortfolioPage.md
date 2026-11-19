@@ -24,9 +24,9 @@
 <!-- BLOCK:J3-PortfolioPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | TODO | TODO |
-| `useRebalancePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:15` | TODO | TODO |
-| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | TODO | TODO |
+| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | 마운트 시 1회 조회(`queryKey: ["portfolio"]`, `queryFn: apiClient.getPortfolio()`). `refetchInterval` 없음(1회 조회). 수동 `refetch()` 호출 가능(`PortfolioPage.tsx:53`, `:106`). `useExecutions`는 별 훅으로 5초 폴링(`refetchInterval: 5000`, `usePortfolio.ts:42`) — 포트폴리오 조회에는 적용 안 됨 | `isError` 시 `portfolioError` 설정. `routeApiError()`로 분류(`PortfolioPage.tsx:33` 재사용, `:61`). `EXCHANGE_UNAVAILABLE`/`DEPENDENCY_NOT_READY`(kind=`refetch_retry`/`backoff_retry`) → `ErrorMessage`에 `onRetry=()=>refetch()`(`:106`). `EXCHANGE_FATAL` → `onRetry` 없이 에러 메시지만 표시(`:98-107). `dataUpdatedAt`(react-query 내부 시각)로 신선도 표시, `DataFreshness` 컴포넌트 사용(`:95`). `asOf`는 `null`(PLT-19 봉투 미적용, `:94-95`) |
+| `useRebalancePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:15` | `useMutation`. `mutateAsync({body, idempotencyKey})` 호출(`PortfolioPage.tsx:76`). `onSuccess` 시 `["portfolio"]` 쿼리 키 무효화(`usePortfolio.ts:25`) — 다음 `usePortfolio` 조회/폴링 시 자동 갱신. `refetchInterval` 없음(수정 요청 후 캐시 무효화 방식) | `handleRebalance`의 `catch`에서 처리(`PortfolioPage.tsx:79-82`). `DuplicateSubmitError` → 조용히 무시(`:80`). `ApiError` → `setError(err)` → `RebalanceError` 컴포넌트(`:81`, `:30-42`). `RebalanceError`: `classifyBadRequest` → `BadRequestNotice`(`:31`), `classifyForbidden` → `ForbiddenNotice`(`:32`), 그 외 → `ErrorMessage`(`:33-40`). 성공 시 `rebalance.data.adjusted`/`pendingApproval`로 결과 카운트 표시(`:175-178`) |
+| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | `submit((key) => action(key))` 호출. `inFlightRef`로 동시 요청 차단(버튼 연타 시 `DuplicateSubmitError` throw, `:36-38`). 성공 시 `manager.discardKey()`로 키 폐기(`:43`). 4xx 실패 시 키 폐기(`:58-59`). 5xx/네트워크 오류 시 같은 키 유지(재시도 가능, `:58`). 키 관리: `createIdempotencyKeyManager()`로 `requestKey: "portfolio.rebalance"` 기반(`:31`, `:40`) | `DuplicateSubmitError` → 호출부(`PortfolioPage.tsx:80`)에서 `return`으로 조용히 종료. 그 외 에러는 재throw → `PortfolioPage.tsx:81`에서 `RebalanceError` 경로로 전달. `classifyIdempotencyFailure`로 `missing_header`(클라이언트 결함) 감지 시 `console.warn`(`:52-56`) — 사용자 화면에 노출 안 함 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
