@@ -32,10 +32,10 @@
 <!-- BLOCK:J1-ConnectionWizardPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `beginConnection.isPending`이 true — review 단계에서 `handleSubmit()` 호출 후 mutation 제출 중 (`ConnectionWizardPage.tsx:60-70`, `:193`) | review 단계의 `연결하기` 버튼(`connectWizard.steps.review.submit`, `:194`)에 `loading` prop이 걸려 버튼 텍스트가 비활성화되고 로딩 인디케이터 표시. 이 화면에는 목록 조회 로딩 문구 키가 없음(페이지 진입 시 데이터 없음). | 제출 취소 버튼 없음. 로딩 완료(성공/실패)까지 대기. | 구현됨(`:193` Button에 `loading={beginConnection.isPending}` 전달). Button이 loading prop을 어떻게 렌더하는지는 ui-web 내부 미확인. |
+| 빈 상태 | 초기 입력 상태 — `providerCode=""`, `opaqueAccountRef=""`, `capabilityProfile=[]`, `readonlyConfirmed=false` (`:45-48`). 권한 체크 0개이므로 `providerStepValid=false` (`:56`) | provider 단계: 빈 `공급자 코드` 입력 필드(`connectWizard.steps.provider.providerLabel`, `:99`), 빈 `계정 키` 입력 필드(`connectWizard.steps.provider.keyLabel`/`keyPlaceholder`, `:102-107`), 권한 체크박스 3개 모두 미선택(`:117-124`), `다음` 버튼(`connectWizard.steps.provider.next`, `:132`)이 `disabled={!providerStepValid}` (`:131`)로 비활성화 | 권한 1개 이상 선택 후 `다음` 클릭 → permissions 단계로 진행. | 구현됨(provider 단계 입력 필드 `:96-133`, `providerStepValid` 조건 `:56`, `next` 버튼 `disabled` `:131`). |
+| 정상 | provider → permissions(`readonlyConfirmed` 체크) → review → 제출 성공 (`onSuccess` → `setSucceeded(true)`, `:67`). `succeeded`가 true일 때 (`:85`) | `connectWizard.steps.review.success` 문구("연결 요청을 보냈습니다. 설정 > 연결에서 상태를 확인하세요.", `:87`)이 `Alert tone="success"` (`:86`)로 표시. 하단에 `connectWizard.steps.review.goToConnections` 버튼("연결 목록으로 이동", `:90`) | `연결 목록으로 이동` 버튼 클릭 → `/settings/connections` 이동 (`:88`, `Link to="/settings/connections"`). | 구현됨(성공 시 `Alert` + `Link` 버튼 `:85-93`, `onSuccess` 핸들러 `:67`). |
+| 낡은 데이터(신선도 초과) | 이 화면은 기존 연결 데이터를 조회하지 않는다. mutation만 존재 (`useConnections.ts:20-25`). 신선도 설정(staleTime, isStale, refetch)이 이 페이지와 훅에 없음. | 없음 — 화면이 기존 연결 상태를 읽어오지 않으므로 신선도 초과 개념이 적용되지 않음. | N/A | 없음(조회 훅 없음, mutation 전용 `:20-25`). 성공 후 `qc.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY })`(`useConnections.ts:24`)가 연결 목록 쪽 신선도를 맞추는 유일한 장치. |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
