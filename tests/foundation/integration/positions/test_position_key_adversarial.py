@@ -24,7 +24,6 @@ import asyncio
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -43,7 +42,6 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.position_key import PositionKey
-from tests import conftest
 from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
@@ -215,7 +213,7 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
 
 @pytest.mark.perf
 async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isolated(
-    pool, perf_budget: conftest.PerfBudget
+    pool,
 ):
     """다중 인스턴스/동시성 D3 증거 + 수치 성능 단언 -- 같은 전략을 복제하는
     서로 다른 포트폴리오 10개가 asyncio.gather로 동시에 첫 체결을 기록해도
@@ -225,8 +223,7 @@ async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isola
     해시 대상 `position_key` 문자열 자체가 portfolio_id로 갈라지므로 서로
     다른 락을 잡는다 -- 이 테스트는 그 격리가 실제로 유지되는지를 확인한다."""
     n = 10
-    budget_sec = 10.0
-    min_ops_per_sec = 1.0
+    max_ratio = 2.5 * n / 2  # linear growth vs one fill, with the 2-fill budget's slack
 
     tenant_id = await create_test_tenant(pool)
     hierarchy = await bootstrap_default_hierarchy(pool, tenant_id)
@@ -245,20 +242,50 @@ async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isola
     for key in keys:
         await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
 
-    try:
-        sample = await perf_budget.sample_async(
-            lambda: asyncio.gather(
-                *[
-                    _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
-                    for key in keys
-                ],
-                return_exceptions=True,
+    # perf keys: separate from assertion keys so measure_async's warmup + best-of
+    # repeats do not accumulate quantity on the keys checked below.
+    perf_keys = [
+        str(
+            PositionKey(
+                instrument_id=f"INSTperf{uuid4().hex[:6]}", portfolio_id=pid, **_SHARED_STRATEGY
             )
         )
-        elapsed = sample.wall_ms / 1000
-        ops_per_sec = n / elapsed
+        for pid in portfolio_ids
+    ]
+    for key in perf_keys:
+        await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
 
-        gather_results = cast("list[BaseException | None]", sample.result)
+    async def _calibration_fill() -> None:
+        await _fill_once(
+            pool, tenant_id=tenant_id, account_id=account_id, position_key=perf_keys[0]
+        )
+
+    async def _race_fills() -> None:
+        await asyncio.gather(
+            *[
+                _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
+                for key in perf_keys
+            ]
+        )
+
+    try:
+        sample = await RelativeBudget().measure_async(_race_fills, calibration_fn=_calibration_fill)
+        print(
+            f"[task-1943/3032 10-portfolio concurrent fills] {n} fills "
+            f"op={sample.op_ms:.1f}ms calibration={sample.calibration_ms:.1f}ms "
+            f"ratio={sample.ratio:.2f} (budget<{max_ratio})"
+        )
+        assert sample.ratio < max_ratio, (
+            f"{n}개 포트폴리오 동시 체결 ratio {sample.ratio:.2f}가 예산({max_ratio})을 넘었습니다."
+        )
+
+        gather_results = await asyncio.gather(
+            *[
+                _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
+                for key in keys
+            ],
+            return_exceptions=True,
+        )
         failures = [r for r in gather_results if isinstance(r, BaseException)]
         assert failures == [], f"동시 체결 중 실패 발생: {failures}"
 
@@ -271,16 +298,5 @@ async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isola
         quantities = {row["position_key"]: row["quantity"] for row in rows}
         assert len(quantities) == n
         assert all(qty == Decimal("1") for qty in quantities.values()), quantities
-
-        print(
-            f"[task-1943/3032 10-portfolio concurrent fills] {n} fills {elapsed:.3f}s "
-            f"({ops_per_sec:.1f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec} ops/s)"
-        )
-        assert elapsed < budget_sec, (
-            f"{n}개 포트폴리오 동시 체결이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-        )
-        assert ops_per_sec > min_ops_per_sec, (
-            f"동시 체결 처리량이 최소값({min_ops_per_sec} ops/s)에 못 미칩니다({ops_per_sec:.1f})."
-        )
     finally:
-        await _delete_pos_snapshot(pool, position_keys=keys)
+        await _delete_pos_snapshot(pool, position_keys=[*keys, *perf_keys])
