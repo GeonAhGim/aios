@@ -32,10 +32,10 @@
 <!-- BLOCK:J1-LoginPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `login.isPending === true` — `mutateAsync`가 실행 중(`useAuth.ts:35~41` mutation) | Submit 버튼에 `loading` 스피너 표시(`LoginPage.tsx:111`), 폼 입력창은 `locked`가 아니면 활성화 상태 유지 | 버튼 클릭 무시 — React Query mutation 중 중복 제출 방지 | 구현됨 (`LoginPage.tsx:111` — `loading={login.isPending}`) |
+| 빈 상태 | 초기 마운트 — 모든 `useState("")`(`LoginPage.tsx:21~23`) | 빈 이메일/비밀번호/MFA 입력창, 제목 "AIOS 로그인"(`:64`), 회원가입 링크(`:114~116`) | 입력 후 제출 | 구현됨 (초기 상태 `:21~23`, 모든 라벨/버튼 렌더링 `:64~117`) |
+| 정상 | 로딩 없음, 에러 없음, 잠김 없음 — `locked === false`, `error === null`, `login.isPending === false` | 입력 가능한 이메일(`:66`)/비밀번호(`:77`)/MFA(`:88`) 필드, "로그인" 버튼 활성화(`:111~112`), "계정이 없으신가요? 회원가입" 링크(`:113~117`) | 이메일·비밀번호·MFA(선택) 입력 후 로그인 버튼 클릭 | 구현됨 (`handleSubmit` `:51~55`, `attemptLogin` `:40~49`, 전체 폼 `:64~117`) |
+| 낡은 데이터(신선도 초과) | `useLogin`은 `useMutation` 기반(`useAuth.ts:35`), refetchInterval/staleTime 옵션 없음(`:35~41`) | 없음 — 신선도 메커니즘 없음 | 없음 | 없음 (mutation 기반 훅이므로 stale 데이터 개념 적용 대상 아님) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
