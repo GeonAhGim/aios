@@ -48,10 +48,10 @@
 <!-- BLOCK:J2-ScriptEditorPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `compileScript` mutation 실패, 응답 `details`가 `ScriptCompileErrorDetails` 스키마 (`isScriptCompileErrorDetails`, `shared-types`) → `ScriptEditor` 마커로 단일 오류 표시 (`ScriptEditorPage.tsx:213-223`) | 컴파일 에러 라인/컬럼에 빨간 불빛 + 오류 코드 메시지 (`legacy.scriptEditorPage.t3` 아래, 마커로만 표시, 별도 문구 키 없음) | 스크립트 수정 후 재컴파일 | 구현됨 (`:213-223`) |
+| 인증 필요/세션 만료(401) | `compileScript` mutation 실패, 응답이 `ApiError`이지만 `isScriptCompileErrorDetails` 아님 → `showGenericError=true` → `ErrorMessage` (`:225`, `:248-254`)에 `errorCode`, `message`, `traceId` 전달 | `ErrorMessage` 컴포넌트 (i18n 키 없음, 기존 `routeApiError` 매핑 경로 재사용, `:23-24` 주석) | 로그인 재시도 | 구현됨 (`:225`, `:248-254`) |
+| 권한 없음/MFA 필요(403) | 401과 동일 경로 (`ErrorMessage`, `:225`, `:248-254`) | `ErrorMessage` 컴포넌트 | 권한 요청 | 구현됨 (`:248-254`) |
+| 충돌/상태 불일치(409) | 401과 동일 경로 (`ErrorMessage`, `:225`, `:248-254`) | `ErrorMessage` 컴포넌트 | 재시도 | 구현됨 (`:248-254`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
