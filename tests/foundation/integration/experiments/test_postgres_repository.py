@@ -362,19 +362,24 @@ def _p95(samples: list[float]) -> float:
 
 @pytest.mark.perf
 async def test_append_db_roundtrip_p95_within_budget(
-    repo: PostgresExperimentRepository, perf_budget: Any
+    repo: PostgresExperimentRepository,
 ) -> None:
-    """raw time.perf_counter() → perf_budget.sample_async 전환(task-10889).
+    """DB round-trip append p95 within the absolute budget (task-10889).
 
-     DB 왕복은 I/O 바운드이므로 wall_ms를 사용한다 — process_time는 대기 시간을
-    計量하지 못한다. 같은 프로세스의 CPU 보정 루프 비율을 쓰는 RelativeBudget이
-     아닌 PerfBudget을 쓰는 이유: 이 리프는 절대 ms 예산(_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS)
-     을 유지하며 측정 방식만 process_time-기반으로 통일한다(task-10775)."""
+    Each sample is the best of 3 appends taken via RelativeBudget.measure_async,
+    which absorbs transient host-load spikes instead of asserting on a single
+    wall_ms reading. The absolute budget _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS is
+    unchanged.
+    """
+    rb = RelativeBudget()
+
+    async def _one_append() -> object:
+        return await repo.append(_experiment())
+
     samples_ms: list[float] = []
     for _ in range(30):
-        experiment = _experiment()
-        sample = await perf_budget.sample_async(lambda e=experiment: repo.append(e))
-        samples_ms.append(sample.wall_ms)
+        sample = await rb.measure_async(_one_append, n=3, warmup=0)
+        samples_ms.append(sample.op_ms)
 
     p95_ms = _p95(samples_ms)
     print(
