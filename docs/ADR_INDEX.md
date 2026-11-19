@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 55건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 8건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-09-29-A, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
+전체 56건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 9건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-09-17-A, ADR-2026-09-29-A, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -41,7 +41,7 @@
 | ADR-2026-09-10-A | 상황 인식 검토 — 검토 컨텍스트 MCP 서버 + 영역별 검토 스킬 + 발견 기억 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-A-context-aware-review.md |
 | ADR-2026-09-10-B | 워커 효율 커넥터 — 저장소 CLAUDE.md·결정론 훅을 먼저, MCP는 측정하며 붙인다 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-B-efficiency-connectors.md |
 | ADR-2026-09-10-C | 개발정책 3단계 전환 — 파일 길이에서 도메인 응집·불변식 지역성으로, 변경 거버넌스는 closeout 시점에 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-C-development-policy-phase3.md |
-| ADR-2026-09-17-A | BYOAI 에이전트 커넥터 — capability scope·Proposal 구조·보안 검토 | Proposed | 2026-09-17 |  |  |  | ADR-2026-09-17-A-BYOAI-connector.md |
+| ADR-2026-09-17-A | BYOAI 에이전트 커넥터 — capability scope·Proposal 구조·보안 검토 | **MISSING** | 2026-11-20 |  |  |  | ADR-2026-09-17-A-BYOAI-connector.md |
 | ADR-2026-09-24-A | MVP-1 종료 순서(검증 우선)와 함대 조직의 재사용 자산화(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
 | ADR-2026-09-26-A | MVP-2 우선 2의 클라우드 전용 조건부 선착수 (ADR-2026-09-24-A Decision 1-1 개정) | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-A-mvp2-priority2-cloud-early.md |
 | ADR-2026-09-26-B | 전략 실행 격리·소스 보호·AI/매매 분리 명문화·도메인 경계 계약 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-B-strategy-sandbox-source-protection-ai-separation-domain-boundaries.md |
@@ -61,3 +61,4 @@
 | ADR-2026-11-18-B | 글로벌 규모 프런트엔드 프로그램 (명세 우선 · 실스택 계약 · 미규정 액션 인입) | Accepted | 2026-11-18 |  |  |  | ADR-2026-11-18-B-global-grade-frontend-program.md |
 | ADR-2026-11-19-A | 종결 지표 재오픈은 같은 원인의 재발만 센다 | Accepted | 2026-11-19 |  |  |  | ADR-2026-11-19-A-reopen-counts-same-cause-only.md |
 | ADR-2026-11-20-A | MVP-2 범위 확정과 두 관문(T2/U2) — 내장 전략 엔진은 MVP-3으로 | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-A-mvp2-scope-and-two-gate-closeout.md |
+| ADR-2026-11-20-B | BYOAI 커넥터 보강 — 사용자가 쓰는 어떤 AI 에이전트(Claude·ChatGPT·Gemini·Copilot·로컬 LLM)도 붙는 구조 | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-B-byoai-multi-agent-compatibility.md |
