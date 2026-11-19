@@ -48,10 +48,10 @@
 <!-- BLOCK:J1-DashboardPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 폼 입력 검증 오류 — 이 화면에 입력 폼 없음. 긴급 정지 mutation의 400 응답은 `frontend/apps/web/src/routes/dashboard/DashboardPage.tsx:36-47`의 EmergencyStopError 컴포넌트가 `frontend/apps/web/src/routes/dashboard/DashboardPage.tsx:40`의 ErrorMessage로 표시. | ErrorMessage: message, errorCode, traceId 전달받아 표시 | 재시도 버튼 없음. 사용자가 직접 정지 버튼 재클릭 | 있음 (emergency stop mutation 에러 경로만) |
+| 인증 필요/세션 만료(401) | `frontend/apps/web/src/router.tsx:70-72`의 ProtectedRoute가 토큰 없으면 /login?next=/dashboard로 리다이렉트. 페이지 내부 401 핸들러 없음. | 리다이렉트 후 로그인 페이지 | 로그인 후 자동 복귀 | 없음 (ProtectedRoute에서 처리) |
+| 권한 없음/MFA 필요(403) | `frontend/apps/web/src/router.tsx:74-80`의 ProtectedRoute가 MFA 미설정 시 /onboarding/mfa-setup로 리다이렉트. 긴급 정지 에러 경로에서 `frontend/apps/web/src/routes/dashboard/DashboardPage.tsx:37`의 classifyForbidden이 true면 ForbiddenNotice 표시. | ForbiddenNotice: 403 응답 시 표시 | 없음. 관리자 조치 필요 | 있음 (emergency stop에서만 classifyForbidden→ForbiddenNotice) |
+| 충돌/상태 불일치(409) | usePauseExecution mutation이 409를 특별히 처리하지 않음. `frontend/apps/web/src/routes/dashboard/DashboardPage.tsx:38`의 routeApiError로 라우팅되나 409 구분 없음. | ErrorMessage: 일반 오류 문구 표시 | 재시도 — 사용자가 정지 버튼 재클릭 | 없음 (409 전용 처리 없음) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
