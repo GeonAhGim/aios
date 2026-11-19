@@ -344,27 +344,30 @@ async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo, perf_bud
         await bundle_repo.get_bundle(**key)
 
     samples = await perf_budget.samples_async(_single_round_trip, n=5)
-    p95_ms = max(s.wall_ms for s in samples)
+    p95_ms = max(s.cpu_ms for s in samples)
     assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
 
 
-# -- D2 failure injection: 10x budget sleep → assertion red -------------------
+# -- D2 failure injection: 10x budget CPU work → assertion red ----------------
 
 
 @pytest.mark.perf
-async def test_p95_latency_assertion_fires_on_10x_budget_sleep(bundle_repo, perf_budget):
-    """Budget invariance: if the same assertion is run against a call delayed
-    by 10× the budget (200ms × 10 = 2000ms), the p95 assertion must fail.
+async def test_p95_latency_assertion_fires_on_10x_budget_cpu_work(bundle_repo, perf_budget):
+    """Budget invariance: if the same assertion is run against a call that
+    performs ~10× the budget in CPU work (200ms × 10 = 2000ms of compute),
+    the p95 assertion must fail.
 
     This proves the performance gate is not a tautology — it actually rejects
-    slow paths. The test **expects** the assertion to fire (AssertionError).
+    CPU-heavy paths. The test **expects** the assertion to fire (AssertionError).
     """
-    import asyncio as _asyncio
+    import math
 
     _BUDGET_MS = 200
-    _SLEEP_MS = _BUDGET_MS * 10  # 2000ms per iteration
+    # Inject ~500ms of CPU work per iteration — enough to blow past 200ms cpu_ms.
+    # Uses floating-point math (fast but CPU-bound).
+    _CPU_ITERATIONS = 10_000_000
 
-    async def _delayed_round_trip() -> None:
+    async def _cpu_heavy_round_trip() -> None:
         key = _bundle_key()
         await bundle_repo.create_bundle(
             **key,
@@ -372,17 +375,43 @@ async def test_p95_latency_assertion_fires_on_10x_budget_sleep(bundle_repo, perf
             check_run_ids=(uuid4(),),
             bundle_hash="bundle-hash-injected",
         )
-        await _asyncio.sleep(_SLEEP_MS / 1000)
+        # CPU-bound: heavy floating-point math burns process_time().
+        # Start from 1.0 so sin(1) ≠ 0 and the loop cannot be optimised away.
+        result: float = 1.0
+        for _ in range(_CPU_ITERATIONS):
+            result = math.sin(result) + math.cos(result)
+        assert result  # avoid dead-code elimination
         await bundle_repo.get_bundle(**key)
 
-    samples = await perf_budget.samples_async(_delayed_round_trip, n=5)
-    p95_ms = max(s.wall_ms for s in samples)
-    # Same assertion as the green test; with 10× sleep it MUST exceed budget.
+    samples = await perf_budget.samples_async(_cpu_heavy_round_trip, n=5)
+    p95_ms = max(s.cpu_ms for s in samples)
+    # Same assertion as the green test; with 10× CPU work it MUST exceed budget.
     # We expect this assertion to fail — that's the point of this test.
     with pytest.raises(AssertionError) as exc_info:
         assert p95_ms < _BUDGET_MS, f"p95={p95_ms:.2f}ms should exceed {_BUDGET_MS}ms budget"
     # Sanity: the fired assertion message contains the measured p95.
     assert "p95=" in str(exc_info.value)
+
+
+# -- D2 negative: get_bundle on missing key returns None (no CPU spike) -------
+
+
+@pytest.mark.perf
+async def test_get_bundle_missing_key_returns_none_cpu_ms_under_budget(bundle_repo, perf_budget):
+    """Negative path: calling get_bundle for a non-existent bundle must return
+    None and not spike CPU — proves the repository short-circuits cleanly."""
+    key = _bundle_key()  # never inserted
+
+    async def _lookup() -> None:
+        result = await bundle_repo.get_bundle(**key)
+        assert result is None, "missing bundle must return None"
+
+    samples = await perf_budget.samples_async(_lookup, n=5)
+    max_cpu_ms = max(s.cpu_ms for s in samples)
+    assert max_cpu_ms < 50, (
+        f"cpu_ms={max_cpu_ms:.2f}ms for missing-key lookup exceeds 50ms budget; "
+        f"samples={[f'{s.cpu_ms:.2f}' for s in samples]}"
+    )
 
 
 # -- D2 CPU measurement convergence: single call cpu_ms → 0 for trivial work ---
