@@ -59,10 +59,10 @@
 <!-- BLOCK:J3-MandatesPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423 `account_locked`(`deriveLockout` → `"account_locked"`, `errorRouting.ts:126`), 429 `RATE_LIMIT_EXCEEDED`(`classifyRetry` → `"backoff"`, `errorRouting.ts:121`) | `MandateActionError` → `ErrorMessage`. 423: `account_locked` 갈래의 `retryAfterSec`으로 카운트다운(`ErrorMessage.tsx:40-53`). 429: `backoff_retry` 갈래의 `retryAfterSec` 카운트다운(`ErrorMessage.tsx:40-53`). | 카운트다운 후 재시도 버튼 활성화(`ErrorMessage.tsx:66`). | 구현됨(`MandateActionError.tsx:16-24`, `ErrorMessage.tsx:38-67`, `errorRouting.ts:119-121,125-126`) |
+| 서버 오류(5xx) | 500/502/503 (`classifyServerError` → `"retryable"` 또는 `"fatal"`, `errorRouting.ts:115-117`) | `MandateActionError` → `ErrorMessage`. `server_fatal`이면 `traceId` 노출(`ErrorMessage.tsx:60`). `backoff_retry`이면 카운트다운(`:63-65`). | 재시도 버튼(백오프면 countdown 후 활성화, `:66`). | 구현됨(`MandateActionError.tsx:16-24`, `ErrorMessage.tsx:57-70`) |
+| 네트워크 단절 | fetch 실패 — `useMandateStatus`의 `isError`(`:122`) 또는 mutation 네트워크 예외 | 초기 로딩 실패(`:122-130`): `PageHeader` + `MandateActionError error={error} onRetry={() => refetch()}`(`:127`). mutation 중 네트워크 실패: 각 에러 상태별 `MandateActionError` 배너(`:75-77`, `:174-178`, `:188-190`). | 수동 refetch(`:127`, `:176`) 또는 mutation별 재시도. | 구현됨(로딩: `:122-130`. mutation: `:75-77`, `:174-178`, `:188-190`) |
+| 부분 실패(일부 데이터만 실패) | 여러 mutation 중 일부만 실패(예: create 성공, activate 실패) | 각 mutation별 독립 에러 상태(`createError:97`, `activateError:98`, `lifecycleError:99`). 실패한 mutation对应的 `MandateActionError` 배너만 표시. | 실패한 operation만 재시도. 성공한 mutation은 UI 계속 정상. | 구현됨(에러 상태 분리: `:97-99`. 각 mutation별 `onError`: `:104`, `:112-118`, `:153-154`) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
