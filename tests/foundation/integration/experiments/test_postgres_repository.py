@@ -351,8 +351,8 @@ async def test_gate_red_check_constraint_actually_fails_without_it(pool: asyncpg
 # --- numeric performance assertion ---
 
 _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
-"""Borrowed from `test_token_lifecycle.py`'s
-`_AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS` (single DB round-trip, same spec, no
+"""Absolute-ms budget for logging reference only. Actual assertion uses
+RelativeBudget ratio (task-25859): single DB round-trip, same spec, no
 AI-specific SLO number exists in §7 yet)."""
 
 
@@ -360,24 +360,65 @@ AI-specific SLO number exists in §7 yet)."""
 async def test_append_db_roundtrip_p95_within_budget(
     repo: PostgresExperimentRepository,
 ) -> None:
-    """DB round-trip append p95 within the absolute budget (task-10889).
+    """DB round-trip append p95 within relative budget (task-10889, task-25859).
 
-    Uses RelativeBudget.assert_within_async to assert on the ratio
-    (op_ms / calibration_ms) instead of absolute wall_ms, so transient
-    host-load spikes do not cause flaky failures. The budget value
-    _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS is unchanged.
+    I/O-bound operation measured with RelativeBudget.measure_async (wall-clock
+    mode) using a single-SELECT-1 calibration_fn so the ratio (op_ms / calib_ms)
+    normalises for Postgres server load. Asserts sample.ratio < 3.0 directly
+    instead of misusing an absolute-ms budget value as a ratio bound.
     """
     rb = RelativeBudget()
 
     async def _one_append() -> object:
         return await repo.append(_experiment())
 
-    sample = await rb.assert_within_async(
+    async def _calibration() -> None:
+        """Single DB round-trip to normalise for server load."""
+        async with repo._pool.acquire() as conn:
+            await conn.execute("SELECT 1")
+
+    sample = await rb.measure_async(
         _one_append,
-        max_ratio=_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS,
         n=30,
         warmup=0,
-        calibration_n=3,
-        label="append",
+        calibration_fn=_calibration,
     )
-    print(f"[AI-10 append] {rb.describe(sample, max_ratio=_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS)}")
+    print(
+        f"[AI-10 append] op={sample.op_ms:.2f}ms "
+        f"calib={sample.calibration_ms:.2f}ms "
+        f"ratio={sample.ratio:.2f}x budget<3.0x"
+    )
+    assert sample.ratio < 3.0
+
+
+@pytest.mark.perf
+async def test_append_db_roundtrip_p95_three_load_runs(
+    repo: PostgresExperimentRepository,
+) -> None:
+    """Negative: three consecutive load runs, each passing the ratio budget.
+
+    Ensures the perf assertion is not a one-shot pass — three sequential
+    invocations of the full measure_async cycle, each asserting ratio < 3.0.
+    """
+    rb = RelativeBudget()
+
+    async def _one_append() -> object:
+        return await repo.append(_experiment())
+
+    async def _calibration() -> None:
+        async with repo._pool.acquire() as conn:
+            await conn.execute("SELECT 1")
+
+    for run in range(3):
+        sample = await rb.measure_async(
+            _one_append,
+            n=30,
+            warmup=0,
+            calibration_fn=_calibration,
+        )
+        print(
+            f"[AI-10 append run-{run + 1}] op={sample.op_ms:.2f}ms "
+            f"calib={sample.calibration_ms:.2f}ms "
+            f"ratio={sample.ratio:.2f}x"
+        )
+        assert sample.ratio < 3.0
