@@ -59,10 +59,10 @@
 <!-- BLOCK:J2-ScriptEditorPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | `compileScript` mutation 실패, 응답 상태 429 → `isScriptCompileErrorDetails` 아님 → `showGenericError=true` → `ErrorMessage`(`:225`, `:248-254`). `backtest` mutation 실패, 상태 429 → `backtest.isError`(`:144`) → alert div(`:145-150`). | `ErrorMessage` 컴포넌트(compile), alert div에 오류 메시지(backtest). 속도 제한 전용 문구·카운트다운·재시도 대기 UI 없음. | 응답 메시지에 재시도 시간 포함 시 사용자 수동 재시도 | 구현됨(공통 오류 경로 재사용, `:225`, `:248-254`, `:144-150`), 전용 UI 없음 |
+| 서버 오류(5xx) | `compileScript` mutation 실패, 응답 상태 5xx → `showGenericError=true` → `ErrorMessage`(`:225`, `:248-254`). `backtest` mutation 실패, 상태 5xx → `backtest.isError`(`:144`) → alert div(`:145-150`). | `ErrorMessage` 컴포넌트(compile), alert div에 `getApiErrorMessage` 결과(backtest). 5xx 전용 재시도·대기 UI 없음. | 수동 재컴파일/재실행 | 구현됨(공통 오류 경로 재사용, `:225`, `:248-254`, `:144-150`), 전용 UI 없음 |
+| 네트워크 단절 | `compileScript`/`backtest` 요청 중 네트워크 오류 → react-query mutation이 `isError`로 전환. `ApiError` 아님 → `showGenericError=true`(`:225`) 또는 `backtest.isError`(`:144`). | compile: `ErrorMessage`에 `mutation.error.message`(네트워크 오류 문구). backtest: alert div에 `backtest.error.message`. react-query mutation 기본값: 자동 재시도 없음. | 수동 재시도 | 구현됨(공통 오류 경로, `:225`, `:248-254`, `:144-150`), 자동 재시도 없음 |
+| 부분 실패(일부 데이터만 실패) | 컴파일 성공(`mutation.isSuccess`, `:256`) → `CompilePreview` 렌더, 그 안에서 `backtest` mutation 실패(`:144`) → 백테스트 오류 표시. 컴파일 실패 → 백테스트 불가. | 컴파일 결과(해시·명령 수 등)는 표시되나 백테스트 결과 없음. backtest error div(`:144-151`)에 실패 사유. | 컴파일 재시도 또는 백테스트 재실행 | 구현됨(두 mutation 독립 실행, `:256`, `:144-151`), 명시적 "부분 실패" 안내 없음 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
