@@ -24,9 +24,9 @@
 <!-- BLOCK:J1-OnboardingFlowPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useExchangeCredentials` | `frontend/packages/shared-hooks/src/useExchanges.ts:5` | TODO | TODO |
-| `useMyStrategies` | `frontend/packages/shared-hooks/src/useStrategyBuilder.ts:14` | TODO | TODO |
-| `usePaperDeployments` | `frontend/packages/shared-hooks/src/usePaperControl.ts:7` | TODO | TODO |
+| `useExchangeCredentials` | `frontend/packages/shared-hooks/src/useExchanges.ts:5` | 1회 조회 (react-query default `staleTime: 0`, `refetchOnWindowFocus: true`). Mutation(`useRegisterExchangeCredential:16`, `useRevokeExchangeCredential:24`) 호출 시 `onSuccess` 콜백이 `qc.invalidateQueries({ queryKey: ["exchangeCredentials"] })`로 수동 무효화·재조회 (useExchanges.ts:16, 24) | react-query default `retry: 3`. 훅 내부 에러 처리 없음. `credentials.isError` → `deriveOnboardingProgress` (onboardingProgress.ts:65)에서 fail-closed(`false` 반환). 화면 에러 메시지·토스트·재시도 버튼 미표시 (OnboardingFlowPage.tsx:50-54) |
+| `useMyStrategies` | `frontend/packages/shared-hooks/src/useStrategyBuilder.ts:14` | 1회 조회 (react-query default `staleTime: 0`, `refetchOnWindowFocus: true`). 전략 생성 Mutation(`useCreateStrategy:31`, `useGenerateWizardStrategy:51`, `useGenerateFromPrompt:57`)은 mutation 성공 시 `["myStrategies"]` 키 무효화 콜백이 없어 — 수동 갱신 필요 | react-query default `retry: 3`. 훅 내부 에러 처리 없음. 훅 반환값 `isError` (OnboardingFlowPage.tsx:53) → fail-closed. 화면 에러 메시지 미표시. 전략 생성 후 목록이 자동 갱신되지 않음 (gap) |
+| `usePaperDeployments` | `frontend/packages/shared-hooks/src/usePaperControl.ts:7` | 1회 조회 (react-query default `staleTime: 0`, `refetchOnWindowFocus: true`). Mutation(`useRequestPaperDeployment:24`, `useDeploymentCommand:40`) 호출 시 `onSuccess` 콜백이 `qc.invalidateQueries({ queryKey: PAPER_DEPLOYMENTS_KEY })`로 수동 무효화·재조회 | react-query default `retry: 3`. 훅 내부 에러 처리 없음. 훅 반환값 `isError` (OnboardingFlowPage.tsx:54) → fail-closed. 화면 에러 메시지 미표시 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터

@@ -162,20 +162,17 @@ async def test_venue_listings_rejects_one_microsecond_overlap(pool: asyncpg.Pool
 
 @pytest.mark.perf
 async def test_bulk_non_overlapping_inserts_meet_latency_budget(
-    pool: asyncpg.Pool, perf_budget: object
+    pool: asyncpg.Pool,
 ) -> None:
     """`EXCLUDE USING gist`는 삽입마다 겹침 검사를 위해 GiST 인덱스를
     스캔한다 — 인덱스가 없거나 퇴화하면 O(n) 순차비교로 느려진다. 500개
-    서로 겹치지 않는 listing을 연속 삽입해 절대시간 예산 내임을 단언한다
-    (실측 로컬 <2s, 예산은 느린 CI 대비 넉넉히 잡음).
-
-    raw perf_counter() → RelativeBudget.measure_wall로 전환(task-10890).
-    """
+    서로 겹치지 않는 listing을 연속 삽입해 상대 비율 예산 내임을 단언한다
+    (호스트 속도에 독립적: 동일 호스트에서 500 insert 측정값과
+    순수 CPU 보정 루프 측정값의 비율이 max_ratio=2000x 이하)."""
     from tests._perf.relative_budget import RelativeBudget
 
     t0_base = datetime.now(UTC) - timedelta(days=2000)
     n = 500
-    budget_sec = 15.0
 
     # Each iteration uses unique data to avoid constraint violations.
     async def _insert_batch(instrument_id: str, symbol: str, t0: datetime) -> None:
@@ -196,10 +193,9 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(
 
     rb = RelativeBudget()
 
-    # I/O-bound async: use measure_async/assert_within_async (RelativeBudget).
-    # 15s absolute → relative budget: calibration on same host ~tens of ms;
-    # 500 inserts ~1-2s → ratio ~100-200. Budget 15s → ratio ~1500.
-    # Use 2000x to allow CI variance while catching O(n^2).
+    # I/O-bound async: RelativeBudget.assert_within_async uses wall-clock
+    # with self-calibrating ratio budget. 500 inserts ~1-2s on host → ratio
+    # ~100-200x vs tens-of-ms CPU calibration. 2000x catches O(n²) regression.
     async def _run_batch() -> None:
         inst_id = _fake_ulid()
         await _insert_instrument(pool, inst_id)
@@ -212,16 +208,9 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(
         warmup=0,
         label=f"[DC-4 venue_listings] {n} inserts",
     )
-    elapsed_sec = sample.op_ms / 1000.0
     print(
-        f"[DC-4 venue_listings] {n} inserts in {elapsed_sec:.3f}s "
-        f"({sample.op_ms / n:.2f} ms/iter, ratio={sample.ratio:.2f}x, "
-        f"budget<{budget_sec}s)"
-    )
-    # Also assert absolute budget for regression tracking.
-    assert elapsed_sec < budget_sec, (
-        f"venue_listings {n}건 삽입이 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed_sec:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
+        f"[DC-4 venue_listings] {n} inserts "
+        f"({sample.op_ms / n:.2f} ms/iter, ratio={sample.ratio:.2f}x)"
     )
 
 
