@@ -24,7 +24,8 @@
 <!-- BLOCK:J1-DemoModePage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| TODO | | |
+| `useTranslation()` (i18n 문자열) | `react-i18next` (`DemoModePage.tsx:10`) | 앱 부트스트랩 시 1회 로드, 언어 변경 시 재호출 | i18n 키가 누락되면 키 문자 그대로 표시(react-i18next 기본), 화면 렌더 차단 없음 |
+| `DEMO_INSTRUMENTS` (샘플 종목 목록) | `./demoDataset.ts:13~17` (`DemoModePage.tsx:5`) | 모듈 로드시 1회 평가, readonly 상수 — 갱신 없음 | 상수 배열이므로 실패 없음; 빈 배열이면 종목 목록이 안 보임 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
