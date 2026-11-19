@@ -355,35 +355,28 @@ _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
 AI-specific SLO number exists in §7 yet)."""
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
 async def test_append_db_roundtrip_p95_within_budget(
     repo: PostgresExperimentRepository,
 ) -> None:
     """DB round-trip append p95 within the absolute budget (task-10889).
 
-    Each sample is the best of 3 appends taken via RelativeBudget.measure_async,
-    which absorbs transient host-load spikes instead of asserting on a single
-    wall_ms reading. The absolute budget _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS is
-    unchanged.
+    Uses RelativeBudget.assert_within_async to assert on the ratio
+    (op_ms / calibration_ms) instead of absolute wall_ms, so transient
+    host-load spikes do not cause flaky failures. The budget value
+    _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS is unchanged.
     """
     rb = RelativeBudget()
 
     async def _one_append() -> object:
         return await repo.append(_experiment())
 
-    samples_ms: list[float] = []
-    for _ in range(30):
-        sample = await rb.measure_async(_one_append, n=3, warmup=0)
-        samples_ms.append(sample.op_ms)
-
-    p95_ms = _p95(samples_ms)
-    print(
-        f"[AI-10 append] db roundtrip p95={p95_ms:.2f}ms "
-        f"budget<{_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS:.1f}ms"
+    sample = await rb.assert_within_async(
+        _one_append,
+        max_ratio=_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS,
+        n=30,
+        warmup=0,
+        calibration_n=3,
+        label="append",
     )
-    assert p95_ms < _APPEND_DB_ROUNDTRIP_P95_BUDGET_MS
+    print(f"[AI-10 append] {rb.describe(sample, max_ratio=_APPEND_DB_ROUNDTRIP_P95_BUDGET_MS)}")
