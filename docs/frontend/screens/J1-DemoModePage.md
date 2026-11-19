@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-DemoModePage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — 온보딩(J1) 여정의 첫 화면, "첫 백테스트까지 5분" DoD의 1단계(task-2632, `DemoModePage.tsx:7~8`) |
+| 목적(한 문장) | 고정 샘플 데이터(1년치 1분봉, 3종목)로 실제 연결 없이 차트와 백테스트를 체험하게 한다 (`DemoModePage.tsx:16`, `DemoModePage.facts.md:13`) |
+| 진입 조건 | 로그인(`ProtectedRoute`, `router.tsx:70~72`) + `onboarding_demo_mode` FeatureFlag 활성화(`router.tsx:101`) |
+| 사용자 준비물 | 없음 — 데모 모드는 실제 거래소 연결·위임장·계정 설정 없이 바로 체험 가능 (`DemoModePage.tsx:16`) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
