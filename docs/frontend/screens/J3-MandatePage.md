@@ -48,10 +48,10 @@
 <!-- BLOCK:J3-MandatePage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 생성·개정 또는 activate mutation이 400 반환 | `mandatePage.pageTitle` 제목 + `MandateActionError` 컴포넌트 노출. `MandateActionError` 내부에서 `classifyBadRequest(error)`(`MandateActionError.tsx:14`)가 true면 `BadRequestNotice`, 그 외 `ErrorMessage` | 없음(페이지 전용 재시도 버튼 없음). 폼 자체 입력 검증(`MandateRuleForm`)은 이 파일 밖이므로 미확인 | 부분 구현(공통 경로: `setCreateError`→`MandateActionError`→`classifyBadRequest`→`BadRequestNotice`(MandatePage.tsx:62, :190~:193, MandateActionError.tsx:14). `classifyStateConflict`는 400에 `null`(stateConflict.ts:34, stateConflict.test.ts:30~35). activate 실패는 `setActivateError`→동일 경로(:71, :176~:180)) |
+| 인증 필요/세션 만료(401) | 세션 만료 또는 미인증 요청 | `MandateActionError` 노출. `classifyBadRequest`(MandateActionError.tsx:14)도 `classifyForbidden`(MandateActionError.tsx:15)도 401을 잡지 못하므로 `routeApiError`(`MandateActionError.tsx:16`)로 폴백. 문구 키는 `routeApiError` 내부에 있으므로 미확인 | 없음(페이지 전용 분기 없음). `classifyStateConflict`는 401에 `null`(stateConflict.ts:34) | 없음(페이지 전용 분기). 공통 경로(`MandateActionError`)가 401을 어떻게 렌더하는지 `routeApiError` 구현을 확인하지 않아 미확인 |
+| 권한 없음/MFA 필요(403) | 권한 부족 또는 MFA 요구 | `MandateActionError` 노출. `classifyForbidden(error)`(`MandateActionError.tsx:15`)가 true면 `ForbiddenNotice` | 없음(페이지 전용 분기 없음). `classifyStateConflict`는 403에 `null`(stateConflict.ts:34) | 없음(페이지 전용 분기). 공통 경로 구현됨(`MandateActionError.tsx:15`: `classifyForbidden` → `ForbiddenNotice`) |
+| 충돌/상태 불일치(409) | activate·초안/개정·pause/resume mutation이 409 반환 | activate 경합(`STATE_CONCURRENCY_CONFLICT`): `classifyStateConflict(err)==="refetch_retry"`(`MandatePage.tsx:74`) → `refetch()`로 최신 상태 재조회(:70~:75). 그 외 409: `setActivateError`→`MandateActionError`(:71, :176~:180). 초안/개정 409: `setCreateError`→`MandateActionError`(:62, :190~:193). pause/resume 409: `setLifecycleError`→`MandateActionError`(:140, :151, :156~:160) | activate 경합만 `refetch()` 재시도. 그 외 409는 재시도 버튼 없음(`MandateActionError`의 `ErrorMessage`(MandateActionError.tsx:18)가 `onRetry` 받지만 activate 409 외에는 전달 안 함) | 구현됨(activate 경로만 `refetch_retry` 재조회). 초안/개정·pause/resume 409는 오류 노출만. `classifyStateConflict` 매핑: `STATE_CONCURRENCY_CONFLICT`→`"refetch_retry"`, 그 외 409→`"invalid_transition"`(stateConflict.ts:37~39, stateConflict.test.ts:5~28) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
