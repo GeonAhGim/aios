@@ -47,10 +47,10 @@
 <!-- BLOCK:J2-ScreenerPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `handleRun` (`ScreenerPage.tsx:171-177`)에서 `describeScreenDefinitionIssues` (`:173`)가 issues 반환, `issues.length > 0` (`:175`) → 서버 조회 안 함. 서버 400 전용 분기 없음 → `ScreenerErrorBanner` (`:104-117`) → `ErrorMessage` (`:109-115`)로 흐름 | 클라이언트 검증 실패: `screener-validation-alert` (`:292`) 안에 `Alert tone="danger"` (`:293`)로 문구 표시. i18n 키 4개: `screener.validation.universeRequired` (`:122`), `filtersRequired` (`:124`), `filterIncomplete` (`:126`), `filterResearchAsOfRequired` (`:128`). 서버 400: 전용 문구 키 없음 (공용 ErrorMessage 표시) | 필드를 고치고 「실행」(`screener-run`, `:303`)을 다시 누름. 성공 시 `validationIssues`가 빈 배열로 갱신되어 경고 사라짐 (`:174`) | 클라이언트 검증: `구현됨` (`:171-177`, `:291-301`). 서버 400 전용 처리: `없음` |
+| 인증 필요/세션 만료(401) | 화면 전용 401 분기 없음. 토큰은 `useAuthStore.getState().token` (`:55-57`)로 읽으나 갱신/재로그인 로직 없음. 오류 분류(`shared-types/src/errorRouting.ts:88-133`)가 `auth_required` 반환하지만 화면에서 분기하지 않음 | HTTP 클라이언트 레벨에서 `handleAuthFailure` (`api-client/http.ts:104`)가 401 refresh 재시도. 화면 전용 오류 문구: 없음. 공용 오류 배너로 표시 여부: 오류 분류 반환값을 화면에서 분기하지 않으므로 미확인 | 재로그인 안내 또는 토큰 갱신: 화면 고유 처리 없음 | 없음 (화면 고유 처리 없음) |
+| 권한 없음/MFA 필요(403) | 화면 전용 403 분기 없음. MFA 관련 코드 이 파일에 없음 (grep 확인) | HTTP 클라이언트 레벨에서 `classifyForbidden(err) === "mfa_required"` (`api-client/http.ts:93`) 처리. 화면 전용 오류 문구: 없음. 공용 오류 배너로 표시 여부: 미확인 | MFA 재입력 또는 권한 요청: 화면 고유 처리 없음 | 없음 (화면 고유 처리 없음) |
+| 충돌/상태 불일치(409) | 화면 전용 409 분기 없음. `routeApiError`가 `refetch_retry`/`invalid_transition`/`data_coverage_missing`/`wallet_balance_drift` 등으로 분류하지만 화면에서 분기하지 않음 | 공용 `ScreenerErrorBanner` (`:104-117`) → `ErrorMessage` (`:109-115`)로만 흐름. 전용 문구: 없음 | 재시도 버튼: `ScreenerErrorBanner`가 `routeApiError.kind`로 `canRetry` 결정 (`:107`). 그 외 복구 안내: 없음 | 없음 (화면 고유 처리 없음) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
