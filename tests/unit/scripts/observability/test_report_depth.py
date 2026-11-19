@@ -12,13 +12,13 @@ DoD:
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts.observability import notify_selftest
+from tests._perf.relative_budget import RelativeBudget
 
 # ── negative tests (D2: negative ≥ 4) ─────────────────────────────────────────
 
@@ -94,17 +94,17 @@ def test_write_report_100_paths_under_200ms(tmp_path: Path) -> None:
     paths = [tmp_path / f"dest_{i}.json" for i in range(100)]
     result: dict[str, object] = {"ok": True, "status_code": 200, "error": None}
 
-    # 5회 측정 중 최소값 (Windows 지터 완화)
-    best = float("inf")
-    for _ in range(5):
+    def _write_once() -> None:
         # recreate paths each iteration (tmp_path is reused)
         for p in paths:
             p.unlink(missing_ok=True)
-        start = time.perf_counter()
         notify_selftest.write_report(result, paths)
-        elapsed = time.perf_counter() - start
-        if elapsed < best:
-            best = elapsed
+
+    # 파일 I/O라 wall 시계. 절대 0.2s 대신 보정 루프 대비 비율로 판정한다(task-7631) --
+    # 로컬 실측 ratio 0.55~0.68x, 예산 2.0x. O(n^2) 회귀는 비율을 움직이고 호스트 속도는 상쇄된다.
+    sample = RelativeBudget().assert_within(
+        _write_once, max_ratio=2.0, mode="wall", label="write_report(100 paths)"
+    )
 
     assert all(p.exists() for p in paths), "모든 100개 경로가 작성되어야 한다"
-    assert best < 0.2, f"write_report(100 paths) took {best:.3f}s, budget 0.2s"
+    assert sample.ratio < 2.0
