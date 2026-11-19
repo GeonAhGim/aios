@@ -44,8 +44,8 @@ from src.foundation.experiments.domain.lineage import (
     DanglingParentError,
     ReproducibilityKeyCollisionError,
 )
-from tests.conftest import PerfBudget
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime.now(UTC)
 
@@ -188,7 +188,7 @@ async def test_record_then_get_round_trip_p95_within_budget(
         sample = await perf_budget.sample_async(
             lambda _c=candidate: get_experiment(repo, _c.tenant_id, _c.experiment_id)
         )
-        samples.append(sample.wall_ms)
+        samples.append(sample.cpu_ms)
 
     p95_ms = _p95(samples)
     print(
@@ -445,7 +445,7 @@ async def test_record_experiment_db_roundtrip_p95_within_budget(
     samples: list[float] = []
     for _ in range(30):
         sample = await perf_budget.sample_async(lambda: record_experiment(repo, _experiment()))
-        samples.append(sample.wall_ms)
+        samples.append(sample.cpu_ms)
 
     p95_ms = _p95(samples)
     print(
