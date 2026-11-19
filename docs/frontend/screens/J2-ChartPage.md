@@ -48,10 +48,10 @@
 <!-- BLOCK:J2-ChartPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | candles 조회(`ChartPage.tsx:135`)가 400을 던져 `query.isError`가 참 (`ChartPage.tsx:220`) | `ErrorMessage`가 `errorCode`/`message`로 문구를 만든다(`ErrorMessage.tsx:36`, 문구는 shared-types getApiErrorMessage 매핑 — 개별 문구는 미확인). `traceId`가 있으면 `legacy.errorMessage.t1` 표시(`ErrorMessage.tsx:60`). `fieldErrors`를 넘기지 않으므로(`ChartPage.tsx:221-227`) 필드별 표시·배너 숨김은 없다 | 재시도 없음: `canRetry`는 `refetch_retry`/`backoff_retry`일 때만 참(`ChartPage.tsx:162`) | 부분: 공통 배너로만 처리, 400 전용 분기는 없음 (`ChartPage.tsx:161`에서 `routeApiError(query.error)`로 분류하지만 kind별 분기 렌더는 없다 — 모든 오류가 `ChartPage.tsx:221`의 `ErrorMessage` 하나로 간다)|
+| 인증 필요/세션 만료(401) | candles 조회가 401을 던짐 (`ChartPage.tsx:220`) | 위와 같은 `ErrorMessage` 배너(`ChartPage.tsx:221`). 문구는 getApiErrorMessage 매핑(개별 문구는 미확인) | 재시도 없음(`ChartPage.tsx:162`). 로그인 화면 이동 등 이 화면 안의 401 전용 처리는 없음 — 라우트 보호는 `protect()`(`router.tsx:120`)이며 401 응답 시 동작은 미확인 | 부분: 공통 배너만, 401 전용 분기 없음 (`ChartPage.tsx:161`, `ChartPage.tsx:221`)|
+| 권한 없음/MFA 필요(403) | candles 조회가 403을 던짐 (`ChartPage.tsx:220`) | 위와 같은 `ErrorMessage` 배너(`ChartPage.tsx:221`). 문구는 getApiErrorMessage 매핑(개별 문구는 미확인) | 재시도 없음(`ChartPage.tsx:162`). MFA 진입 등 403 전용 행동 없음 | 부분: 공통 배너만, mfa_required/forbidden 분기 렌더 없음 (`ChartPage.tsx:161`, `ChartPage.tsx:221`)|
+| 충돌/상태 불일치(409) | candles 조회가 409를 던짐 (`ChartPage.tsx:220`) | 위와 같은 `ErrorMessage` 배너(`ChartPage.tsx:221`). 문구는 getApiErrorMessage 매핑(개별 문구는 미확인) | `routeApiError`가 `refetch_retry`로 분류하면 `canRetry`가 참이 되어 재시도 버튼이 나오고 `query.refetch()`를 호출(`ChartPage.tsx:162`, `ChartPage.tsx:226`; 버튼 렌더 `ErrorMessage.tsx:61-67`). data_coverage_missing/invalid_transition은 `canRetry`가 거짓 — 버튼 없음 | 구현됨: 409 중 `refetch_retry`만 재시도 가능(`ChartPage.tsx:162`). 나머지 409는 배너만|
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
