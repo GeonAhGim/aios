@@ -56,10 +56,10 @@
 <!-- BLOCK:J1-OnboardingFlowPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | API 응답이 423(Locked) 또는 429(Too Many Requests). react-query 기본 `retry: 3`으로 재시도 후 `isError` 전환 (useExchanges.ts:5, useStrategyBuilder.ts:14, usePaperControl.ts:7) | 재시도 실패 시 `isError` → `deriveOnboardingProgress`의 `hasNonEmptyList`가 `false` 반환 (onboardingProgress.ts:65). 화면에는 해당 단계가 "예정" 뱃지로 표시됨. 속도 제한 문구·재시도 시각적 피드백 없음 | — | `구현됨` — 속도 제한 전용 UI 없음. react-query retry 후 fail-closed로 "예정" 표시: `onboardingProgress.ts:65`, `OnboardingFlowPage.tsx:98` |
+| 서버 오류(5xx) | API 응답이 5xx. react-query 기본 `retry: 3` 후 `isError` 전환 | `isError` → `hasNonEmptyList`가 `false` 반환. 화면에 에러 메시지·토스트·재시도 버튼 미표시. 전체 화면이 에러 상태로 전환되지 않고 단계별 "예정" 표시로 국소화됨 (OnboardingFlowPage.tsx:50-54, onboardingProgress.ts:65) | — | `구현됨` — 5xx 전용 UI 없음. fail-closed로 단계별 "예정" 표시: `OnboardingFlowPage.tsx:50-54`, `onboardingProgress.ts:65` |
+| 네트워크 단절 | 연결 끊김으로 react-query 요청 실패. 기본 `retry: 3` 후 `isError` 전환. `refetchOnWindowFocus: true`로 윈도우 포커스 시 자동 재시도 시도 (data 블록 참조) | 네트워크 복구 시 `refetchOnWindowFocus`로 재조회 시도. 단 수동 재시도 버튼 없음. 실패 시 5xx와 동일하게 fail-closed | 윈도우 포커스 시 자동 재조회; 수동 재시도 버튼 없음 | `없음` — 네트워크 전용 UI 없음. react-query retry + `refetchOnWindowFocus`로만 대응: `data` 블록 |
+| 부분 실패(일부 데이터만 실패) | 예: exchangeCredentials는 성공, strategies는 실패. 각 훅(`useExchangeCredentials`, `useMyStrategies`, `usePaperDeployments`)이 독립적으로 `isError` 판단 (OnboardingFlowPage.tsx:46-48) | 실패한 단계만 "예정" 뱃지로 표시. 성공한 단계는 "완료" 뱃지. 전체가 아닌 해당 단계만 "예정"으로 국소화됨. 에러 메시지 미표시 (OnboardingFlowPage.tsx:74-99, onboardingProgress.ts:65) | — | `구현됨` — 부분 실패 시 국소화 "예정" 표시: `OnboardingFlowPage.tsx:74-99`, `onboardingProgress.ts:65`. 단 에러 메시지 없음 (gap) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
