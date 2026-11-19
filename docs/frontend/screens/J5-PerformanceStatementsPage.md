@@ -13,10 +13,10 @@
 <!-- BLOCK:J5-PerformanceStatementsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 개인 트레이더(투자자) — 포트폴리오의 수익률·구성 요소별 순손익을 확인하고, 명세서에 오류가 있으면 정정 요청한다. [확인: PERSONAS_AND_JOURNEYS.md §2 P1, routes/portfolio/PerformanceStatementsPage.tsx:323 "실적 명세서"] |
+| 목적(한 문장) | 포트폴리오의 실적 명세서를 계산·조회·정정하여 투자 성과의 투명성과 정확성을 보장한다. [확인: routes/portfolio/PerformanceStatementsPage.tsx:61-274 MoneyCell/StatementDetail/ComputeForm] |
+| 진입 조건 | `router.tsx:134` — `/portfolio/performance-statements` 경로, `protect(<PerformanceStatementsPage />)`로 인증 필요. [확인: router.tsx:134] |
+| 사용자 준비물 | 성과 데이터를 가진 포트폴리오, 명세서 계산 기간(periodStart~periodEnd). [확인: routes/portfolio/PerformanceStatementsPage.tsx:203-216 ComputeForm] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
