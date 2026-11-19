@@ -45,10 +45,10 @@
 <!-- BLOCK:J1-OnboardingFlowPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 이 화면에는 입력 폼이 없다(facts.md Form fields 표 비어 있음). mutation 호출도 없다(OnboardingFlowPage.tsx:46-48은 조회 훅 3개뿐). 발생 경로: 없음 | 없음(오류 문구 키 없음) | 없음 | 없음 |
+| 인증 필요/세션 만료(401) | 조회 훅(`useExchangeCredentials:useExchanges.ts:5`, `useMyStrategies:strategyBuilder.ts:14`, `usePaperDeployments:usePaperControl.ts:7`)이 401 응답 받으면 react-query가 `refreshAccessToken` 호출(tokenRefresh.ts:50). refresh 실패 시 `clearHandler` 호출 → `useAuthStore.logout()(useAuthStore.ts:49)` → `ProtectedRoute`에서 `!token` 분기(ProtectedRoute.tsx:20) → `/login?next=...` 리다이렉트 | 없음(오류 문구 키 없음). 화면이 `isError`를 읽지만(OnboardingFlowPage.tsx:50-54) 에러 UI 미표시. `deriveOnboardingProgress` (onboardingProgress.ts:65)에서 fail-closed(`false` 반환) | 없음(화면 내 행동 없음). 전역 처리: 401 → 로그아웃 → `/login` 리다이렉트 (ProtectedRoute.tsx:20-21) | 없음(화면 외 전역 처리: `tokenRefresh.ts:50` refresh → `useAuthStore.ts:49` logout → `ProtectedRoute.tsx:20` loginRedirect) |
+| 권한 없음/MFA 필요(403) | 조회 훅이 403 응답 받으면 `tokenRefresh.ts:66`의 `clearHandler` 호출 → `useAuthStore.logout()` → `ProtectedRoute`에서 `!token` 분기 → `/login` 리다이렉트. `ProtectedRoute`는 403을 직접 처리하지 않음(토큰 폐기 후 401 경로로 우회). `protect()` 정의: `router.tsx:70` → `ProtectedRoute` | 없음(오류 문구 키 없음). 화면이 403을 직접 받지 않음(토큰 폐기 → 리다이렉트) | 없음(화면 내 행동 없음). 전역 처리: 403 → 토큰 폐기 → 로그아웃 → `/login` 리다이렉트 (ProtectedRoute.tsx:20-21) | 없음(화면 외 전역 처리: `tokenRefresh.ts:66` clearHandler → `useAuthStore.ts:49` logout → `ProtectedRoute.tsx:20` loginRedirect. `protect()` 정의: `router.tsx:70`) |
+| 충돌/상태 불일치(409) | 이 화면에 mutation 호출이 없다(OnboardingFlowPage.tsx:46-48). 발생 경로: 없음 | 없음(오류 문구 키 없음) | 없음 | 없음 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
