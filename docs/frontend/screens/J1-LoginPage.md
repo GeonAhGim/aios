@@ -65,7 +65,8 @@
 <!-- BLOCK:J1-LoginPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/auth/LoginPage.tsx:111`) | TODO | TODO | TODO | TODO |
+| `<Button type="submit">` (`LoginPage.tsx:111`) | `locked`가 false — `locked = lockoutRemainingSec > 0`(:32). `disabled={locked}`(:111). `loading={login.isPending}`으로 제출 중 스피너+비활성(`packages/ui-web/src/Button.tsx:39` `disabled={disabled || loading}`). 브라우저 `required`(`:70`, `:81`)가 빈 이메일·비밀번호 제출을 먼저 막음. Enter 키 제출도 form `onSubmit`(`:65`)으로 같은 경로 — Enter 동작 실측은 미확인 | `handleSubmit`(`:51~55`) → `attemptLogin`(`:40~49`) → `login.mutateAsync` 성공 후 `navigate(sanitizeNextPath(searchParams.get("next")))`(:44). `sanitizeNextPath`(`:14~17`)는 `next`가 `/`로 시작하고 `//`가 아니면 그 경로, 아니면 `/dashboard` | `catch`(`:45~48`): `error` 설정, `deriveLockout(err).retryAfterSec`를 `lockoutRemainingSec`(:47). `navigate` 호출 없음 → `/login` 머무름, `ErrorMessage`(:98~106) 표시. 429면 재시도 버튼 활성(`:103~104`), 423이면 카운트다운 후 입력·버튼 잠금 해제(`:34~38`, `:73`, `:84`, `:94`, `:111`) | 성공 → `?next` 경로 또는 `/dashboard`(`router.tsx:114` `protect(<DashboardPage />)`). 실패 → 동일 `/login` |
+| `<Link to="/signup">` (`LoginPage.tsx:115`, 텍스트 `legacy.loginPage.t8` `:116`) | 항상 노출(조건 없음, `:113~117`) | 클릭 시 라우터 이동 — 제출 결과와 무관 | 없음(클릭 결과 없음) | `/signup`(`router.tsx:85`) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
