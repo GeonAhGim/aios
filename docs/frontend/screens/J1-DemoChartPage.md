@@ -24,7 +24,11 @@
 <!-- BLOCK:J1-DemoChartPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| TODO | | |
+| `findDemoInstrument(instrumentId)` | `demoDataset.ts:52` | 1회 조회(컴포넌트 마운트 시 `DemoChartPage.tsx:21`). 동기 함수, `DEMO_INSTRUMENTS` 배열에서 `find()` 탐색. 폴링/반복 갱신 없음. | `undefined` → `DemoChartPage.tsx:37`에서 `!instrument` 조건 참, `EmptyState` + "알 수 없는 데모 종목입니다."(`demoMode.chart.unknownInstrument`) 표시. `Link to=/onboarding/demo` 돌아가기 버튼 제공. |
+| `getDemoDailyCandles(instrumentId)` | `demoDataset.ts:59` | 1회 조회(`DemoChartPage.tsx:22`, `useMemo` 메모이제이션). mulberry32 PRNG로 365일 일봉 계산 후 `dailyCandleCache`(Map) 캐시. 두 번째 호출부터 캐시 히트(`demoDataset.ts:60-61`). 폴링 없음. | instrumentId 미등록 시 빈 배열(`[]`) 반환(`demoDataset.ts:62`). 차트에 캔들 없음으로 표시, 별도 오류 UI 없음. |
+| `runDemoBacktest(bars)` | `demoBacktest.ts:28` | 변경 요청(버튼 클릭 `handleRunBacktest`, `DemoChartPage.tsx:28-35`). `setTimeout(0)`으로 한 틱 미룸(`DemoChartPage.tsx:31-34`). 순수 함수. | 빈 배열 시 초기 자산 동일 결과(`demoBacktest.ts:29-37`). 예외 던짐 없음. `isRunning=true` 시 `LoadingState` 표시(`DemoChartPage.tsx:70`). |
+| `useState` (`isRunning`, `result`) | `DemoChartPage.tsx:25-26` | 로컬 상태. `handleRunBacktest` 호출 시 `isRunning=true`→완료 시 `result=DemoBacktestResult`, `isRunning=false`. | `runDemoBacktest` 순수 동기 함수이므로 예외 발생 적음. `isRunning`이 `true`에 고정되면 `LoadingState`에 정지. |
+| `useTranslation()` | `react-i18next` (`DemoChartPage.tsx:20`) | 1회 호출. i18n 키→문자열 매핑. `react-i18next` 내부 캐시. | 번역 키 부재 시 키 자체 표시(예: `demoMode.chart.pageTitle`). 오류 스택 트레이스 없음. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
