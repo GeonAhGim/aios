@@ -3997,3 +3997,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 카드 본문은 `scripts/replay_verify.py::_order_pair`의 설계된 pre-cutover skip 진단과 `src/core/eventstore/projections/orders.py`의 `EventChainBrokenError` 메시지 포맷이며 FAILED 신호가 아니다 — task-25337/25439/21172와 동형. 실제 실패 nodeid는 카드에 없다.
 - 로컬 재현(aios_test_backend_1): `-k "replay_verify or event_chain or projections_orders"` **84 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**(PYTHONPATH 없이 직접 실행하면 `scripts` 패키지 임포트 오류로 exit=1이므로 반드시 PYTHONPATH=. 로 돌린다).
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인; 84 passed 수치로 대체).
+
+
+## task-25972 — pytest 24h 4회 반복 systemic 묶음 (task-25722/25955/25964/25971), 설계 결함 재조사 (2026-11-19)
+
+- `scripts/check_pytest.py`는 없다(#28/#34/#40/task-24841/task-25439와 동일) — `pytest` 단계는 전체 스위트 컨테이너 이름이라 공통 검사 규칙·기준선이 없다. 반복 리프마다 독립 원인이다.
+- files에 지목된 `tests/adversarial/execution_ownership/test_no_double_tick.py`는 현 HEAD에서 단독 실행 9 passed. five_schedulers 성능 단언은 이미 `5262115e8`(예산을 경쟁자 수에서 도출, 노이즈 하한 40% 플레이크 해소)로 고쳐졌고, 반복 리프는 그 수정 이전의 공유 호스트 부하 플레이크와 task-25971(replay_verify 설계된 skip 진단) 계열이다.
+- 기준선/임계값/규칙 완화 없음(B-2). 새 설계 결함 없음 — 다음 pytest 리프는 해당 nodeid를 단독 재현해 통과하면 이 항목을 인용해 noop으로 닫는다.
