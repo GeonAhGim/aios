@@ -65,12 +65,12 @@
 <!-- BLOCK:J1-ConnectionWizardPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:89`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:131`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:159`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:162`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:190`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:193`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`:89`) — "연결 목록으로 이동" | `succeeded === true` (`:85`) — `handleSubmit()` 제출 후 `onSuccess` (`:67`)가 `setSucceeded(true)`를 호출한 후 | `succeeded` 상태가 true이므로 `Alert tone="success"` (`:86`)와 "연결 요청을 보냈습니다…" 문구(`:87`)가 이미 표시됨. 버튼은 `Link` 컴포넌트(`:88`)로 `/settings/connections` 페이지로 이동 | `Link` 컴포넌트는 동기 탐색이므로 실제 실패 경로 없음. `/settings/connections` 라우트의 정의 위치는 미확인 | `/settings/connections` (`Link` 컴포넌트 사용, 라우트 정의 미확인) |
+| `<Button>` (`:131`) — "다음" (provider 단계) | `providerStepValid === true` (`:56`) — `providerCode.trim().length > 0`, `opaqueAccountRef.trim().length > 0`, `capabilityProfile.length > 0` (권한 1개 이상 선택) | `step`이 `"permissions"`로 변경 (`:133` — `setStep("permissions")`) | 입력 검증 실패 시 버튼이 `disabled={!providerStepValid}` (`:131`)로 비활성화되어 클릭 불가. 사용자 피드백 없음(비활성화 상태만) | permissions 단계 (`:134-166`) |
+| `<Button>` (`:159`) — "이전" (permissions 단계) | `step === "permissions"` (`:134`), `readonlyConfirmed` 체크박스 상태와 무관 | `step`이 `"provider"`로 변경 (`:159` — `onClick={() => setStep("provider")}`) | 없음 (순수 상태 전이, side-effect 없음) | provider 단계 (`:96-133`) |
+| `<Button>` (`:162`) — "다음" (permissions 단계) | `step === "permissions"` (`:134`), `readonlyConfirmed === true` (`:151` 체크박스 확인) | `step`이 `"review"`로 변경 (`:162` — `onClick={() => setStep("review")}`) | 체크박스가 미확인 시 버튼이 `disabled={!readonlyConfirmed}` (`:162`)로 비활성화되어 클릭 불가. 사용자 피드백 없음(비활성화 상태만) | review 단계 (`:167-198`) |
+| `<Button>` (`:190`) — "이전" (review 단계) | `step === "review"` (`:167`), `succeeded === false` (`:85` 조건 바깥) | `step`이 `"permissions"`로 변경 (`:190` — `onClick={() => setStep("permissions")}`) | 없음 (순수 상태 전이, side-effect 없음) | permissions 단계 (`:134-166`) |
+| `<Button>` (`:193`) — "연결하기" (review 단계 제출) | `step === "review"` (`:167`), `beginConnection.isPending === false` (`:193` — `loading={beginConnection.isPending}`으로 비활성화 방지), `submitError === null` 또는 이전 오류 상태 | `handleSubmit()` (`:58-71`) 호출 → `beginConnection.mutate()` (`:60`) 실행 → `onSuccess` (`:67`) → `setSucceeded(true)` → 성공 Alert 표시 (`:85-93`) | `onError` (`:68`) → `setSubmitError(err)` (`:68`) → review 단계에서 `submitError` truthy (`:188`) → `<WizardActionError error={submitError} />` 렌더 (`:188`). `WizardActionError` (`:19-30`) — `classifyForbidden(error)` 참이면 `<ForbiddenNotice>` (`:20`), 아니면 `<ErrorMessage>` (`:23-28`) | 상태 유지 (review 단계, `:167-198`). `succeeded`는 false 유지, 재시도는 동일 버튼 클릭 |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
