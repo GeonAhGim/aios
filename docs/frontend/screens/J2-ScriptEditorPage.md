@@ -70,9 +70,9 @@
 <!-- BLOCK:J2-ScriptEditorPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:133`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:136`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:244`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:133`) | 컴파일 성공 후 `CompilePreview` 렌더링 중 (`mutation.isSuccess`, `:256`) | `/chart?script_hash=<hash>` 페이지로 이동 — `handleOpenChart`(`:197-199`) 호출, `navigate`(`:187`) 사용 | 없음 (router.push 실패 미확인) | `/chart` 페이지 (`router.tsx:122` 차트 라우트 미확인) |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:136`) | 컴파일 성공 후 `CompilePreview` 렌더링 중, `backtest.isPending`이 아님 (`:139` disabled 조건) | `backtest.mutate(source)`(`:138`) → `runBacktest(source)`(`:166`) → `backtestsClient.runQuickBacktest(venue, instrumentId, timeframe, start, end, initialCash, scriptSource, config)` — 성공 시 `BacktestSummary`(`:152`)에 finalEquity/fills/bars 표시 | `instrument_id` 없으면 `throw new Error(t("scriptEditorPage.backtestNeedsInstrument"))`(`:163`). mutation 실패 시 `role="alert"` div(`:145-150`)에 `getApiErrorMessage` 결과 표시 | 같은 페이지 (`ScriptEditorPage`, `:144-152`) |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:244`) | `source.trim().length > 0`, `mutation.isPending`이 아님 (`:244` disabled 조건) | `compileScript(source)`(`:244` onClick) → `useMutation`(`:189`) POST `/v1/scripts/compile`. 성공 시 `CompilePreview`(`:257-263`) 렌더 — 해시·명령수·시리즈수·연산수·플롯수·컴파일시간 표시, `ScriptPreviewPanes`(`:264`) 갱신 (`:204-211` useEffect) | `isScriptCompileErrorDetails` 응답(`:213-216`) → `ScriptEditor` marker(`:221-223`)에 단일 오류 표시(`:221-223`). 그 외 `ApiError` → `ErrorMessage`(`:249-253`)에 errorCode/message/traceId 전달 | 같은 페이지 (`ScriptEditorPage`, `:256-264`) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
