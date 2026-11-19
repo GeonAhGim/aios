@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 54건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 7건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
+전체 55건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 8건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-09-29-A, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A, ADR-2026-11-11-A.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -48,7 +48,7 @@
 | ADR-2026-09-26-C | MVP-1 안정화 단계 — 리프 수가 아니라 지표로 종결한다 | Accepted | 2026-09-26 |  |  | 2026-11-06 | ADR-2026-09-26-C-stabilization-phase-exit-by-metrics.md |
 | ADR-2026-09-26-D | 통합테스트 DB 격리 — 창(window) 스캔·전역 상태 테스트는 모듈별 템플릿 클론에서 돈다 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-D-test-db-isolation-per-module-clone.md |
 | ADR-2026-09-26-E | 지표 플랫폼 통합 — TA-Lib WASM 클라이언트 계산 · OSS 계층 확장 · 검증 폭 확장 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-E-indicator-platform-wasm-oss-verification.md |
-| ADR-2026-09-29-A | MVP-2 내장 전략 지능 엔진(분석·생성·고도화·자가학습) — 무료 벤더만, 가상자산 우선 프로덕션 수준 | Proposed | 2026-09-29 |  |  |  | ADR-2026-09-29-A-mvp2-builtin-strategy-intelligence-engine.md |
+| ADR-2026-09-29-A | MVP-2 내장 전략 지능 엔진(분석·생성·고도화·자가학습) — 무료 벤더만, 가상자산 우선 프로덕션 수준 | **MISSING** | 2026-11-20 |  |  |  | ADR-2026-09-29-A-mvp2-builtin-strategy-intelligence-engine.md |
 | ADR-2026-09-30-A | 로컬 PM 대리 임무 — 대시보드 호출·로컬 워커풀 자가복구 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-A-local-pm-delegate-and-self-recovery.md |
 | ADR-2026-09-30-B | 머지 큐·기계 검증 정정·게이트 캐시 — 함대 처리 효율 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-B-merge-queue-and-throughput.md |
 | ADR-2026-10-01-A | 사용자 관점 1등급 지표 축 — 체감 성능·기능 범위·편리함·전략 성과 (MVP-2 종결 조건 보강) | Accepted | 2026-10-01 |  |  |  | ADR-2026-10-01-A-user-facing-tier1-metrics.md |
@@ -60,3 +60,4 @@
 | ADR-2026-11-18-A | MVP-1 종결 2관문(T 기술 / U 사용자) | Accepted | 2026-11-18 |  |  |  | ADR-2026-11-18-A-mvp1-two-gate-closeout.md |
 | ADR-2026-11-18-B | 글로벌 규모 프런트엔드 프로그램 (명세 우선 · 실스택 계약 · 미규정 액션 인입) | Accepted | 2026-11-18 |  |  |  | ADR-2026-11-18-B-global-grade-frontend-program.md |
 | ADR-2026-11-19-A | 종결 지표 재오픈은 같은 원인의 재발만 센다 | Accepted | 2026-11-19 |  |  |  | ADR-2026-11-19-A-reopen-counts-same-cause-only.md |
+| ADR-2026-11-20-A | MVP-2 범위 확정과 두 관문(T2/U2) — 내장 전략 엔진은 MVP-3으로 | Accepted | 2026-11-20 |  |  |  | ADR-2026-11-20-A-mvp2-scope-and-two-gate-closeout.md |
