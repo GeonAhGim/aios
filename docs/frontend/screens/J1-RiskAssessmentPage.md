@@ -66,7 +66,8 @@
 <!-- BLOCK:J1-RiskAssessmentPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:202`) | TODO | TODO | TODO | TODO |
+| `<Button type="submit">` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:202`) — 제출하기 | 폼(`<form onSubmit={handleSubmit}>` `:147`)이 preventEvent()(`:107`)로 제출 차단. 5개 필드 모두 값 보유(기본값: yearsOfExperience=0 `:82`, investableRatioPct=10 `:83`, lossTolerancePct=10 `:84`, investmentGoal="LONG_TERM_GROWTH" `:86`, liquidityNeed="WITHIN_1_YEAR" `:89`). Button loading state(`:202`)로 제출 중 비활성화. | `mutateAsync`(`:110-116`)가 POST `/api/v1/account/risk-assessment`(`frontend/packages/api-client/src/clients/account.ts:26`)로 5개 필드 전송. 성공 시 draft 제거(`clearDraft` `:117`) 후 대시보드 전이(`navigate` `:118`, `react-router-dom`의 `useNavigate` 훅 `:94`). | `mutateAsync`가 throw: `err instanceof ApiError`면 `err` 그대로, 아니면 새 Error(`:120`)로 상태 설정(`:119-121`). `SubmitError`(`:201`)가 분류 렌더링 — 400면 `classifyBadRequest`(`:65`)→`BadRequestNotice`, 403면 `classifyForbidden`(`:66`)→`ForbiddenNotice`, 아니면 `routeApiError`(`:67-74`)→`ErrorMessage`. 화면 머물러 동일 폼 수정 재제출 가능. 초안 sessionStorage에 유지(`:97-104`). | `/dashboard` (`:118`) |
+| `<Link to="/onboarding/mfa-setup">` (`:127-131`) — "← 이전 단계(2단계 인증)으로 돌아가기" | 페이지 렌더링됨. `restoredFromDraft`가 true면 복원 안내(`:133-137`) 표시. | `react-router-dom` Link가 `<a>` 렌더링(`:127-131`). 클릭 시 navigate(`/onboarding/mfa-setup`) 효과. 폼 상태 보존. | 없음(Link는 단순 네비게이션). | `/onboarding/mfa-setup` (`:128`) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
@@ -74,7 +75,7 @@
 <!-- BLOCK:J1-RiskAssessmentPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 — 투자 목표(investableRatioPct, lossTolerancePct)가 금액 관련 입력은 아니나 위험 등급 판정의 재무적 입력이다. 다만 이 화면 자체는 금전 거래(주문·이체·구매)를 다루지 않으므로 XCUT 금전 행위 절의 2단계 확인·멱등성 키·재시도 버튼 요구사항은 적용되지 않음. React Query useMutation(`:110`)의 단일 호출이므로 새고침/중복 클릭에 안전. 제출 실패 시 fail-closed: 초안 sessionStorage에 보존(`:97-104`), 재제출 가능. 불확실 결과("완료로 표시하지 않음") — mutateAsync가 promise를 반환하므로 완료/실패 불명 상태 없음. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
@@ -82,12 +83,12 @@
 <!-- BLOCK:J1-RiskAssessmentPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyBadRequest` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:4`) | TODO | TODO | TODO |
-| `classifyForbidden` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:5`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:6`) | TODO | TODO | TODO |
-| `BadRequestNotice` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:65`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:66`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:69`) | TODO | TODO | TODO |
+| `classifyBadRequest` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:4`) | `getApiErrorMessage(errorCode, message)`(`frontend/apps/web/src/components/BadRequestNotice.tsx:62`) — 알려진 errorCode면 EXACT_MESSAGES 고정 한국어, 아니면 message || DEFAULT_API_ERROR_MESSAGE(`frontend/packages/shared-types/src/apiError.ts:106-118`). | 필드 오류(field)면 details.fields가 비어 있을 때만 배너 표시(`frontend/apps/web/src/components/BadRequestNotice.tsx:49`). mfa_invalid면 onFocusMfaCode 버튼(`:73-77`), disclosure_retired면 onReload 버튼(`:67-71`). 나머지 갈래(action_denied, policy_override)는 재시도 버튼 없음. | trace_id 미노출(BadRequestNotice 컴포넌트에 traceId prop 없음). |
+| `classifyForbidden` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:5`) | `getApiErrorMessage(errorCode, message)`(`frontend/apps/web/src/components/ForbiddenNotice.tsx:36`) — EXACT_MESSAGES 매핑. policy 갈래는 DenialReasons(`:41`)가 상세 사유 표시. | mfa_required면 onStepUp 버튼(`:42-45`). policy면 DenialReasons 컴포넌트가 사유 목록 표시. 재시도 버튼 없음. | trace_id 미노출(ForbiddenNotice 컴포넌트에 traceId prop 없음). |
+| `routeApiError` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:6`) | `getApiErrorMessage(errorCode, message)`(`frontend/apps/web/src/components/ErrorMessage.tsx:36`) — 알려진 errorCode면 EXACT_MESSAGES, 접두 매칭(PREFIX_MESSAGES), 아니면 DEFAULT_API_ERROR_MESSAGE(`frontend/packages/shared-types/src/apiError.ts:106-118`). errorCode 없으면 message fallback. | classifyRetry(`:38`)로 backoff/refetch 판정. backoff(RATE_LIMIT_EXCEEDED)면 카운트다운 후 재시도 버튼 활성화(`:49-53`). refetch(STATE_CONCURRENCY_CONFLICT)면 즉시 활성화. fieldErrors가 있으면 배너 숨김(`:55`). | traceId 노출(`frontend/apps/web/src/components/ErrorMessage.tsx:60`): error instanceof ApiError ? error.traceId : undefined. i18n 키 legacy.errorMessage.t1로 표시. |
+| `BadRequestNotice` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:65`) | getApiErrorMessage(errorCode, message) — 위 classifyBadRequest와 동일 경로. | 위 classifyBadRequest 열 참조. | trace_id 미노출. |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:66`) | getApiErrorMessage(errorCode, message) — 위 classifyForbidden와 동일 경로. | 위 classifyForbidden 열 참조. | trace_id 미노출. |
+| `ErrorMessage` (`frontend/apps/web/src/routes/onboarding/RiskAssessmentPage.tsx:69`) | getApiErrorMessage(errorCode, message)(`frontend/apps/web/src/components/ErrorMessage.tsx:36`) — errorCode 우선, message fallback, 기본문구 안전고지. | 위 routeApiError 열 참조. | traceId 노출(`:60`): ApiError.traceId를 legacy.errorMessage.t1로 표시. |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
@@ -95,10 +96,10 @@
 <!-- BLOCK:J1-RiskAssessmentPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `restoredFromDraft` 안내 문구에 `role="status"`(`:134`) — screen reader에게 동적 업데이트 알림. 폼 필드에 `<Field>` 컴포넌트가 label 연결(`:148`, `:180`, `:190`). `<Input>`에 `type="number"`·`min={0}`·`required`(`:150-152`) — 브라우저 기본 검증. `<Button type="submit">`(`:202`). | `<Input>`에 `aria-describedby` 또는 `aria-invalid` 명시적 연결 확인 안 됨. slider(`:171-177`)에 `aria-label` 미확인. 폼 전체에 `aria-labelledby` 또는 `aria-describedby`로 제목 연결 확인 안 됨. 미확인: `Field` 컴포넌트가 `for`/`id` 매핑을 WCAG 2.2 AA 수준으로 만드는지. |
+| i18n/지역화 | 모든 가시 문자열이 `t("legacy.riskAssessmentPage.*")` 키로 `react-i18next`(`:80`)를 경유(`:131`, `:135`, `:142`, `:144`, `:148`, `:180`, `:185-186`, `:190`, `:195-197`, `:203`). 숫자 입력(`:154`)은 `Number(e.target.value)`로 현지화 없이 raw number 사용. | `Number()`는 영어 decimal point(".")만 지원 — locales에서 comma decimal separator 쓰면 변환 안 됨. slider(`:175`)도 동일. i18n 키가 `legacy.` 접두사로 기존 번역 파일에서 가져옴 — 새 키 등록 아님. |
+| 성능 예산 | 서버 데이터 조회 없음(로딩 스피너 없음). sessionStorage 읽기/쓰기(`:33-48`)는 동기 I/O이나 작은 JSON(5개 숫자/문자)이라 영향 미미. `useEffect`로 매 상태 변경 시 draft 저장(`:96-104`) — 빈도 높지만 sessionStorage setItem은 비-blocking. | 매 keystroke마다 `writeDraft` 호출(`:104`의 deps 배열에 모든 상태 포함). debounce/throttle 없음. 폼 필드가 적어 실제 영향은 미미하나, ratchet 기준으로는 미확인. |
+| 텔레메트리 | 텔레메트리 기록 코드 확인 안 됨(이 파일에 없음). `ErrorMessage`가 `traceId`를 표시하지만(event logging 아님) — 분석용으로 이벤트 추적하지 않음. | 텔레메트리 기록 없음. 오류 발생 시 `setError`로 UI에만 표시. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
@@ -106,9 +107,9 @@
 <!-- BLOCK:J1-RiskAssessmentPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 폼 제출 시 POST `/api/v1/account/risk-assessment`가 5개 필드(yearsOfExperience, investableRatioPct, lossTolerancePct, investmentGoal, liquidityNeed)만 포함하는 body로 전송되고, 성공 시 sessionStorage에서 draft가 제거되며 `/dashboard`로 이동한다. | `RiskAssessmentPage.test.tsx`: mock apiClient로 `submitRiskAssessment` 응답 후 `navigate` 호출과 `clearDraft` 확인. |
+| A2 | 제출 실패 시 에러 종류(classifyBadRequest/classifyForbidden/routeApiError)에 따라 올바른 오류 컴포넌트(BadRequestNotice/ForbiddenNotice/ErrorMessage)가 렌더링되고, 사용자는 동일 폼으로 재제출 가능하다. | `RiskAssessmentPage.test.tsx`: 400/403/500 각각 mock 후 SubmitError 렌더링 확인. 재제출 시 draft가 유지되는지 확인. |
+| A3 | 페이지 진입 시 sessionStorage에 기존 draft가 있으면 기본값 대신 복원되고, 복원 안내 문구(`restoredNotice`)가 `role="status"`로 표시된다. draft가 없으면 기본값(0, 10, 10, LONG_TERM_GROWTH, WITHIN_1_YEAR)이 적용된다. | `RiskAssessmentPage.test.tsx`: sessionStorage에 draft 설정 후 렌더링 — 필드 값과 `role="status"` 요소 존재 확인. draft 없을 때 기본값 확인. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -116,9 +117,9 @@
 <!-- BLOCK:J1-RiskAssessmentPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 폼 필드에 `disabled` 속성이 없어 제출 중(isPending)에도 입력 수정 가능(`:149-199`). XCUT 금전 행위 규칙과 유사하게 제출 중 입력 잠금이 기대되나 구현 안 됨. | `Button`만 `loading={submit.isPending}`(`:202`)으로 비활성화 시각 피드백. 필드 disabled 없음. | 개선 | Phase 1 |
+| G2 | `restoredNotice`("세션 만료로 중단됐던 입력값을 복원했습니다.") 문구가 sessionStorage에 초안 존재 시 무조건 표시(`:133`)되나, '세션 만료' 조건(실제 만료 여부)과 실제 조건(초안 존재)이 불일치. | `restoredFromDraft` state(`:92`)가 `initialDraft !== null`로 설정, 타임스탬프/만료 체크 없음(`:33-41`). | 중요 | 리프 필요 |
+| G3 | `Number(e.target.value)`(`:154`, `:175`)가 영어 decimal point만 지원 — i18n locales에서 comma decimal separator 사용 시 숫자 변환 오류. | `Input`과 `range` slider 모두 `Number()` 직접 호출. `Intl.NumberFormat` 또는 지역화 대응 parsing 없음. | 개선 | Phase 1 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
