@@ -141,7 +141,8 @@ async def test_append_parent_child_lineage_orphan_parent_not_prevented(
     pool: asyncpg.Pool, repo: PostgresExperimentRepository
 ) -> None:
     """negative: FK 제약(experiments_parent_id_fkey) 이 있어 parent 먼저
-    삽입해야 함 — parent 없이 child 만 append 하면 FK 위반으로 실패해야 함.
+    삽입해야 함 — parent 없이 child 만 append 하면 FK 가
+    ForeignKeyViolationError 로 차단해야 함.
     (append-only 테이블이 FK 를 강제하는 구조 확인)."""
     tenant_id = uuid4()
     parent = _experiment(tenant_id=tenant_id)
