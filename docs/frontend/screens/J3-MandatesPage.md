@@ -88,7 +88,7 @@
 <!-- BLOCK:J3-MandatesPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyStateConflict` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:116`) | TODO | TODO | TODO |
+| `classifyStateConflict` (`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:116`) | `getApiErrorMessage(errorCode, message)` (shared-types) → `legacy.errorMessage.t1`(trace_id: "지원코드: {{traceId}}"/"Support code: {{traceId}}"), `t2`("{{remainingSec}}초 후 재시도 가능"/"Retry available in {{remainingSec}}s"), `t3`("다시 시도"/"Retry") | refetch_retry(STATE_CONCURRENCY_CONFLICT): 즉시 refetch()로 최신 activeRevision 반영 후 UI 자동 갱신. idempotency(INTEGRITY_IDEMPOTENCY_CONFLICT): MandateActionError → ErrorMessage에서 재시도 버튼 노출(classifyRetry 기준). invalid_transition(STATE_INVALID_TRANSITION 또는 기타 409): 상태 전이가 애초에 불가능 — 재시도 무의미. ErrorMessage가 classifyRetry로 retry 가능 여부 판정 후 버튼 활성화 제어 | 노출됨. MandateActionError.tsx:21에서 error.traceId를 ErrorMessage 컴포넌트에 전달. ErrorMessage.tsx:60에서 legacy.errorMessage.t1로 "지원코드: {traceId}" 표시 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
