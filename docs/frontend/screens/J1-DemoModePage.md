@@ -55,10 +55,10 @@
 <!-- BLOCK:J1-DemoModePage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 이 화면에 HTTP 호출이 없다(`DemoModePage.tsx:9~41`에 fetch/axios/React Query 부재). 423/429가 발생할 경로가 없다. `router.tsx:101`의 `onboarding_demo_mode` 플래그는 FeatureFlag(로컬 localStorage, `featureFlags.ts:10~15`)이므로 HTTP 잠김이 아님. 플래그 미활성 시 `FeatureFlagGate`가 자식을 렌더링하지 않음(`FeatureFlagGate.test.tsx:25~28`) — 이 파일에서 확인 불가 | 없음 | 없음 | 없음(근거: HTTP 호출 부재 `DemoModePage.tsx:9~41`). 플래그 미활성 시 동작: 미확인(`router.tsx:101`, `FeatureFlagGate` 구현은 이 파일에서 확인 불가) |
+| 서버 오류(5xx) | HTTP 호출이 없으므로 5xx 발생 경로가 없다(`DemoModePage.tsx:9~41`). 종목 목록은 `./demoDataset.ts:13~17`의 모듈 상수(`DEMO_INSTRUMENTS`)이므로 서버 응답에 의존하지 않음 | 없음 | 없음 | 없음(근거: HTTP 호출 부재 `DemoModePage.tsx:9~41`, `DEMO_INSTRUMENTS`는 모듈 상수 `demoDataset.ts:13~17`) |
+| 네트워크 단절 | 목록 렌더링과 `<Link>` 이동(`DemoModePage.tsx:29`)은 클라이언트 라우팅이라 네트워크 요청이 없다(`DemoModePage.tsx:9~41`). SPA 번들 로딩 동작(오프라인 시)은 확인 불가 | 없음 | 없음 | 없음(근거: 클라이언트 라우팅 `DemoModePage.tsx:29`). 오프라인 시 SPA 번들 로딩: 미확인 |
+| 부분 실패(일부 데이터만 실패) | `DEMO_INSTRUMENTS`는 길이 3의 상수 배열(`demoDataset.ts:13~17`)이라 일부만 실패하는 경로가 없다(`DemoModePage.tsx:19~36`). 종목 데이터 자체가 손상된 경우의 동작은 확인 불가 | 없음 | 없음 | 없음(근거: 고정 길이 3 배열 `demoDataset.ts:13~17`, 렌더 루프 `DemoModePage.tsx:19~36`). 종목 데이터 손상 시 동작: 미확인 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
