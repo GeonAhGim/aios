@@ -128,5 +128,5 @@ async def test_save_assessment_rejects_nonexistent_user(service):
     import uuid
 
     result = SuitabilityQuestionnaire().evaluate(_answers())
-    with pytest.raises(RiskProfileError):
+    with pytest.raises(RiskProfileError, match="User not found."):
         await service.save_assessment(uuid.uuid4(), result)
