@@ -432,11 +432,12 @@ _OVERHEAD_BUDGET_SECONDS = 0.05
 async def test_generate_overhead_p95_under_budget_with_instant_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """raw time.perf_counter() → RelativeBudget.measure_async 전환(task-10937).
+    """RelativeBudget.assert_within_async → ratio 단언 (task-26030 review fix).
 
-    비동기 I/O 왕복은 time.process_time() CPU 시간으로 재면 대기 시간이
-    통째로 사라지므로(실제 지연을 못 재음), RelativeBudget.measure_async로
-    wall-clock 기반 상대 비율 단언으로 바꾼다.
+    기존 코드는 measure_async 로 수동 호출 후 절대 wall-ms 50.0 단언을 했다.
+    review 발견 3건: (1) RelativeBudget 직접 생성 → assert_within_async 사용,
+    (2) 절대 50.0ms → 상대 max_ratio 전환, (3) calibration/ratio 미사용 →
+    sample.ratio / sample.calibration_ms 단언 추가.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -445,33 +446,31 @@ async def test_generate_overhead_p95_under_budget_with_instant_transport(
     _mock_transport(monkeypatch, httpx.MockTransport(handler))
     provider = _provider()
     prompt = _prompt()
-    budget = _budget()
+    gen_budget = _budget()
 
-    samples: list[float] = []
-    for _ in range(20):
-        sample = await RelativeBudget().measure_async(
-            lambda: provider.generate(_SCHEMA, prompt, budget),
-            n=1,
-            warmup=0,
-            calibration_n=1,
-        )
-        samples.append(sample.op_ms)
+    sample = await RelativeBudget().assert_within_async(
+        lambda: provider.generate(_SCHEMA, prompt, gen_budget),
+        max_ratio=1.0,
+        n=20,
+        warmup=0,
+        calibration_n=3,
+    )
 
-    samples.sort()
-    p95_ms = samples[int(len(samples) * 0.95)]
-    # _OVERHEAD_BUDGET_SECONDS=0.05s → 50ms (예산 값 불변)
-    assert p95_ms < 50.0, f"p95 {p95_ms:.2f}ms exceeds budget 50.0ms"
+    # calibration_ms 가 유한하고 양수여야 ratio 단언이 의미 있음
+    assert sample.calibration_ms > 0, "calibration_ms must be positive"
+    # ratio 단언: 측정값이 보정 루프 비용의 1.0 배를 넘지 않아야 함
+    assert sample.ratio < 1.0, f"ratio {sample.ratio:.3f}x exceeds max_ratio 1.0x"
 
 
 @pytest.mark.perf
 async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """raw time.perf_counter() → RelativeBudget.measure_async 전환(task-10937).
+    """ratio 단언으로 적색 재현 (task-26030 review fix).
 
-    게이트 적색 재현: 위 성능 단언이 실제로 지연을 감지하는지(항상 통과하는
-    타우톨로지가 아닌지) 증명한다. 전송에 예산을 초과하는 지연을 주입하면 같은
-    측정 방식이 예산 초과를 실제로 잡아낸다.
+    주입 지연이 보정 루프 대비 충분히 크면 ratio 가 max_ratio=1.0 을 넘겨야
+    한다. 절대 op_ms 임계값 대신 상대 ratio 로 단언하므로 호스트 부하에
+    민감하지 않다.
     """
     injected_delay = _OVERHEAD_BUDGET_SECONDS * 10
 
@@ -486,10 +485,11 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
         lambda: provider.generate(_SCHEMA, _prompt(), _budget()),
         n=1,
         warmup=0,
-        calibration_n=1,
+        calibration_n=3,
     )
-    # injected_delay=0.50s → 500ms (10x budget); budget=50ms. gate-red가
-    # 예산 초과를 포착하려면 측정값이 50ms를 넘겨야 한다.
-    assert sample.op_ms >= 50.0, (
-        "적색 재현 실패 — 주입한 지연이 측정에 반영되지 않았다(타우톨로지 위험)"
+    # injected_delay=0.50s → 500ms. 보정 루프가 수십 ms 이므로 ratio 는
+    # 1.0 을 크게 넘는다. 절대 op_ms >= 50.0 단언에서 상대 ratio > 1.0 단언으로 전환.
+    assert sample.ratio > 1.0, (
+        f"적색 재현 실패 — 주입한 지연이 ratio {sample.ratio:.3f}x 로 1.0x 미만 "
+        f"(op_ms={sample.op_ms:.2f}ms calibration_ms={sample.calibration_ms:.2f}ms)"
     )
