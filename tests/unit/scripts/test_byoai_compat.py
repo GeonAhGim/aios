@@ -66,3 +66,14 @@ def test_the_committed_table_matches_the_data_file() -> None:
     assert bc.validate(data) == []
     current = bc.TABLE.read_text(encoding="utf-8").replace(chr(13) + chr(10), chr(10))
     assert current == bc.render(data)
+
+
+def test_health_is_observed_state_separate_from_the_certified_grade() -> None:
+    down = agent(health={"state": "down", "last_ok_at": "2026-12-01", "incident": None})
+    assert any("incident" in e for e in bc.validate({"agents": [down]}))
+    down["health"]["incident"] = "byoai-2026-12-03-x-01"
+    assert bc.validate({"agents": [down]}) == []
+    bad = agent(health={"state": "fine"})
+    assert any("health" in e for e in bc.validate({"agents": [bad]}))
+    cells = bc._cells(down, 90, TODAY)
+    assert "중단" in cells and cells[2] == "미확인"  # 운영 상태가 중단이어도 등급은 그대로
