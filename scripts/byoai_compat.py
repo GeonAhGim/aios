@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "docs" / "ops" / "byoai_compat.json"
 TABLE = ROOT / "docs" / "ops" / "BYOAI_COMPAT.md"
 STATUSES = ("verified", "compatible", "manual", "unverified")
+HEALTH_STATES = ("ok", "degraded", "down", "unknown")
+HEALTH_LABEL = {"ok": "정상", "degraded": "저하", "down": "중단", "unknown": "-"}
 LABEL = {
     "verified": "Verified",
     "compatible": "Compatible",
@@ -51,6 +53,11 @@ def validate(data: dict[str, Any]) -> list[str]:
         seen.add(aid)
         if a.get("status") not in STATUSES:
             errors.append(f"{aid}: 알 수 없는 등급 {a.get('status')!r}")
+        health = a.get("health") or {}
+        if health and health.get("state") not in HEALTH_STATES:
+            errors.append(f"{aid}: 알 수 없는 health 상태 {health.get('state')!r}")
+        if health.get("state") in ("degraded", "down") and not health.get("incident"):
+            errors.append(f"{aid}: degraded/down은 incident(사건 id)가 필요하다")
         if a.get("status") == "verified" and not (a.get("verified_at") and a.get("evidence")):
             errors.append(f"{aid}: verified는 verified_at과 evidence가 필요하다")
     return errors
@@ -87,6 +94,7 @@ def _cells(a: dict[str, Any], days: int, today: dt.date) -> list[str]:
         label,
         str(a.get("verified_at") or "-"),
         str(due) if due else "-",
+        HEALTH_LABEL.get(str((a.get("health") or {}).get("state") or "unknown"), "-"),
         src,
     ]
 
@@ -101,10 +109,11 @@ def render(data: dict[str, Any], today: dt.date | None = None) -> str:
         "생성: `python scripts/byoai_compat.py --render`. 규칙: ADR-2026-11-20-B D7·D9.",
         "등급은 자동 검사가 **내리기만** 한다.",
         "Verified는 실제 클라이언트로 확인한 증거(날짜·근거)가 있을 때만 사람이 올린다.",
+        "운영 상태(health)는 관측이라 자동으로 오르내린다(ADR-2026-11-20-B D10).",
         f"확인 주기: {days}일. 기한이 지나면 대시보드·소견이 '재확인 필요'로 표시한다.",
         "",
-        "| 에이전트 | 채널 | 등급 | 마지막 확인 | 다음 확인 | 출처 |",
-        "|---|---|---|---|---|---|",
+        "| 에이전트 | 채널 | 등급 | 마지막 확인 | 다음 확인 | 운영 상태 | 출처 |",
+        "|---|---|---|---|---|---|---|",
     ]
     rows = ["| " + " | ".join(_cells(a, days, today)) + " |" for a in data.get("agents") or []]
     return NL.join(head + rows) + NL

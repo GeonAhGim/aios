@@ -1,5 +1,5 @@
 {
-  "_설명": "BYOAI 에이전트 호환성 등록부(ADR-2026-11-20-B D7·D9). 사람이 읽는 표 docs/ops/BYOAI_COMPAT.md는 scripts/byoai_compat.py --render로 이 파일에서 생성한다. 등급: verified(실제 클라이언트로 연결·제안 제출까지 확인, 근거 필수) / compatible(표준에 맞지만 실제 클라이언트로 미검증) / manual(붙여 넣기로만 보장) / unverified(아직 확인 안 함). 자동 검사는 등급을 내리기만 한다(기한 초과·문서 변경·시험 실패). 올리는 것은 증거가 있을 때 사람이 한다.",
+  "_설명": "BYOAI 에이전트 호환성 등록부(ADR-2026-11-20-B D7·D9). 사람이 읽는 표 docs/ops/BYOAI_COMPAT.md는 scripts/byoai_compat.py --render로 이 파일에서 생성한다. 등급: verified(실제 클라이언트로 연결·제안 제출까지 확인, 근거 필수) / compatible(표준에 맞지만 실제 클라이언트로 미검증) / manual(붙여 넣기로만 보장) / unverified(아직 확인 안 함). 자동 검사는 등급을 내리기만 한다(기한 초과·문서 변경·시험 실패). 올리는 것은 증거가 있을 때 사람이 한다. health(ok/degraded/down/unknown)는 운영 관측이라 자동으로 오르내리고, status(등급)는 사람만 올린다(ADR-2026-11-20-B D10).",
   "review_every_days": 90,
   "agents": [
     {
@@ -9,8 +9,17 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["원격 MCP 커넥터 설정 경로", "Streamable HTTP", "토큰 인증"],
-      "sources": []
+      "depends_on": [
+        "원격 MCP 커넥터 설정 경로",
+        "Streamable HTTP",
+        "토큰 인증"
+      ],
+      "sources": [],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "chatgpt",
@@ -19,11 +28,22 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["개발자 모드 설정 경로", "플랜별 쓰기 가능 범위", "HTTPS 원격 서버", "SSE 또는 Streamable HTTP", "OAuth 또는 인증 없음"],
+      "depends_on": [
+        "개발자 모드 설정 경로",
+        "플랜별 쓰기 가능 범위",
+        "HTTPS 원격 서버",
+        "SSE 또는 Streamable HTTP",
+        "OAuth 또는 인증 없음"
+      ],
       "sources": [
         "https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt",
         "https://developers.openai.com/api/docs/guides/developer-mode.md"
-      ]
+      ],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "gemini-cli",
@@ -32,8 +52,19 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["stdio·SSE·Streamable HTTP", "OAuth 2.0", "개인 계정 제공 종료 공지"],
-      "sources": ["https://geminicli.com/docs/tools/mcp-server/"]
+      "depends_on": [
+        "stdio·SSE·Streamable HTTP",
+        "OAuth 2.0",
+        "개인 계정 제공 종료 공지"
+      ],
+      "sources": [
+        "https://geminicli.com/docs/tools/mcp-server/"
+      ],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "gemini-api",
@@ -42,8 +73,16 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["함수 선언 형식", "원격 MCP 직접 연결 공식 지원 여부"],
-      "sources": []
+      "depends_on": [
+        "함수 선언 형식",
+        "원격 MCP 직접 연결 공식 지원 여부"
+      ],
+      "sources": [],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "copilot-github",
@@ -52,8 +91,18 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["IDE별 MCP 지원 단계(GA/미리보기)", "클라우드 에이전트의 OAuth 원격 MCP 미지원 여부"],
-      "sources": ["https://docs.github.com/en/copilot/concepts/context/mcp"]
+      "depends_on": [
+        "IDE별 MCP 지원 단계(GA/미리보기)",
+        "클라우드 에이전트의 OAuth 원격 MCP 미지원 여부"
+      ],
+      "sources": [
+        "https://docs.github.com/en/copilot/concepts/context/mcp"
+      ],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "copilot-studio",
@@ -62,8 +111,19 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["MCP 서버 URL·인증 입력 화면", "생성형 오케스트레이션 활성화", "Microsoft 365 Copilot 연결 여부"],
-      "sources": ["https://learn.microsoft.com/en-us/microsoft-copilot-studio/agent-extend-action-mcp"]
+      "depends_on": [
+        "MCP 서버 URL·인증 입력 화면",
+        "생성형 오케스트레이션 활성화",
+        "Microsoft 365 Copilot 연결 여부"
+      ],
+      "sources": [
+        "https://learn.microsoft.com/en-us/microsoft-copilot-studio/agent-extend-action-mcp"
+      ],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "local-ollama",
@@ -72,8 +132,19 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["MCP 클라이언트 도구(mcp-client-for-ollama·Goose·Cline·Continue)", "모델별 도구 호출 신뢰도", "낮은 온도"],
-      "sources": ["https://pypi.org/project/mcp-client-for-ollama/0.24.1/"]
+      "depends_on": [
+        "MCP 클라이언트 도구(mcp-client-for-ollama·Goose·Cline·Continue)",
+        "모델별 도구 호출 신뢰도",
+        "낮은 온도"
+      ],
+      "sources": [
+        "https://pypi.org/project/mcp-client-for-ollama/0.24.1/"
+      ],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     },
     {
       "id": "paste",
@@ -82,8 +153,15 @@
       "status": "unverified",
       "verified_at": null,
       "evidence": null,
-      "depends_on": ["제안 붙여 넣기 화면"],
-      "sources": []
+      "depends_on": [
+        "제안 붙여 넣기 화면"
+      ],
+      "sources": [],
+      "health": {
+        "state": "unknown",
+        "last_ok_at": null,
+        "incident": null
+      }
     }
   ]
 }
