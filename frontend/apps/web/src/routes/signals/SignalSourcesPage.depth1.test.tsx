@@ -11,7 +11,7 @@ import type {
   SignalSourceResponse,
 } from "@aios/shared-types";
 import { SignalSourcesPage, type SignalSourcesPageProps } from "./SignalSourcesPage";
-import { perfBudgetMs } from "../../test/perfBudget";
+import { BEST_OF_RUNS, bestOfMsAsync, perfBudgetMs } from "../../test/perfBudget";
 
 vi.mock("@aios/shared-hooks", () => ({
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
@@ -93,13 +93,17 @@ describe("SignalSourcesPage depth1 — negative / failure / perf / gate-red / ad
     await waitFor(() => { expect(screen.queryByText("connection reset")).toBeInTheDocument(); });
   });
 
-  // perf assertion: 200건 렌더 실측 약 12ms → 예산 360ms (실측×30)
+  // perf assertion: best-of-5 fastest of 5 sequential renders; shared-host noise drops out, real O(n²) stays slow(perf assertion)
   it("성능: 200건 소스 목록 렌더가 360ms 이내에 완료된다(perf assertion)", async () => {
-    const items = Array.from({ length: 200 }, (_, i) => src({ id: i + 1, name: `Source ${i + 1}` }));
-    renderPage({ signalsClient: stub({ listSources: vi.fn().mockResolvedValue({ items, total: items.length }) }) });
-    const startedAt = globalThis.performance.now();
-    await screen.findByText("Source 100");
-    expect(globalThis.performance.now() - startedAt).toBeLessThan(perfBudgetMs(360));
+    const best = await bestOfMsAsync(async () => {
+      const items = Array.from({ length: 200 }, (_, i) => src({ id: i + 1, name: `Source ${i + 1}` }));
+      renderPage({ signalsClient: stub({ listSources: vi.fn().mockResolvedValue({ items, total: items.length }) }) });
+      const startedAt = globalThis.performance.now();
+      await screen.findByText("Source 100");
+      cleanup();
+      return globalThis.performance.now() - startedAt;
+    }, BEST_OF_RUNS);
+    expect(best).toBeLessThan(perfBudgetMs(360));
   });
 
   // gate red 1/2: 지연으로 source가 표시되지 않음
