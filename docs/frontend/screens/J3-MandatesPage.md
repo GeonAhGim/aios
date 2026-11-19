@@ -37,10 +37,10 @@
 <!-- BLOCK:J3-MandatesPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading || !data` (`:133`) | `legacy.mandatesPage.title13` 제목("위임장(Mandate)")(`:137`)과 `LoadingState` 컴포넌트(`:138`) | 없음(데이터 조회 중) | 구현됨(`:133-142`) |
+| 빈 상태 | `data.activeRevision`이 null이고 `pendingRevision`도 null인 경우 (`:90`, `:144`, `:162`) | `legacy.mandatesPage.t8` 배지("위임장 미설정(주문 차단)", `Badge tone="warning"`, `:58`), `legacy.mandatesPage.t11` 문단("활성 위임장이 없습니다 — 규칙이 없다는 뜻이 아니라 모든 주문이 차단된다는 뜻입니다.", `:82`), `MandateRuleForm` 제출 라벨 "초안 작성"(`:183`, i18n 키 없음(하드코딩 문자열)) | 초안 작성 제출 (`MandateRuleForm` 제출 → `handleCreate`(`:101-105`) → `createDraft.mutate`(`:103-104`)) | 구현됨(`:58`, `:82`, `:162`, `:182-186`) |
+| 정상 | `activeRevision`이 있는 경우 (`:61`). 대기 개정안 존재 여부: `pendingRevision`이 null이 아닐 때(`:162`)와 null일 때(`:180`)로 나뉨 | `legacy.mandatesPage.t7`("현재 활성 리비전", `:54`), `StatusBadge`(리비전 상태 표시, `:56`), `RevisionRules`의 `t1`~`t6`(`:23-28`, 금지 자산이 없으면 "없음" 하드코딩, `:28`). 대기 개정안 있음: `legacy.mandatesPage.t15`("대기 중 개정안", `:161`), `StatusBadge`(개정안 상태, `:165`), `RevisionRules`(개정안 규칙, `:167`), `legacy.mandatesPage.t16` 버튼("활성화", `:169-170`). 대기 개정안 없음: `MandateRuleForm` 제출 라벨 "개정안 제안"(`:183`) | `state === "ACTIVE"`일 때 `legacy.mandatesPage.t9`("일시정지") 버튼(`:65-68`) → `pause.mutate`(`:153`). `state === "PAUSED"`일 때 `legacy.mandatesPage.t10`("재개") 버튼(`:69-72`) → `resume.mutate`(`:154`). 대기 개정안 있을 때 `legacy.mandatesPage.t16`("활성화") 버튼(`:169-170`) → `handleActivate`(`:107-120`) → `activate.mutate`(`:109-110`) | 구현됨(`:54`, `:56`, `:61`, `:65-68`, `:69-72`, `:161`, `:165`, `:167`, `:169-170`, `:183`) |
+| 낡은 데이터(신선도 초과) | `useMandateStatus`(`frontend/packages/shared-hooks/src/useMandates.ts:10-15`)에 staleTime과 refetchInterval 설정 없음. `frontend/apps/web/src/routes/mandates/` 안에서 staleTime·refetchInterval·isStale·updatedAt·lastUpdated·fresh·stale 검색 결과 0건. 따라서 신선도 초과 판정 없음. (전역 QueryClient 기본 설정은 미확인 — 범위 밖) | 없음(신선도 표시 없음) | 수동 재시도 버튼은 MandateActionError 컴포넌트의 onRetry에만 있음(`frontend/apps/web/src/routes/mandates/MandatesPage.tsx:127`, `:176`) — refetch() 호출 | 없음(`useMandates.ts:10-15`에 staleTime/refetchInterval 없음, `frontend/apps/web/src/routes/mandates/`에 신선도 관련 코드 0건). 전역 QueryClient 기본 설정은 미확인 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
