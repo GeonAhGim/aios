@@ -33,10 +33,10 @@
 <!-- BLOCK:J1-SignupPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `signup.isPending`이 true (POST `/auth/register` 전송 중) | Button에 스피너 회전 + 버튼 라벨 `legacy.signupPage.t5` "가입하기" 계속 표시 (Button.tsx:47-50, children는 항상 렌더). 입력 필드는 비활성화되지 않으나 Button `disabled={locked}` 외 별도 disabled 없음. | 제출 차단: Button `loading` → `disabled={disabled \|\| loading}`(ui-web Button.tsx:39)으로 클릭 불가. | 구현됨 (SignupPage.tsx:111 `loading={signup.isPending}`, ui-web Button.tsx:39) |
+| 빈 상태 | 초기 마운트 — email, password가 모두 빈 문자열 (`useState("")` :42-43) | 이메일/비밀번호 입력 필드가 빈 채로 표시. `legacy.signupPage.mfaPrenotice` 안내 문구 항상 보임 (:104-105). | 이메일/비밀번호 입력 후 "가입하기" 제출. 비밀번호는 minLength=12 (:94) 검증 있음. | 구현됨 (SignupPage.tsx:42-43 초기값, :75-102 입력 필드) |
+| 정상 | `signup.mutateAsync` 성공 후 (`/auth/register` 2xx) | 별도 성공 문구 없음. `/onboarding/mfa-setup`로 이동 (:64). 사전 안내 문구 `legacy.signupPage.mfaPrenotice` ("다음 단계에서 Google Authenticator 등 인증 앱이 필요합니다. 가입 전에 미리 설치해두세요.")는 입력 화면에 항상 보이는 상태 (:104-105). | 로그인 링크 `legacy.signupPage.t7` "로그인"으로 `/login` 이동 (:115-116). | 구현됨 (SignupPage.tsx:63-64 `navigate("/onboarding/mfa-setup")`) |
+| 낡은 데이터(신선도 초과) | 해당 없음 — 이 화면은 `useQuery`로 서버 데이터를 조회하지 않음. `useSignup`(:47)은 mutation 전용, `useMe`(:10-17)는 이 페이지에서 호출하지 않음. `useSignup.onSuccess`의 `qc.invalidateQueries({ queryKey: ["me"] })`(:27, useAuth.ts)는 토큰 갱신 후 신선도 갱신이지 본 화면 데이터就不是 | — | — | 없음 (조회 데이터 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
