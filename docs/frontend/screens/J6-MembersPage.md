@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-MembersPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더/투자자) — J1~J6 여정이 P1 중심 (§3 여정 지도). P8(운영자)도 `/admin/*`에서 멤버 관리를 할 수 있으나 이 화면은 P1의 조직/가구 테넌트 관리용 |
+| 목적(한 문장) | 활성 테넌트(조직/가구)의 멤버 목록을 확인하고, 멤버를 초대·정지·폐기하여 테넌트 접근 권한을 관리한다 |
+| 진입 조건 | `router.tsx:152` — `/settings/members` 라우트, `protect()` 게이트 통과(=`ProtectedRoute`로 인증 완료). `useTenant().activeTenantId`가 null이 아님(테넌트 선택 완료) |
+| 사용자 준비물 | 로그인 세션, 활성 테넌트(조직/가구) 선택, 테넌트에서 `canManageMembers=true` 역할(OWNER 또는 ACTIVE+ADMIN) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
