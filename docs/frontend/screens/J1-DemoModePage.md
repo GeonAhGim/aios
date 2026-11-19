@@ -44,10 +44,10 @@
 <!-- BLOCK:J1-DemoModePage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 이 화면에 입력 폼 없음(`DemoModePage.tsx:9~41`에 폼 요소·제어 상태 부재). 사실 시트 `Form fields` 표 공백(`DemoModePage.facts.md:18~21`) | 없음 | 없음 | 없음(근거: 입력 폼 부재 `DemoModePage.tsx:9~41`, 사실 시트 `Form fields` 공백 `DemoModePage.facts.md:18~21`) |
+| 인증 필요/세션 만료(401) | 이 화면에 API 호출 없음(`DemoModePage.tsx:9~41`에 fetch/axios/React Query 부재). 사실 시트 `Error handling calls` 표 공백(`DemoModePage.facts.md:35~38`). 라우트 가드 `ProtectedRoute`(router.tsx:70~72)가 401 처리 여부를 이 파일에서 확인 불가 | 없음 | 없음 | 없음(근거: API 호출 부재 `DemoModePage.tsx:9~41`, 사실 시트 `Error handling calls` 공백 `DemoModePage.facts.md:35~38`). 라우트 가드 401 처리 여부: 미확인(`router.tsx:70~72`는 이 파일에서 확인 불가) |
+| 권한 없음/MFA 필요(403) | 이 화면에 권한 체크 API 호출 없음(`DemoModePage.tsx:9~41`). 사실 시트 `Error handling calls` 표 공백(`DemoModePage.facts.md:35~38`) | 없음 | 없음 | 없음(근거: 권한 체크 호출 부재 `DemoModePage.tsx:9~41`, 사실 시트 `Error handling calls` 공백 `DemoModePage.facts.md:35~38`) |
+| 충돌/상태 불일치(409) | 이 화면에 상태 변경 API 호출 없음(`DemoModePage.tsx:9~41`). 사실 시트 `Error handling calls` 표 공백(`DemoModePage.facts.md:35~38`) | 없음 | 없음 | 없음(근거: 상태 변경 호출 부재 `DemoModePage.tsx:9~41`, 사실 시트 `Error handling calls` 공백 `DemoModePage.facts.md:35~38`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
