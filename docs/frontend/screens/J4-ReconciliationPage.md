@@ -13,10 +13,10 @@
 <!-- BLOCK:J4-ReconciliationPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P8(운영자) — 가입 승인·검증 대기열·분쟁·입출금 승인·안전장치·정합성 점검 (`PERSONAS_AND_JOURNEYS.md` §2) |
+| 목적(한 문장) | 대사(Reconciliation) 불일치 상태를 조회하고, 해소 사유를 입력하여 불일치를 해결한다. |
+| 진입 조건 | `/admin/reconciliation` 경로 접근; `router.tsx:175`의 `protectAdmin(<ReconciliationPage />)` 가드 — `ProtectedRoute`(로그인) + `AdminRoute`(관리자 권한) 동시 통과 |
+| 사용자 준비물 | 관리자 권한을 가진 활성 세션 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
