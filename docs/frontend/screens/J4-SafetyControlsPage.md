@@ -13,10 +13,10 @@
 <!-- BLOCK:J4-SafetyControlsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P8 운영자 — `docs/frontend/PERSONAS_AND_JOURNEYS.md:29`(P8 행에 `safety-controls` 명시). 보조 P9(마스터) |
+| 목적(한 문장) | 운영자가 안전 통제(R-53)를 조회·개통·해제하고, 리스크 게이트 평가·복구 평가·룰번들 승인/활성화를 수행하는 화면 — `frontend/apps/web/src/routes/admin/AdminHomePage.tsx:17`(`R-53 조회·해제`), `SafetyControlsPage.tsx:115`(activateHeading), `:163`(evaluateHeading), `:214`(approveHeading), `:299–338`(deactivate/recovery) |
+| 진입 조건 | 라우트: `frontend/apps/web/src/router.tsx:174`(`/admin/safety-controls`, `protectAdmin(<SafetyControlsPage />)`). 가드: `router.tsx:74–77`에서 `AdminRoute`로 감쌈. `AdminRoute.tsx:45`는 `me.isPlatformAdmin`이 거짓이면 `/dashboard`로 보냄. 테스트 `AdminRoute.test.tsx:114`가 `isPlatformAdmin=false → /dashboard`를 확인. 진입 링크: `navItems.ts:66`, `AdminHomePage.tsx:17`. 기능 플래그: 미확인. MFA 요구 여부: 미확인 |
+| 사용자 준비물 | 플랫폼 관리자 계정(`isPlatformAdmin=true`, `AdminRoute.tsx:45`). 개통: 대상 참조 scope_ref(선택, `SafetyControlsPage.tsx:126–128`), 사유(필수, `:133–135`). 평가: 커넥션 ID(선택, `:174–176`), 게이트 종류·범위 선택(`:165`의 Select). 룰번들: 룰번들 ID(필수, `:218–220`), 승인 참조 approval_ref(필수, `:225–227`). 해제·복구: 승인 요청 ID(미확인, `:319–321`), 증빙 참조 evidence_ref(미확인, `:326–328`) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
