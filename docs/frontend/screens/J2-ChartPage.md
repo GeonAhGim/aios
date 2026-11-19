@@ -13,10 +13,10 @@
 <!-- BLOCK:J2-ChartPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더/투자자) [확인: PERSONAS_AND_JOURNEYS.md §2, J2 여정 소속] |
+| 목적(한 문장) | 선택한 심볼의 캔들 차트를 표시하고, 지표/도형/비교 심볼을 추가하며, 즉시 백테스트를 실행한다. |
+| 진입 조건 | `router.tsx:120` — `{ path: "/chart", element: protect(<ChartPage />) }`. `protect()` 래퍼가 인증 가드(로그인 세션 필요). `ChartPage.tsx:68`에서 `searchParams.get("instrument_id")`로 읽고, `ChartPage.tsx:157-158`에서 `!instrumentId`이면 `NoInstrumentSelected`로 전환. |
+| 사용자 준비물 | 로그인 세션, 차트 볼 심볼 (또는 /market/instruments에서 선택), 거래소(VENUE) 및 시간봉(Timeframe) 기본값(chartPageConfig.ts:14-15: BITGET/1h) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
