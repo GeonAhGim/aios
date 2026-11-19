@@ -1,6 +1,5 @@
 [
   "apps/web/src/commandPalette/matchCommands.test.ts",
-  "apps/web/src/components/CoverageBadge.test.tsx",
   "apps/web/src/components/CoverageFreshnessPanel.test.tsx",
   "apps/web/src/components/FeatureFlagGate.depth1.test.tsx",
   "apps/web/src/components/InstallPrompt.depth1.test.tsx",
