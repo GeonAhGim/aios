@@ -69,8 +69,9 @@
 <!-- BLOCK:J1-DemoChartPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx:45`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx:66`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx:45`) | `instrument`가 없음(`DemoChartPage.tsx:37`), 즉 `instrumentId`가 `DEMO_INSTRUMENTS`에 없음(`demoDataset.ts:52`). 라우트 가드(`router.tsx:108` protect, `:109` FeatureFlagGate `onboarding_demo_mode`)를 통과한 상태. | `/onboarding/demo`로 이동(`DemoChartPage.tsx:44` Link). | 없음(클릭은 링크 이동뿐이며 오류 경로 없음). | `/onboarding/demo`(DemoModePage). |
+| `<Button onClick={handleRunBacktest} loading={isRunning}>` (`frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx:66`) | 정상 분기 렌더(`instrument` 존재, `:58`). 클릭 시 `isRunning`이 `true`로 바뀌고 `setTimeout(0)`으로 `runDemoBacktest(bars)` 실행(`:28-35`). 핸들러에 중복 클릭 가드 없음. | `result` 설정 후 `demo-backtest-summary` 섹션 표시(`:72-83`). 최종 자산 `Stat` tone은 `finalEquity >= initialEquity`면 success, 아니면 danger(`:78`). 거래 횟수(`:80`), 최대 낙폭(`:81`). 같은 화면에 머묾. | 구현된 오류 UI 없음. `runDemoBacktest`가 예외를 던지면 `setIsRunning(false)`가 호출되지 않아 `isRunning`이 `true`로 고정될 수 있음(코드 추론, 실제 재현은 미확인). 버튼 `loading` 때 disabled 여부는 `@aios/ui-web` 구현을 읽어야 하므로 미확인. | 없음(동일 화면, `:71-84`). |
+| `Link to="/onboarding/demo"` ("데모 종목 목록으로", `frontend/apps/web/src/routes/onboarding/DemoChartPage.tsx:85`) | 정상 분기 표시(`instrument` 존재, `:58`). | `/onboarding/demo` 이동(`:85` Link). | 없음(Link 이동에 실패 경로 없음). | `/onboarding/demo`(DemoModePage). |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
