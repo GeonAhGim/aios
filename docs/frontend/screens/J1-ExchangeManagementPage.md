@@ -48,10 +48,10 @@
 <!-- BLOCK:J1-ExchangeManagementPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `ExchangeManagementPage.tsx:78` — `register.mutateAsync`가 `ApiError`(400) 던짐. `setFromError(err)`가 `extractFieldErrors(err)` 호출하여 필드별 오류 추출(`ExchangeManagementPage.tsx:101`, `useFieldErrors.ts:19`). `RegisterCredentialError`(`ExchangeManagementPage.tsx:100`)가 `ExchangeCredentialErrors.tsx:37`에서 `classifyBadRequest`로 분류 | 필드별 오류(`Field.error` prop: `RegisterCredentialForm.tsx:48`(exchange), `:57`(api_key), `:65`(api_secret), `:74`(api_passphrase)) + 전체 오류(`RegisterCredentialForm.tsx:89`). `BadRequestNotice`는 알려진 error_code일 때 고정 문구, 아니면 `ErrorMessage`에 `redactSecret` 처리된 메시지 | 필드 오류 수정 후 재제출(`ExchangeManagementPage.tsx:165`), `onRetry`로 재시도(`:166`) | 구현됨(`RegisterCredentialForm.tsx:48,57,65,74,89`, `ExchangeManagementPage.tsx:78,100-101`, `useFieldErrors.ts:19`) |
+| 인증 필요/세션 만료(401) | 이 페이지는 `router.tsx:70`의 `ProtectedRoute` 감싸짐: 토큰 필요(`router.tsx:20`), `me` 클레임 필요(`router.tsx:29`). 401 응답 시 페이지에 도달하지 못함 | 401 관련 문구 없음. 페이지 내에서 401 처리 코드 없음. ExchangeManagementPage.tsx 전체 검색: 401, unauthorized 키워드 없음 | 없음(ProtectedRoute가 리다이렉트) | 없음(근거: `router.tsx:70`의 `ProtectedRoute`가 인증 가드, 페이지 내 401 처리 없음) |
+| 권한 없음/MFA 필요(403) | 서버가 403 응답. `RegisterCredentialError`(`ExchangeCredentialErrors.tsx:36`)와 `RevokeCredentialError`(`ExchangeCredentialErrors.tsx:54`)가 `classifyForbidden(error)` 체크 | `ForbiddenNotice` 컴포넌트 렌더링(`ExchangeCredentialErrors.tsx:36,54`). 고정 문구(EXACT_MESSAGES) | 권한 획득 후 재시도 | 구현됨(`ExchangeCredentialErrors.tsx:36,54`) |
+| 충돌/상태 불일치(409) | `useConflictRetry.ts:18` — `useConflictRetry`가 409 수신. `classifyStateConflict(err) === "retryable"`일 때 refetch 후 1회 재시도(`ExchangeManagementPage.tsx:45`(해지), `:76`(등록)) | 409 오류 메시지 없음. `useConflictRetry`가 투명하게 재시도. 재시도 실패 시 후속 오류(5xx 등)만 등록/해지 오류 컴포넌트로 전달 | 없음(자동 재시도). 재시도 실패 시 후속 오류 처리 | 구현됨(`useConflictRetry.ts:18`, `ExchangeManagementPage.tsx:45,76`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
