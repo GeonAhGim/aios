@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-ConnectionsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — `docs/frontend/PERSONAS_AND_JOURNEYS.md` §2: "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독". J1~J6 전체가 P1 중심. [확인] |
+| 목적(한 문장) | 외부 제공자(거래소/증권사 등)에 계정 연동을 생성·확인·동기화·해지하고, 연동 상태와 스냅샷 신선도를 관리한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:153` — `/settings/connections` 경로는 `protect(<ConnectionsPage />)` 래퍼로 `ProtectedRoute`를 거쳐 인증된 사용자만 접근. [확인] |
+| 사용자 준비물 | 제공자 코드(providerCode, 예: "toss"), 연동 대상 참조값(opaqueAccountRef), 요청할 권한 범위(CAPABILITY_OPTIONS: READ_BALANCE, READ_POSITION, READ_ACTIVITY 중 선택). [확인] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
