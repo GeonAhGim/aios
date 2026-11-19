@@ -3,8 +3,7 @@
 // just a runtime fallback) so switching languages never silently falls back to a
 // missing key. The `common`/`errors`/`ai` sections translate UX-1's hand-written
 // catalog.ko; `legacy` mirrors the mechanically extracted per-file namespaces
-// (scripts/i18n-literals-baseline.json) -- both are a rough draft, not a reviewed
-// translation.
+// (scripts/i18n-literals-baseline.json) -- both a rough draft, not reviewed.
 import type { CatalogKo } from "./catalog.ko";
 import { catalogEnLegacyA } from "./catalog.en.legacyA";
 import { catalogEnLegacyB } from "./catalog.en.legacyB";
@@ -377,6 +376,7 @@ export const catalogEn = {
     "/scripts/editor": "Script editor",
     "/marketplace": "Marketplace",
     "/follow": "Follow",
+    "/signals/sources": "Signal sources",
     "/ai/studio": "AI studio",
     "/executions": "Execution control",
     "/portfolio": "Portfolio",
@@ -412,6 +412,7 @@ export const catalogEn = {
     "/admin/reconciliation": "Reconciliation",
     "/admin/evidence-chain": "Evidence chain",
     "/admin/trust": "Trust membership",
+    "/admin/audit-log": "Audit log",
   },
   executionAlgoPage: {
     pageTitle: "Algo execution progress",
