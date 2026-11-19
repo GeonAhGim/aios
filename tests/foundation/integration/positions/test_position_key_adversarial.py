@@ -44,6 +44,7 @@ from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.position_key import PositionKey
 from tests import conftest
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.db import create_pool_with_retry
@@ -121,7 +122,12 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
     """적대적 -- 같은 4-part(venue/instrument/strategy/execution)를 서로 다른
     두 포트폴리오가 동시에 쓸 때(전략 복제), portfolio_id가 5번째 구성요소로
     키에 포함돼 있으므로 `pos_snapshot`에 두 개의 독립된 행이 생기고, 한쪽
-    포트폴리오의 체결이 다른 쪽 수량을 절대 건드리지 않아야 한다."""
+    포트폴리오의 체결이 다른 쪽 수량을 절대 건드리지 않아야 한다.
+
+    성능 단언: `RelativeBudget.measure_async`로 wall-clock 측정 + 단일 DB
+    round-trip 보정(CPU 보정 루프로는 DB 서버 측 경합을 정규화 못 함,
+    task-11078). 부하가 높은 CI 환경에서도 ratio 단언이 안정적으로 통과한다.
+    """
     tenant_id = await create_test_tenant(pool)
     hierarchy = await bootstrap_default_hierarchy(pool, tenant_id)
     account_id = await create_pos_account(pool, tenant_id)
@@ -142,12 +148,54 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
     )
     assert key_a != key_b, "FA-0d의 핵심 불변 -- portfolio_id가 다르면 키도 달라야 한다"
 
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_a)
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_b)
+
+    # perf measurement keys (측정용 — separate from assertion keys to avoid
+    # accumulation from measure_async's warmup + best-of-3 runs).
+    _perf_key_a = str(
+        PositionKey(
+            instrument_id=f"INSTperf{uuid4().hex[:4]}",
+            portfolio_id=hierarchy.portfolio.portfolio_id,
+            **_SHARED_STRATEGY,
+        )
+    )
+    _perf_key_b = str(
+        PositionKey(
+            instrument_id=f"INSTperf{uuid4().hex[:4]}",
+            portfolio_id=second_portfolio_id,
+            **_SHARED_STRATEGY,
+        )
+    )
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=_perf_key_a)
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=_perf_key_b)
+
+    # calibration: 단일 fill round-trip (DB 서버 부하를 같은 순간에 측정)
+    async def _calibration_fill() -> None:
+        await _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=_perf_key_a)
+
+    # 실제 측정 대상: 두 포트폴리오에 동시 기록
+    async def _race_fills() -> None:
+        await asyncio.gather(
+            _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=_perf_key_a),
+            _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=_perf_key_b),
+            return_exceptions=True,
+        )
+
+    sample = await RelativeBudget().measure_async(_race_fills, calibration_fn=_calibration_fill)
+
+    # ratio: 동시 fill 2건이 단일 fill 대비 2배 이내여야(선형 성장 허용,
+    # 초과 락 경합은 superlinear ratio로 감지)
+    max_ratio = 2.5
+    assert sample.ratio < max_ratio, (
+        f"동시 체결 ratio {sample.ratio:.2f}가 예산({max_ratio})을 넘었습니다. "
+        f"op_ms={sample.op_ms:.1f}ms calibration_ms={sample.calibration_ms:.1f}ms"
+    )
+
+    # 실제 테스트 키에 fill — assertion 전 key_a에 한 번만 기록
+    await _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_a)
+
     try:
-        await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_a)
-        await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_b)
-
-        await _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key_a)
-
         async with pool.acquire() as conn:
             row_a = await conn.fetchrow(
                 "SELECT quantity, portfolio_id FROM pos_snapshot WHERE position_key = $1", key_a
@@ -162,7 +210,7 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
         assert row_a["quantity"] == Decimal("1")
         assert row_b["quantity"] == Decimal("0"), "다른 포트폴리오의 체결이 새어 들어왔다"
     finally:
-        await _delete_pos_snapshot(pool, position_keys=[key_a, key_b])
+        await _delete_pos_snapshot(pool, position_keys=[key_a, key_b, _perf_key_a, _perf_key_b])
 
 
 @pytest.mark.perf
