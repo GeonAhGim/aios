@@ -24,11 +24,11 @@
 <!-- BLOCK:J3-ExecutionControlPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | TODO | TODO |
-| `useCreateExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:46` | TODO | TODO |
-| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50` | TODO | TODO |
-| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | TODO | TODO |
-| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18` | TODO | TODO |
+| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | 5초 폴링 (`refetchInterval: 5000`, `FD-16.4` 원칙 — `frontend/packages/shared-hooks/src/usePortfolio.ts:42`) | `executionsIsError`/`executionsError` → `ExecutionsListError` 컴포넌트 표시(`frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:320-321`). 404(`isResourceNotFound`)면 `NotFoundState`(`:64-71`), 그 외 `ErrorMessage` + `classifyServerError.kind === "retryable"`일 때 `onRetry` 버튼. `OperationStatusBar`에도 `isError` 전달(`:239`) |
+| `useCreateExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:46`, `frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:158` | mutation (POST). 성공 시 `qc.invalidateQueries({queryKey: ["executions"]})`로 목록 자동 갱신(`usePortfolio.ts:56`) | `submitExecution`의 try/catch(`:211-214`). `DuplicateSubmitError`면 조용히 무시(`:212`). 그 외 `setError(err)` → `CreateExecutionError`(`:299-303`). `CreateExecutionError`: `classifyBadRequest`→`BadRequestNotice`(`:44`), `classifyForbidden`→`ForbiddenNotice`(`:45`), 그 외 `ErrorMessage`(재시도 가능 여부 `classifyServerError`로 판정, `:47-54`) |
+| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50`, `frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:159` | mutation (POST). `PRE_SUBMIT` 시점, `isFeatureEnabled("FF_J3_RISK_PANEL")`일 때만 호출(`:205-207`). flag 꺼지면 네트워크 호출 없음 | `RiskVerdictPanel`이 `status`/`data`/`error` prop으로 받음(`:312-316`). `error`는 `RiskVerdictPanel` 내부에서 처리 |
+| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30`, `frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:160` | 호출부 `submit(fn)`이 `Idempotency-Key` 헤더 관리. `inFlightRef`로 in-flight 중복 차단(`:36-39`). 성공 또는 4xx(재시도 불가) 후 키 폐기(`:43`, `:58-59`) | `DuplicateSubmitError`로 버튼 연타 차단(`:37`). 호출부에서 `err instanceof DuplicateSubmitError`면 return(`:212`). 4xx면 `discardKey` 후 에러 재던짐(`:58-59`). `missing_header`(개발 결함)는 `console.warn`(`:53-56`) |
+| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18`, `frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:181` | `run(...args)`로 감싼 mutation. `classifyStateConflict(err) !== "refetch_retry"`면 그대로 던지고, `"refetch_retry"`면 `refetch()` 후 `mutate(...args)`를 정확히 1회 재시도(`:27-29`) | 재시도 불가 타입(`STATE_INVALID_TRANSITION`, idempotency 실패, 409 아님)은 즉시 던짐(`:27`). 재시도 후에도 409 발생 시 재던짐(무한 재시도 금지). `:181-197`에서 `refetch`로 `useExecutions.refetch()` 전달 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
