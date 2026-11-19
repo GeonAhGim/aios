@@ -24,8 +24,8 @@
 <!-- BLOCK:J1-SignupPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | TODO | TODO |
-| `useSignup` | `frontend/packages/shared-hooks/src/useAuth.ts:20` | TODO | TODO |
+| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | 로컬 상태hook. `handleSubmit` catch에서 `setFromError(err)`로 동기 업데이트(1회). `extractFieldErrors(err)`가 `details.fields[]`를 `Record<string,string>`으로 파싱. 사용자가 이메일/비밀번호 입력값을 수정하면 `clearField("email")`/`clearField("password")`가 해당 키만 제거(나머지 필드 오류 유지). 폴링/재시도 없음. | `fieldErrors` 상태에 필드별 오류 메시지가 저장됨. SignupPage.tsx:75(`error={fieldErrors.email}`), :89(`error={fieldErrors.password}`)에서 `<Field error>`로 인라인 표시. `SignupError` 컴포넌트(:26-27)가 `classifyBadRequest`/`classifyForbidden`으로 400/403를 배너(`BadRequestNotice`/`ForbiddenNotice`)로 표시하고, 그 외는 `ErrorMessage`로 전달. 423(`AUTH_ACCOUNT_LOCKED`)은 `deriveLockout(err).retryAfterSec`로 잠금 카운트다운 시작(:68). |
+| `useSignup` | `frontend/packages/shared-hooks/src/useAuth.ts:20` | `useMutation`. 폼 제출에서 mutateAsync로 1회 POST `/auth/register`(폴링 없음). onSuccess에서 setToken(data.accessToken) + qc.invalidateQueries({ queryKey: ["me"] }) 후 /onboarding/mfa-setup로 네비게이트. | 폼 제출 catch에서 setError로 에러 상태 설정, setFromError로 필드 오류 저장, deriveLockout으로 잠금 시간 설정. SignupError 컴포넌트가 오류 분류 후 BadRequestNotice/ForbiddenNotice/ErrorMessage로 렌더. 423일 때 useEffect가 1초 간격으로 lockoutRemainingSec 카운트다운. Button은 isPending으로 loading 표시. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
