@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-EvidenceChainPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P8(운영자) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:29` P8: 가입 승인·분쟁·안전장치·정합성 점검. P11(감사자·컴플라이언스)도 읽기 전용 접근. [확인: `:29`(P8), `:32`(P11), `router.tsx:176` admin 라우트] |
+| 목적(한 문장) | 증빙 감사 체인의 무결성을 검증(AUD-003)하고, 타임라인 이벤트를 페이지네이션으로 조회한다. [확인: `EvidenceChainPage.tsx:65-68` title/t2, `useEvidence.ts:15,22`] |
+| 진입 조건 | `/admin/evidence-chain` 경로에 접근. `router.tsx:176`에서 `protectAdmin(<EvidenceChainPage />)` 가드: `ProtectedRoute`(로그인 필수) + `AdminRoute`(관리자 권한 필수) 이중 적용. [확인: `router.tsx:74-79`, `:176`] |
+| 사용자 준비물 | 테넌트 ID (선택사항, 비워두면 system 이벤트만 검증). `placeholder4` 입력 필드. [확인: `EvidenceChainPage.tsx:72-74`, `t3` 설명 문구] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
