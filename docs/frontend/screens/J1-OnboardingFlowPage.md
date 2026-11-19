@@ -34,10 +34,10 @@
 <!-- BLOCK:J1-OnboardingFlowPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `credentials.isLoading \|\| strategies.isLoading \|\| deployments.isLoading` (OnboardingFlowPage.tsx:50) | `<LoadingState />` 컴포넌트 (OnboardingFlowPage.tsx:62-63) | 대기 | `구현됨` — `LoadingState` 렌더링: `OnboardingFlowPage.tsx:62-63` |
+| 빈 상태 | 로딩 완료, `progress.isComplete === false`, 모든 단계의 데이터가 비어 있음 (OnboardingFlowPage.tsx:64, 72) | 단계별 카드 3개 표시: 각 카드에 번호(1~3), 제목/설명, 상태 뱃지("예정") — 현재 단계(`isCurrent`)는 CTA 버튼 (OnboardingFlowPage.tsx:73-105) | 현재 단계 CTA 버튼 클릭 → 해당 페이지로 이동 | `구현됨` — 단계 목록 렌더링: `OnboardingFlowPage.tsx:73-105`, 뱃지/CTA 분기: `OnboardingFlowPage.tsx:91-99` |
+| 정상 | 로딩 완료, `progress.isComplete === false`, 일부 단계 완료 | 완료된 단계는 "완료" 뱃지(`Badge tone="success"`, OnboardingFlowPage.tsx:92), 현재 단계는 CTA 버튼, 미수행 단계는 "예정" 뱃지 (OnboardingFlowPage.tsx:98) | 완료된 단계 확인, 현재 단계 CTA 클릭 | `구현됨` — `progress.steps` 순회 및 `complete`/`isCurrent` 분기: `OnboardingFlowPage.tsx:74-99` |
+| 낡은 데이터(신선도 초과) | react-query 기본 `staleTime: 0` — 조회 직후 stale. `refetchOnWindowFocus: true`로 윈도우 포커스 시 재조회 (data 블록 참조) | 별도의 신선도 표시 UI 없음. stale 여부 UI에 반영되지 않음 | 윈도우 포커스 시 자동 재조회; 수동 갱신 버튼 없음 | `없음` — stale 상태 시각화 없음. `refetchOnWindowFocus`로만 대응 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
