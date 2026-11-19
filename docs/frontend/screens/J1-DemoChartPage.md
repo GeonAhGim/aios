@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-DemoChartPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더). 근거: PERSONAS_AND_JOURNEYS.md:22 — "P1 | **개인 트레이더(투자자)** | 전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독 | J1~J6 전체 [확인]". :40 — "시작·온보딩(J1) | P1, 이후 모든 페르소나가 **자기 버전**을 가진다". 데모 모드는 J1 온보딩 여정의 2단계로 P1 전용. |
+| 목적(한 문장) | 데모 모드에서 샘플 종목의 일일 봉 차트를 보고, 버튼 하나로 백테스트를 실행해 결과(최종 자산, 거래 횟수, 최대 낙폭)를 확인한다. 근거: DemoChartPage.tsx:62-63(차트 캔버스 `data-testid="demo-chart-canvas"`), :66-68(백테스트 실행 버튼 `handleRunBacktest`), :72-83(결과 섹션 `demo-backtest-summary`). |
+| 진입 조건 | 로그인 필요: `router.tsx:108`에서 `protect(...)` → `ProtectedRoute` 가드. :109-110에서 `FeatureFlagGate flag="onboarding_demo_mode"`로 데모 모드 기능 플래그가 꺼지면 `FeatureFlagGate.tsx:17`의 `common.featureDisabled` 문구 표시. :107에서 `/onboarding/demo/:instrumentId` 라우트 파라미터 `instrumentId` 필요. `DemoChartPage.tsx:37-38`에서 `findDemoInstrument(instrumentId)`가 `null`이면 알 수 없는 종목 에러 페이지(`DemoChartPage.tsx:51`) 표시. |
+| 사용자 준비물 | 데모 모드 진입점(`/onboarding/demo`)에서 종목 선택 완료: DemoModePage.tsx:29(`Link to=/onboarding/demo/${instrument.id}`). 데모 모드는 실제 계좌 연결이 필요 없으므로 추가 준비물 없음. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
