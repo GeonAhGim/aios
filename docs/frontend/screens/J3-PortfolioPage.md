@@ -34,10 +34,10 @@
 <!-- BLOCK:J3-PortfolioPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `usePortfolio`(`frontend/packages/shared-hooks/src/usePortfolio.ts:11`)의 `isLoading`이 true (`PortfolioPage.tsx:108`) | `<LoadingState />` 표시 (`PortfolioPage.tsx:109`) | 없음(로딩 완료까지 대기) | `구현됨` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:108-109`) |
+| 빈 상태 | `portfolio` 데이터가 존재하지만 `portfolio.allocations.length === 0` (`PortfolioPage.tsx:180`) | `<EmptyState>{t("legacy.portfolioPage.t13")}</EmptyState>` — "배분된 실행이 없습니다." (`PortfolioPage.tsx:181`) | 없음(배분된 실행이 없어 재조정 불가) | `구현됨` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:180-182`, 사실 시트: `legacy.portfolioPage.t13` 배분된 실행이 없습니다.) |
+| 정상 | `portfolio` 데이터가 존재하고 `allocations.length > 0` (`PortfolioPage.tsx:110`, `:123`) | 총 포트폴리오 가치(`label2`), 미배분 현금(`label3`), 배분된 실행 수(`label4`) Stat 3개; 자산 배분 차트(`t5`); 배분 내역·재조정 표(`t6`~`t10`) 전략/비중/손익/새 배분 자본 열; 재조정 적용 버튼(`t11`); 결과 메시지(`t12`) | 재조정 입력 후 `<Button>`(`t11`) 클릭 → `handleRebalance`(`PortfolioPage.tsx:65`) → `useIdempotentSubmit`(`:55`) + `useRebalancePortfolio`(`:54`)로 POST (`PortfolioPage.tsx:75-76`) | `구현됨` (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:110-189`, 사실 시트: `legacy.portfolioPage.title1`~`t13` 전체) |
+| 낡은 데이터(신선도 초과) | `DataFreshness` 컴포넌트(`frontend/apps/web/src/components/DataFreshness.tsx:20`)는 `asOf`가 null일 때 "기준 시각 확인 불가"(`legacy.dataFreshness.t1`)를 표시. 현재 `PortfolioPage.tsx:95`에서 `asOf={null}` 고정 (`apiPaths.ts "portfolio.get" · PLT-19 예정`으로 ApiResponse 봉투 미적용, `task-936 decision`) | `asOf === null`이므로 stale 배지 없이 "기준 시각 확인 불가" 문구만 (`DataFreshness.tsx:24-28`) | 없음(수동 갱신 버튼 없음; react-query가 `refetch` 제공하지만 UI 노출 안 함) | `구현됨(확인 불가 문구)` (`frontend/apps/web/src/components/DataFreshness.tsx:24-28`, `PortfolioPage.tsx:95`); `낡은 데이터 배지`는 `asOf`가 null이라 never 뜨므로 `없음` (`DataFreshness.tsx:34-37`) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
