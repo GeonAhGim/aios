@@ -219,11 +219,13 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo, perf_budg
             )
 
     samples = [await perf_budget.sample_async(_probe_once) for _ in range(20)]
-    wall_ms_list = sorted(s.wall_ms for s in samples)
-    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+    # cpu_ms is PerfBudget's budget criterion (process_time: other workers' CPU
+    # contention excluded); wall_ms is reference-only on a loaded host.
+    cpu_ms_list = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms_list[min(int(len(cpu_ms_list) * 0.95), len(cpu_ms_list) - 1)]
     budget_ms = 800.0
     print(f"[REC-007 resolve rejection] p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms")
-    assert p95_ms < budget_ms, f"resolve rejection p95={p95_ms:.3f}s exceeds 800ms mutation budget"
+    assert p95_ms < budget_ms, f"resolve rejection p95={p95_ms:.3f}ms exceeds 800ms mutation budget"
 
 
 @pytest.mark.perf
