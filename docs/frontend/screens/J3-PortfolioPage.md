@@ -45,10 +45,10 @@
 <!-- BLOCK:J3-PortfolioPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `statusCode === 400` → `classifyBadRequest` 분기 (`PortfolioPage.tsx:31`) | `BadRequestNotice` 호출. errorCode별: `VALIDATION_INVALID_FIELD`/`VALIDATION_IDEMPOTENCY_KEY_REQUIRED` → `"입력값을 확인해주세요."` (`apiError.ts:92`) | 수정 후 재시도 | 서버 400 표시: `구현됨`. 클라이언트 입력 검증: `없음`(빈 값 필터링 `PortfolioPage.tsx:68,73`, 숫자 형식 검증 `PortfolioPage.tsx:157-158` 없음) |
+| 인증 필요/세션 만료(401) | `statusCode === 401` → `classifyBadRequest` null, `classifyForbidden` null → `routeApiError` → `auth_required` (`errorRouting.ts:129`) → `ErrorMessage` (`PortfolioPage.tsx:35`) | `ErrorMessage` 호출, errorCode=`AUTH_TOKEN_EXPIRED`, message=`"세션이 만료되었습니다. 다시 로그인해주세요."` (`apiError.ts:61`) | 로그인 재시작 | 화면 전용 분기: `없음`. 전역 401 처리: `구현됨` (`useAuthStore.ts:49` `configureUnauthorizedHandler` → `logout()`) |
+| 권한 없음/MFA 필요(403) | `statusCode === 403` → `classifyForbidden` 분기 (`PortfolioPage.tsx:32`) | `AUTH_MFA_REQUIRED`/`AUTH_TENANT_MISMATCH`/`policy` → `ForbiddenNotice`. 그 외 403 → `ErrorMessage` (`PortfolioPage.tsx:35`) | MFA 완료 / 권한 요청 / 수정 후 재시도 | 403 전용 분기: `부분` (`forbidden.ts:35-36` MFA/TENANT_MISMATCH 전용 처리, 그 외 `ErrorMessage` 폴백) |
+| 충돌/상태 불일치(409) | `statusCode === 409` → `classifyBadRequest` null, `classifyForbidden` null → `routeApiError` → `ErrorMessage` (`PortfolioPage.tsx:35`) | `ErrorMessage` 호출. errorCode별: `INTEGRITY_IDEMPOTENCY_CONFLICT` (`apiError.ts:76`), `STATE_CONCURRENCY_CONFLICT` (`apiError.ts:74`) | 새로고침 후 재시도 | 화면 전용 분기: `없음`. 훅 수준에서 `INTEGRITY_IDEMPOTENCY_CONFLICT` 키 폐기 (`useIdempotentSubmit.ts:58-60`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
