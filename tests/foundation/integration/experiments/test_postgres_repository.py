@@ -111,8 +111,8 @@ async def test_append_parent_child_lineage_p95_within_budget(
 ) -> None:
     """numeric performance assertion: lineage append+get round-trip p95 within budget.
 
-    I/O-bound operation measured with RelativeBudget.measure_async (wall-clock
-    with self-calibration ratio) to normalise for host speed. The ratio
+    I/O-bound operation measured with RelativeBudget.measure_async — wall-clock
+    timing normalised by a same-process CPU calibration loop so the ratio
     (op_ms / calibration_ms) stays stable across hosts: a 2x slower CI
     runner produces a 2x slower calibration and a 2x slower op, so the
     ratio stays the same. A real regression moves the ratio without moving
@@ -206,10 +206,10 @@ async def test_append_parent_child_lineage_goes_red_with_io_delay(
         return await repo.get(tenant_id, child.experiment_id)
 
     sample = await RelativeBudget().measure_async(_one_lineage_call_with_delay, n=1, warmup=0)
-    assert sample.op_ms >= _APPEND_LINEAGE_P95_BUDGET_MS, (
-        f"delay-injected op time {sample.op_ms:.3f}ms — "
+    assert sample.ratio >= 3.0, (
+        f"delay-injected ratio {sample.ratio:.2f}x — "
         f"unexpectedly green: measurement/assertion is hollow "
-        f"(budget={_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms)"
+        f"(budget threshold=3.0x)"
     )
 
 
