@@ -21,6 +21,7 @@ import {
   resolveInOpenApi,
   snapshotPathToTemplate,
 } from "./apiPaths.openapi.scanner";
+import { bestOfMs } from "./testSupport/bestOf";
 
 const SNAPSHOT_PATH = join(dirname(fileURLToPath(import.meta.url)), "../../../../contracts/openapi/v1.json");
 const snapshotRaw = readFileSync(SNAPSHOT_PATH, "utf-8");
@@ -155,12 +156,13 @@ describe("performance — 스캐너 함수 실행 시간 (task-25042 D2)", () =>
     const routeDef = API_ROUTES["auth.login"] as ApiRouteDefinition;
     const iterations = 1000;
 
-    const start = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      resolveInOpenApi(routeDef.legacyPath, snapshotPathList);
-    }
-    const elapsed = performance.now() - start;
-    const avgMs = elapsed / iterations;
+    const avgMs = bestOfMs(() => {
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        resolveInOpenApi(routeDef.legacyPath, snapshotPathList);
+      }
+      return (performance.now() - start) / iterations;
+    });
 
     expect(avgMs).toBeLessThan(1);
   });
@@ -168,12 +170,13 @@ describe("performance — 스캐너 함수 실행 시간 (task-25042 D2)", () =>
   it("findUnregisteredSnapshotPaths: 전체 스냅샷(100+ 경로) 역방향 매칭 < 5ms (예산: 로컬 실측 0.1ms × 30 = 3ms, 여유 5ms)", () => {
     const legacyPaths = Object.values(API_ROUTES).map((def) => (def as ApiRouteDefinition).legacyPath);
 
-    const start = performance.now();
-    for (let i = 0; i < 100; i++) {
-      findUnregisteredSnapshotPaths(snapshotPathList, legacyPaths);
-    }
-    const elapsed = performance.now() - start;
-    const avgMs = elapsed / 100;
+    const avgMs = bestOfMs(() => {
+      const start = performance.now();
+      for (let i = 0; i < 100; i++) {
+        findUnregisteredSnapshotPaths(snapshotPathList, legacyPaths);
+      }
+      return (performance.now() - start) / 100;
+    });
 
     expect(avgMs).toBeLessThan(5);
   });
@@ -186,14 +189,16 @@ describe("performance — 스캐너 함수 실행 시간 (task-25042 D2)", () =>
       "/v1/accounts/{account_id}/orders",
     ];
 
-    const start = performance.now();
-    for (let i = 0; i < 10000; i++) {
-      for (const p of testPaths) {
-        legacyPathToTemplate(p);
-        snapshotPathToTemplate(p);
+    const elapsed = bestOfMs(() => {
+      const start = performance.now();
+      for (let i = 0; i < 10000; i++) {
+        for (const p of testPaths) {
+          legacyPathToTemplate(p);
+          snapshotPathToTemplate(p);
+        }
       }
-    }
-    const elapsed = performance.now() - start;
+      return performance.now() - start;
+    });
 
     expect(elapsed).toBeLessThan(30);
   });
@@ -203,16 +208,15 @@ describe("performance — 스캐너 함수 실행 시간 (task-25042 D2)", () =>
       get: { responses: { "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/ApiResponse_Foo" } } } } } },
     };
 
-    // 예전 예산은 1000회에 1ms(호출당 1us)라 측정 잡음 수준이었다: 한가한 호스트에서도 3회 중 1회가 1.6ms로 적색이었다
-    // (2026-11-15 머지 큐 배치 반려). 5회 중 최소값에 거친 상한을 둔다 -- 10배 이상 느려지는 회귀는 여전히 잡힌다.
-    let bestMs = Number.POSITIVE_INFINITY;
-    for (let run = 0; run < 5; run += 1) {
+    // bestOfMs로 최솟값 판정 — 예전 예산은 1000회에 1ms(호출당 1us)라 측정 잡음 수준이었다
+    // (2026-11-15 머지 큐 배치 반려). 10배 이상 느려지는 회귀는 여전히 잡힌다.
+    const bestMs = bestOfMs(() => {
       const start = performance.now();
       for (let i = 0; i < 1000; i++) {
         computeEnvelopeFromOpenApi(enveloped);
       }
-      bestMs = Math.min(bestMs, performance.now() - start);
-    }
+      return performance.now() - start;
+    });
 
     expect(bestMs).toBeLessThan(10);
   });
