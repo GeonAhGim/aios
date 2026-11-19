@@ -37,10 +37,10 @@
 <!-- BLOCK:J2-ChartPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `query.isLoading`이 true — `instrumentId`가 있고 candles `useQuery`가 아직 데이터를 받지 못함 (`ChartPage.tsx:228`) | 회색 스피너 + "불러오는 중..." (`Feedback.tsx:31-37`) | 없음(자동 재시도: react-query 기본 재시도 3회) | 구현됨 (`ChartPage.tsx:228-229`: `query.isLoading ? <LoadingState />`) |
+| 빈 상태 | `query.isError`가 false이고 `points.length === 0` — candles 조회는 성공했으나 서버가 빈 배열을 반환 (`ChartPage.tsx:230`) | 점선 테두리 박스 안에 "표시할 캔들이 없습니다." (`ChartPage.tsx:231`: `t("legacy.chartPage.t2")`) | 없음 — 사용자가 변경할 수 있는 입력 없음(심볼 선택은 이미 완료됨) | 구현됨 (`ChartPage.tsx:230-231`: `points.length === 0 ? <EmptyState>{t("legacy.chartPage.t2")}</EmptyState>`, 사실 시트: `legacy.chartPage.t2` @ `ChartPage.tsx:231`) |
+| 정상 | `query.isError` false, `query.isLoading` false, `points.length > 0` — candles 데이터를 받음 (`ChartPage.tsx:232`) | 캔들 차트(`CandlestickChart`, `ChartPage.tsx:246`) + 지표 오버레이 + 도형 + 비교 심볼 + 백테스트 패널 등 전체 UI | 지표 추가/제거(`toggleIndicator`, `ChartPage.tsx:191`), 도형 그리기(`handleAddDrawing`, `ChartPage.tsx:197`), 템플릿 적용(`ChartPage.tsx:212-216`), 비교 심볼 추가/제거(`CompareSymbols`, `ChartPage.tsx:269-283`), 백테스트 실행(`BacktestPanel`, `ChartPage.tsx:259-267`) | 구현됨 (`ChartPage.tsx:232-248`: else 분기 전체) |
+| 낡은 데이터(신선도 초과) | candles `useQuery`에 stale/freshness 옵션 미설정 (`ChartPage.tsx:135-139`) | (별도 UI 없음) | 없음 | 없음 (`ChartPage.tsx:135-139`: staleTime 등 freshness 옵션 미설정, 폴링/자동 갱신 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
