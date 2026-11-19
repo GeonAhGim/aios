@@ -1,5 +1,4 @@
 [
-  "apps/web/src/components/CoverageFreshnessPanel.test.tsx",
   "apps/web/src/components/InstallPrompt.depth1.test.tsx",
   "apps/web/src/components/MfaStepUpDialog.depth1.test.tsx",
   "apps/web/src/components/ScriptEditor.depth1.test.tsx",

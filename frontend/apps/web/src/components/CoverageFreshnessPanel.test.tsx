@@ -9,7 +9,7 @@ import type { ResearchSourceStatusView } from "@aios/shared-types";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { CoverageFreshnessPanel } from "./CoverageFreshnessPanel";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 
 // CoverageBadge.test.tsx/DataFreshness.test.tsx와 동일 사유(vitest.config에
 // globals:true가 없어 자동 cleanup 미등록).
@@ -141,9 +141,17 @@ describe("CoverageFreshnessPanel", () => {
       );
     }
 
-    const startedAt = performance.now();
+    const renderOnce = () => {
+      const startedAt = performance.now();
+      render(<CoverageFreshnessPanel sources={sources} now={NOW} staleAfterSec={3600} />);
+      const elapsedMs = performance.now() - startedAt;
+      cleanup();
+      return elapsedMs;
+    };
+    const elapsedMs = bestOfMs(renderOnce);
+
+    // bestOfMs의 마지막 호출에서 cleanup()했으므로 기능 검증을 다시 렌더한다.
     render(<CoverageFreshnessPanel sources={sources} now={NOW} staleAfterSec={3600} />);
-    const elapsedMs = performance.now() - startedAt;
 
     expect(screen.getByTestId("coverage-freshness-alert")).toHaveTextContent(`수집 지연 ${SOURCE_COUNT / 2}건`);
     expect(elapsedMs).toBeLessThan(perfBudgetMs(1500));
