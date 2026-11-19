@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-DashboardPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 — 개인 트레이더(투자자). 여정 J1~J6 전체에 관여(MVP-1) [PERSONAS_AND_JOURNEYS.md §2] |
+| 목적(한 문장) | 로그인 후 첫 진입 화면으로, 위험 등급·포트폴리오 요약·실행 중인 전략·긴급 정지·최근 알림을 한눈에 조망하여 운용 상태를 모니터링하고 필요시 즉시 개입한다. |
+| 진입 조건 | `ProtectedRoute` 통과(인증 완료) — `router.tsx:114` `{ path: "/dashboard", element: protect(<DashboardPage />) }`. 루트 `/`에서 자동 리다이렉트 대상(`router.tsx:84`). |
+| 사용자 준비물 | 계정 로그인 완료, 위험도 평가 완료(`useRiskProfile`가 `riskProfile` 값 반환, `useSuitability.ts:6`), 포트폴리오 존재(`usePortfolio`, `usePortfolio.ts:11`), 최소 1개 연결된 거래소 세션(실행 목록 조회용, `useExecutions`, `usePortfolio.ts:37`) |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
