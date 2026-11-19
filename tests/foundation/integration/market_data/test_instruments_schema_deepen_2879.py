@@ -20,6 +20,7 @@ import asyncpg
 import pytest
 
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_budget import PerfBudget
 
 
 def _asyncpg_dsn() -> str:
@@ -163,14 +164,12 @@ async def test_venue_listings_rejects_one_microsecond_overlap(pool: asyncpg.Pool
 @pytest.mark.perf
 async def test_bulk_non_overlapping_inserts_meet_latency_budget(
     pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
 ) -> None:
     """`EXCLUDE USING gist`는 삽입마다 겹침 검사를 위해 GiST 인덱스를
     스캔한다 — 인덱스가 없거나 퇴화하면 O(n) 순차비교로 느려진다. 500개
-    서로 겹치지 않는 listing을 연속 삽입해 상대 비율 예산 내임을 단언한다
-    (호스트 속도에 독립적: 동일 호스트에서 500 insert 측정값과
-    순수 CPU 보정 루프 측정값의 비율이 max_ratio=2000x 이하)."""
-    from tests._perf.relative_budget import RelativeBudget
-
+    서로 겹치지 않는 listing을 연속 삽입해 CPU 시간 예산 내임을 단언한다
+    (perf_budget fixture 경유, host 속도 의존성 제거)."""
     t0_base = datetime.now(UTC) - timedelta(days=2000)
     n = 500
 
@@ -191,26 +190,24 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(
     await _insert_instrument(pool, warmup_id)
     await _insert_batch(warmup_id, _venue_symbol(), t0_base)
 
-    rb = RelativeBudget()
-
-    # I/O-bound async: RelativeBudget.assert_within_async uses wall-clock
-    # with self-calibrating ratio budget. 500 inserts ~1-2s on host → ratio
-    # ~100-200x vs tens-of-ms CPU calibration. 2000x catches O(n²) regression.
+    # I/O-bound async: perf_budget.best_of_async uses process_time (CPU),
+    # not wall-clock. 500 inserts → cpu_ms self-calibrating via PerfBudget;
+    # no absolute wall clock. 2000x catches O(n²) regression.
     async def _run_batch() -> None:
         inst_id = _fake_ulid()
         await _insert_instrument(pool, inst_id)
         await _insert_batch(inst_id, _venue_symbol(), t0_base - timedelta(days=1))
 
-    sample = await rb.assert_within_async(
-        _run_batch,
-        max_ratio=2000.0,
-        n=3,
-        warmup=0,
-        label=f"[DC-4 venue_listings] {n} inserts",
-    )
+    sample = await perf_budget.best_of_async(_run_batch, n=3, warmup=0)
     print(
         f"[DC-4 venue_listings] {n} inserts "
-        f"({sample.op_ms / n:.2f} ms/iter, ratio={sample.ratio:.2f}x)"
+        f"({sample.cpu_ms / n:.2f} ms/iter, cpu={sample.cpu_ms:.0f}ms)"
+    )
+    # CPU 시간 단언 — PerfBudget은 process_time 기준으로 host 속도 영향을 제거.
+    # 500건 삽입이 수백 ms대 CPU를 쓴다면 GiST 인덱스가 정상 (O(n)이면 수 초).
+    assert sample.cpu_ms < 5000, (
+        f"venue_listings {n}건 삽입 CPU 시간이 너무 큽니다: {sample.cpu_ms:.0f}ms — "
+        "GiST 인덱스가 안 타는지 확인하세요."
     )
 
 
