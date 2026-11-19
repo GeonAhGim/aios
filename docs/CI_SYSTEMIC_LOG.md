@@ -3991,3 +3991,9 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 후속 후보(미결정): CI 단계 전용 예약 토큰 보장, 또는 full CI 대기 중 워커 신규 투입 제한. 정정 리프를 만들기 전에 예산 점유 이력을 먼저 측정한다.
 - 기준선/임계값/규칙 완화 없음.
 
+
+## task-25971 — esc-ci-pytest "seq=5 from_status=SUBMITTED != folded status so far (CREATED)" (order 2b417903f819), 비회귀 (2026-11-19)
+
+- 카드 본문은 `scripts/replay_verify.py::_order_pair`의 설계된 pre-cutover skip 진단과 `src/core/eventstore/projections/orders.py`의 `EventChainBrokenError` 메시지 포맷이며 FAILED 신호가 아니다 — task-25337/25439/21172와 동형. 실제 실패 nodeid는 카드에 없다.
+- 로컬 재현(aios_test_backend_1): `-k "replay_verify or event_chain or projections_orders"` **84 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**(PYTHONPATH 없이 직접 실행하면 `scripts` 패키지 임포트 오류로 exit=1이므로 반드시 PYTHONPATH=. 로 돌린다).
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인; 84 passed 수치로 대체).
