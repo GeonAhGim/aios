@@ -24,7 +24,12 @@
 <!-- BLOCK:J2-ScriptEditorPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| TODO | | |
+| `compileScript` (`useMutation`, `ScriptEditorPage`) | `apiClient.compileScript` (`ScriptEditorPage.tsx:157`) | 사용자 클릭(컴파일 버튼, `:244`) 1회 요청. 자동 재조회/폴링 없음. | `ApiError`且`isScriptCompileErrorDetails` → `ScriptEditor` 마커로 단일 오류 표시(`:221-223`). 그 외 오류 → `ErrorMessage`(`:248-254`)에 `traceId`·`errorCode`·`message` 전달. |
+| `backtest` (`useMutation`, `CompilePreview`) | `backtestsClient.runQuickBacktest` (`:166`) | 컴파일 성공 후 "백테스트 실행" 버튼(`:138`) 1회 요청. | `backtest.isError`(`:144`) → `role="alert"` div(`:145`)에 `getApiErrorMessage` 결과 표시. 성공 시 `BacktestSummary`(`:152`). |
+| `useSearchParams` (URL `instrument_id`) | `react-router-dom` (`:159`) | URL 변경 시 자동 갱신. | 파라미터 없으면 `runBacktest`가 `throw new Error`(`:163`). |
+| `source` (`useState`) | 로컬 상태 (`:188`) | `ScriptEditor` `onChange`(`:227`)로 매 키스트roke 갱신. 초기값 `DEFAULT_SOURCE`(`:33-40`). | 편집 시 `mutation.reset()`(`:229`)로 이전 상태 클리어. |
+| `preview` (`useState` + `useEffect`) | `chart-engine` scriptPreview (`:189-190`, `:204-211`) | `mutation.data` 변경 시 `useEffect`에서 `syncScriptPreview`(`:207`)로 자동 갱신. | 동기 함수라 throw 없음. |
+| `useTranslation` (`react-i18next`) | `react-i18next` (`:18`) | 앱 시작 시 1회 로드. | i18n 키 누락 시 키 문자열 자체 표시(기본 동작). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
