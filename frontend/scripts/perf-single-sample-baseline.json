@@ -1,5 +1,4 @@
 [
-  "apps/web/src/components/InstallPrompt.depth1.test.tsx",
   "apps/web/src/components/ScriptEditor.depth1.test.tsx",
   "apps/web/src/components/ScriptEditor.test.tsx",
   "apps/web/src/components/layout/AppShell.mobileNav.depth1.test.tsx",
