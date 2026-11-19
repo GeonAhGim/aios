@@ -1,6 +1,8 @@
 # ADR-2026-09-17-A: BYOAI 에이전트 커넥터 — capability scope·Proposal 구조·보안 검토
 
 ## Status
+**보강 (2026-11-20, ADR-2026-11-20-B)**: 채널·인증·보안·도구 설계를 구체화해 MVP-2 범위로 확정했다. 인바운드(에이전트가 AIOS에 접속)만 MVP-2이고, 사용자 키를 쓰는 아웃바운드(BYOK)는 MVP-3으로 미룬다.
+
 Proposed (2026-09-17, CTO 검토 중). ideabank 2026-09-10/02에서 제안한 방향을 ADR-2026-09-05-A Agent Gateway 게이트로 구체화.
 
 ## Context
