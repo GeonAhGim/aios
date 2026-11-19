@@ -56,10 +56,10 @@
 <!-- BLOCK:J3-PortfolioPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423(LOCKED)·429(RATE_LIMIT_EXCEEDED) | 화면 상단 `Alert tone="warning"` 배너. `RATE_LIMIT_ERROR_CODE` 번역 문구 + 카운트다운 + "다시 시도" 버튼. | `notice.retryNow` (skipWait) — 대기 건너뛰기. 자동 재시도도 있음 (`interruptibleSleep`). | `RateLimitNotice` 컴포넌트 (전역, `main.tsx:29` 마운트)가 `useRateLimitNotice()` 구독. `useRetryableAction.ts:132`에서 429 감지 시 notice 발행. |
+| 서버 오류(5xx) | 503(RETRYABLE: EXCHANGE_UNAVAILABLE, DEPENDENCY_NOT_READY)·502(FATAL: EXCHANGE_FATAL)·500(FATAL: INTERNAL_ERROR) | retryable 5xx → `ErrorMessage` 컴포넌트에서 재시도 버튼 표시 (backoff 카운트다운). fatal 5xx → traceId 표시, 재시도 버튼 없음. | retryable만 backoff 재시도 (EXCHANGE_UNAVAILABLE, DEPENDENCY_NOT_READY). fatal은 재시도 불가. | `classifyServerError`(serverError.ts:39-52)가 `RETRYABLE_SERVER_ERROR_CODES`(503) vs `FATAL_SERVER_ERROR_CODES`(502/500) 분류. `classifyRetry`(retryable.ts:27-31)가 backoff/refetch/none 판정. `routeApiError`(errorRouting.ts:116-117)가 `backoff_retry`/`server_fatal` 라우팅. |
+| 네트워크 단절 | `navigator.onLine === false` 또는 fetch 실패 | `Alert tone="warning"` 배너 (상단 고정). 번역 키 `legacy.offlineBanner.t1`. 재시도 버튼 없음. | 온라인 복귀 시 자동 재시도 아님 — 사용자가 화면을 다시 interactions. React Query의 retry 옵션으로 개별 쿼리가 재시도할 수 있으나 OfflineBanner 자체는 재시도 버튼 없음. | `OfflineBanner`(OfflineBanner.tsx:7-21)가 `useOnlineStatus()` 구독. `main.tsx:30`에서 루트에 마운트. `useOnlineStatus.ts:4-19`에서 `navigator.onLine` + 이벤트 리스너. |
+| 부분 실패(일부 데이터만 실패) | positions 쿼리 성공/실패 독립, nav 쿼리 성공/실패 독립, 저널 쿼리 성공/실패 독립 | 일부 섹션만 에러 배너 표시 (예: positions는 성공했으나 nav만 실패 → nav 에러 배너만). 다른 섹션은 정상 데이터 표시. 에러 난 섹션만 `PositionsQueryError` 렌더 (404→NotFoundState, 403→ForbiddenNotice, 그 외→ErrorMessage). | 각 쿼리별 `refetch()` 배선 (onRetry). | `frontend/apps/web/src/routes/portfolio/PortfolioPositionsLive.tsx`에서 positions 쿼리 에러 (lines 91-100)와 nav 쿼리 에러 (lines 126-134)를 **독립적으로** 처리. 각 섹션이 `PositionsQueryError` 컴포넌트 렌더. `PositionJournalPanel.tsx:89`도 개별 에러 처리. |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
