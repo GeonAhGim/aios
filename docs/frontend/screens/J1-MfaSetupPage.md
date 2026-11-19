@@ -68,7 +68,9 @@
 <!-- BLOCK:J1-MfaSetupPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:109`) | TODO | TODO | TODO | TODO |
+| `<Button>` 제출 (`frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:109`, 핸들러 `handleSubmit` :67-76) | `qrDataUrl`이 설정되어야 함(`disabled={!qrDataUrl}` :109) — `setupMfa.mutate` onSuccess에서 `QRCode.toDataURL`(:57) 완료 필요. 입력 필드 `required`(:102), `loading={verifyMfa.isPending}`(:109)로 제출 중 비활성. | `verifyMfa.mutateAsync(totpCode)`(:71) 성공 → `navigate("/onboarding/risk-assessment")`(:72). `["me"]` 쿼리 무효화 (`frontend/packages/shared-hooks/src/useAuth.ts:74`). | `verifyMfa.mutateAsync` 예외 catch(:73-75) → `setVerifyError` → `MfaError`(:108) 렌더링. 화면 머묾, navigate 호출 안 됨. **400 `AUTH_MFA_INVALID`**: `MfaError`(:21) → `BadRequestNotice` 렌더링 — "코드 재입력" 버튼은 `BadRequestNotice` prop이지만 MfaSetupPage에서 인자 전달 안 함(`MfaSetupPage.tsx:21`) → **미구현(버튼 렌더링 안 됨)**. **403 `AUTH_MFA_REQUIRED`**: `http.ts:93`에서 `handleMfaStepUp`이 자동 step-up 가로채기 — step-up 성공 시 원요청 재시도, 실패 시 원래 에러 던짐. **그 외 오류**: `MfaError`(:23-31) → `ErrorMessage` 렌더링 — 재시도 버튼 prop은 MfaSetupPage에서 전달 안 함(:29) → **미구현(버튼 렌더링 안 됨)**. | `/onboarding/risk-assessment`(:72) |
+| Input Enter 제출 (`frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:99-106`, 같은 `handleSubmit` :67-76) | `qrDataUrl` 설정됨(:109 disabled 해제). Input `required`(:102). form(:98) 안에 있어 Enter 키로 `handleSubmit` 호출. | Button 제출과 동일 — `verifyMfa.mutateAsync`(:71) → `navigate("/onboarding/risk-assessment")`(:72). | Button 실패와 동일 — `MfaError`(:108) 렌더링, 화면 머뜸. | Button과 동일 — `/onboarding/risk-assessment`(:72) |
+| "← 이전 단계" 링크 (`frontend/apps/web/src/routes/onboarding/MfaSetupPage.tsx:82-83`, `backTo="/signup"`) | `AuthLayout`이 `backTo` prop 받음(:82) → `AuthLayout.tsx:24-28`에서 `<Link to={backTo}>` 렌더링. [확인] `frontend/apps/web/src/routes/auth/AuthLayout.tsx:24-28` | `/signup` 라우트로 이동. | — (링크이므로 실패 없음) | `/signup` (`frontend/apps/web/src/router.tsx` 라우트 정의 참조) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
