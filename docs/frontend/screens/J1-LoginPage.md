@@ -24,7 +24,7 @@
 <!-- BLOCK:J1-LoginPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useLogin` | `frontend/packages/shared-hooks/src/useAuth.ts:32` | TODO | TODO |
+| `useLogin` | `frontend/packages/shared-hooks/src/useAuth.ts:32` | `useMutation` 기반 변경 요청 — 사용자가 제출할 때만 `mutateAsync`로 1회 실행(:43). 자동 폴링(refetchInterval), staleTime 모두 없음(:35~41). 훅에 `retry` 옵션이 명시되지 않아 자동 재시도는 미확인 | `attemptLogin`의 `catch`(:45~48): `ApiError`면 그대로 `setError`(:46), 아니면 `t("legacy.loginPage.t9")` 문구의 `Error`로 감싸 저장. `deriveLockout(err).retryAfterSec`를 `lockoutRemainingSec`에 넣음(:47). 값 > 0이면 입력창·버튼이 `disabled={locked}`(:73, :84, :94, :111)로 비활성화되고 카운트다운 안내(:107~110)가 뜬다. `ErrorMessage`(:98~106)가 `errorCode`, `message`, `traceId`를 표시하고, 429(`backoff_retry`)일 때만 `retryAfterSec`/`onRetry` 재시도 버튼 활성화(:103~104). 성공 시 `navigate(sanitizeNextPath(...))`(:44)로 `?next` 쿼리 또는 `/dashboard`로 이동. 실패 시 `navigate` 호출 없음. `routeApiError`(60)가 오류 분류를 담당. `ApiError` 생성 경로, HTTP 오류 매핑, `deriveLockout` 판정 기준 — 미확인 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
