@@ -1,5 +1,5 @@
 {
- "_설명": "Phase 0 화면 명세 대상(J1~J3). 사실 추출기·명세 발행기의 단일 입력.",
+ "_설명": "Phase 0 화면 명세 대상(J1~J6). J4~J6는 MVP-2(ADR-2026-11-20-A) 명세이며 구현 리프는 MVP-1 기술 종결 뒤에 푼다. 사실 추출기·명세 발행기의 단일 입력.",
  "screens": [
   {
    "id": "J1-SignupPage",
@@ -114,6 +114,108 @@
    "journey": "J3",
    "route": "/notifications",
    "page": "frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx"
+  },
+  {
+   "id": "J4-SafetyControlsPage",
+   "journey": "J4",
+   "route": "/admin/safety-controls",
+   "page": "frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx"
+  },
+  {
+   "id": "J4-ReconciliationPage",
+   "journey": "J4",
+   "route": "/admin/reconciliation",
+   "page": "frontend/apps/web/src/routes/admin/ReconciliationPage.tsx"
+  },
+  {
+   "id": "J5-ResearchPage",
+   "journey": "J5",
+   "route": "/research",
+   "page": "frontend/apps/web/src/routes/research/ResearchPage.tsx"
+  },
+  {
+   "id": "J5-ReportsPage",
+   "journey": "J5",
+   "route": "/reports",
+   "page": "frontend/apps/web/src/routes/reports/ReportsPage.tsx"
+  },
+  {
+   "id": "J5-PerformanceStatementsPage",
+   "journey": "J5",
+   "route": "/portfolio/performance-statements",
+   "page": "frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx"
+  },
+  {
+   "id": "J5-WalletPage",
+   "journey": "J5",
+   "route": "/wallet",
+   "page": "frontend/apps/web/src/routes/wallet/WalletPage.tsx"
+  },
+  {
+   "id": "J5-LedgerHistoryPage",
+   "journey": "J5",
+   "route": "/wallet/ledger",
+   "page": "frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx"
+  },
+  {
+   "id": "J5-PayoutsPage",
+   "journey": "J5",
+   "route": "/wallet/payouts",
+   "page": "frontend/apps/web/src/routes/wallet/PayoutsPage.tsx"
+  },
+  {
+   "id": "J6-MyApprovalRequestsPage",
+   "journey": "J6",
+   "route": "/approval-requests",
+   "page": "frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx"
+  },
+  {
+   "id": "J6-ApprovalSettingsPage",
+   "journey": "J6",
+   "route": "/settings/approval",
+   "page": "frontend/apps/web/src/routes/settings/ApprovalSettingsPage.tsx"
+  },
+  {
+   "id": "J6-DecisionHistoryPage",
+   "journey": "J6",
+   "route": "/decisions/history",
+   "page": "frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx"
+  },
+  {
+   "id": "J6-AuditLogPage",
+   "journey": "J6",
+   "route": "/admin/audit-log",
+   "page": "frontend/apps/web/src/routes/admin/AuditLogPage.tsx"
+  },
+  {
+   "id": "J6-EvidenceChainPage",
+   "journey": "J6",
+   "route": "/admin/evidence-chain",
+   "page": "frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx"
+  },
+  {
+   "id": "J6-SessionsPage",
+   "journey": "J6",
+   "route": "/settings/sessions",
+   "page": "frontend/apps/web/src/routes/settings/SessionsPage.tsx"
+  },
+  {
+   "id": "J6-MembersPage",
+   "journey": "J6",
+   "route": "/settings/members",
+   "page": "frontend/apps/web/src/routes/settings/MembersPage.tsx"
+  },
+  {
+   "id": "J6-ConnectionsPage",
+   "journey": "J6",
+   "route": "/settings/connections",
+   "page": "frontend/apps/web/src/routes/settings/ConnectionsPage.tsx"
+  },
+  {
+   "id": "J6-AccountDeletionPage",
+   "journey": "J6",
+   "route": "/settings/account",
+   "page": "frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx"
   }
  ]
 }
