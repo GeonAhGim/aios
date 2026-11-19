@@ -24,11 +24,11 @@
 <!-- BLOCK:J3-ExecutionControlPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | TODO | TODO |
-| `useCreateExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:46` | TODO | TODO |
-| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50` | TODO | TODO |
-| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | TODO | TODO |
-| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18` | TODO | TODO |
+| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | 마운트 시 자동 조회(`queryFn: apiClient.listExecutions()` `:41`). 5초 폴링(`refetchInterval: 5000` `:42`), queryKey `["executions"]` `:40`. | 훅에 `onError`/`retry` 없음(`frontend/packages/shared-hooks/src/usePortfolio.ts:37-43`), React Query 기본 동작. 화면 전달은 소비부 확인 전까지 '미확인' — 현재 코드에서 `useExecutions` 결과(`executionsError`, `executionsIsError` `frontend/apps/web/src/routes/executions/ExecutionControlPage.tsx:155-156`)를 에러 표시에 배선하지 않음. |
+| `useCreateExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:46` | 변경 요청(`mutate`). 성공 시 `onSuccess`에서 `["executions"]` invalidate(`:56`)로 목록 즉시 갱신. | 훅에 `onError` 없음(`:46-57`), 예외가 호출부로 전파. `ExecutionControlPage.tsx:211-214` catch에서 `DuplicateSubmitError`면 silent, `ApiError`면 그대로 `setError`, 그 외는 `t("legacy.executionControlPage.t15")`("실행 생성에 실패했습니다.")로 `error` 상태 설정. `CreateExecutionError` 컴포넌트(`:43`)가 `classifyBadRequest`/`classifyForbidden`/`routeApiError`/`classifyServerError`로 분류해 `BadRequestNotice`/`ForbiddenNotice`/`ErrorMessage`로 화면 표시(`:300-302`). |
+| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50` | 변경 요청만(`mutate({ gateKind: "PRE_SUBMIT" })` `ExecutionControlPage.tsx:206`). 자동 조회·invalidate 없음(`:50-53`). | `onError` 없음, 예외가 호출부로 전파. `ExecutionControlPage.tsx:205-207` — `FF_J3_RISK_PANEL` 플래그 아래에서만 호출(기본 OFF). 훅 실패는 `submitExecution`의 try/catch 바깥(`:205-207`)에서 catch되지 않음 — '미확인'. |
+| `useIdempotentSubmit` | `frontend/apps/web/src/hooks/useIdempotentSubmit.ts:30` | 변경 요청을 감싸는 래퍼. `inFlightRef`로 동시 제출 가드(`:36-38`), `DuplicateSubmitError` 던짐(`:37`). 같은 키 재사용(`manager.getOrCreateKey` `:40`). 성공 시 키 폐기(`manager.discardKey` `:43`). | 예외를 다시 던짐(`:61`). 409 `new_key`·`missing_header`는 자동 재제출 안 함(`:46-50` 주석). `isNonRetryableFailure`로 4xx면 키 폐기(`:58-59`). 5xx/네트워크 오류는 키 유지(재시도 가능). |
+| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18` | 변경 요청 래퍼. 1차 실패이 `classifyStateConflict(err) === "refetch_retry"`(`:27`)이면 `refetch()` 후 1회 재시도(`:28-29`). | 재시도 후에도 실패하면 그대로 throw, 무한 재시도 금지(`:12` 주석). `ExecutionControlPage.tsx:181-197`에서 `createExecutionWithRetry`로 사용하고, `submitExecution`의 catch(`:211-214`)가 최종 수신. `refetch` 인자는 `useExecutions`의 `refetch`(`:154`). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
