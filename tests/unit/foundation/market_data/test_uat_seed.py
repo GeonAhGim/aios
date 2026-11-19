@@ -105,3 +105,37 @@ async def test_network_failure_returns_reason_not_exception(pool):
         assert entry["ingested"] is False
         assert "TimeoutError" in str(entry["reason"])
     assert await _instrument_count(pool) == 3
+
+
+class _PartialFailSource(_FakeSource):
+    """Fails only for one raw symbol; the other symbols must still be seeded."""
+
+    def __init__(self, bad_symbol: str) -> None:
+        super().__init__()
+        self.bad_symbol = bad_symbol
+
+    async def fetch_candles(self, venue, raw_symbol, tf, start, end):
+        if raw_symbol == self.bad_symbol:
+            self.calls += 1
+            raise TimeoutError("network down")
+        return await super().fetch_candles(venue, raw_symbol, tf, start, end)
+
+
+async def test_partial_failure_isolates_the_failing_symbol(pool):
+    bad = SEED_SYMBOLS[1]
+    res = await seed_uat_market_data(
+        pool, now=datetime.now(UTC), fetch_source=_PartialFailSource(bad)
+    )
+    assert res[bad]["ingested"] is False and "TimeoutError" in str(res[bad]["reason"])
+    healthy = [s for s in SEED_SYMBOLS if s != bad]
+    assert all(res[s]["ingested"] is True for s in healthy)
+    assert await _instrument_count(pool) == 3
+
+
+async def test_failed_run_then_rerun_recovers_without_reregistering(pool):
+    now = datetime.now(UTC)
+    await seed_uat_market_data(pool, now=now, fetch_source=_FakeSource(fail=True))
+    res = await seed_uat_market_data(pool, now=now, fetch_source=_FakeSource())
+    assert all(e["registered"] is False for e in res.values())
+    assert all(e["ingested"] is True for e in res.values())
+    assert await _instrument_count(pool) == 3
