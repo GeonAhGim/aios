@@ -54,6 +54,7 @@ async def test_pytest_reports_the_polluting_module_after_finalizers(
         os.environ,
         SENTINEL_TEST_URL=clone_url,
         LEAVE_RESIDUE=str(int(leave_residue)),
+        PYTHONIOENCODING="utf-8",
         PYTHONPATH=str(Path(__file__).resolve().parents[3]),
     )
     result = subprocess.run(
@@ -72,6 +73,8 @@ async def test_pytest_reports_the_polluting_module_after_finalizers(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     output = result.stdout + result.stderr
