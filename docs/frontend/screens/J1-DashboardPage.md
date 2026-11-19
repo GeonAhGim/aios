@@ -24,12 +24,12 @@
 <!-- BLOCK:J1-DashboardPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `usePauseExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:111` | TODO | TODO |
-| `useStartExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:60` | TODO | TODO |
-| `useRiskProfile` | `frontend/packages/shared-hooks/src/useSuitability.ts:6` | TODO | TODO |
-| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | TODO | TODO |
-| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | TODO | TODO |
-| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | TODO | TODO |
+| `usePauseExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:111` | mutation(단일 호출). `mutate(executionId)`로 각 RUNNING 실행 건마다 개별 호출(DashboardPage.tsx:72). 성공 시 `onSuccess`가 `queryClient.invalidateQueries({ queryKey: ["executions"] })`로 executions 쿼리 무효화(usePortfolio.ts:115). | `onError: (err) => setStopError(err)`로 상태 저장(DashboardPage.tsx:72). `stopError`이 null이 되면 `EmergencyStopError` 컴포넌트(DashboardPage.tsx:36-47)가 `classifyForbidden` 경로로 `ForbiddenNotice`(DashboardPage.tsx:37) 또는 `routeApiError`로 `ErrorMessage`(DashboardPage.tsx:38) 표시. trace_id는 `ErrorMessage`에 전달됨(DashboardPage.tsx:43). |
+| `useStartExecution` | `frontend/packages/shared-hooks/src/usePortfolio.ts:60` | mutation(단일 호출). `mutateAsync({ executionId, idempotencyKey })`로 재개 시 한 건 호출(DashboardPage.tsx:77-78). idempotencyKey 형식: `dashboard-resume-${executionId}-${crypto.randomUUID()}`. 성공 시 `onSuccess`가 executions 쿼리 무효화(usePortfolio.ts:70). | `.catch((err) => setStopError(err))`로 상태 저장(DashboardPage.tsx:80). 같은 `EmergencyStopError` 경로로 표시(DashboardPage.tsx:86). |
+| `useRiskProfile` | `frontend/packages/shared-hooks/src/useSuitability.ts:6` | query(1회 조회). 폴링 없음, staleTime 기본(QueryClient 기본값). `enabled: !!token`(useSuitability.ts:11) — 토큰 있을 때만 조회. queryKey: `["riskProfile"]`. | DashboardPage.tsx:135에서 `data: riskProfile`만 destructures. `isError`/`error` destructuring 없음. 위험등급 뱃지 표시 실패 시 사용자 피드백 없음. |
+| `usePortfolio` | `frontend/packages/shared-hooks/src/usePortfolio.ts:11` | query(1회 조회). 폴링 없음, staleTime 기본. queryKey: `["portfolio"]`. | DashboardPage.tsx:139-140에서 `isError`/`error`를 destructures하지만, 포트폴리오 데이터 실패 시 화면에 오류를 표시하는 UI가 없음(포트폴리오 요약 섹션이 단순히 비어 있음). |
+| `useExecutions` | `frontend/packages/shared-hooks/src/usePortfolio.ts:37` | query(5초 폴링). `refetchInterval: 5000`(usePortfolio.ts:42). 주석 "FD-16.4 실시간성 요구 — 5초 폴링(Draft, 17번 문서 §17.4와 동일 원칙)". queryKey: `["executions"]`. | DashboardPage.tsx:142에서 `isError`를 destructures하지만(`executionsIsError`), 실행 중인 전략/긴급 정지 섹션에서 isError 분기 없음. executions 데이터 실패 시 빈 상태("현재 실행 중인 운용이 없습니다.")가 대신 표시됨(DashboardPage.tsx:114). |
+| `useNotificationHistory` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:45` | query(1회 조회). 폴링 없음, staleTime 기본. queryKey: `["notificationHistory", eventType]`. eventType 인자 없음(전체 알림). | DashboardPage.tsx:146-147에서 `isError`/`error`를 destructures(`notificationsError`/`notificationsErrorObj`). notificationsError가 true면 `<ErrorMessage>` 표시(DashboardPage.tsx:244-247). errorCode와 message 전달. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
