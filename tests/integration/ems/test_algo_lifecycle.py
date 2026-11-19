@@ -91,6 +91,32 @@ async def test_tick_algo_skips_slices_not_yet_due(pool):
     assert await _committed_qty(pool, parent_id) == Decimal("0")  # unchanged
 
 
+async def test_tick_algo_denies_when_slice_would_overcommit_parent_qty(pool):
+    """Negative 1 -- reservation fails closed (`AlgoConstraintError`,
+    EM-A1) before `submit_child` is ever called."""
+    user_id = await create_test_user(pool)
+    parent_id = await _insert_order(
+        pool, user_id, quantity=Decimal("5"), committed_child_qty=Decimal("3")
+    )
+    now = datetime.now(UTC)
+    plan = AlgoRunPlan(
+        parent=_parent_order(parent_id, qty=Decimal("5")),
+        children=[_child(parent_id, 0, Decimal("4"), scheduled_at=now - timedelta(seconds=1))],
+    )
+    submitter = _RecordingSubmitter()
+
+    result = await tick_algo(
+        plan, pool=pool, orders_repo=PostgresOrderRepository(), submit_child=submitter, now=now
+    )
+
+    assert len(result.outcomes) == 1
+    assert result.outcomes[0].order is None
+    assert result.outcomes[0].denied_reason is not None
+    assert submitter.calls == []  # never reached submit_order
+    assert plan.submitted_slice_seqs == set()
+    assert await _committed_qty(pool, parent_id) == Decimal("3")  # unchanged
+
+
 async def test_tick_algo_denies_when_parent_is_terminal(pool):
     """Negative 2 -- EM-A4: a terminal parent rejects new child reservation."""
     user_id = await create_test_user(pool)
