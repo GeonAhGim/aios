@@ -16,7 +16,7 @@
 | 주 페르소나(P1~P11) | P1 개인 트레이더 (보조 후보 P5 자산운용사는 다중 고객 화면이 [미확인]이라 단정하지 않음; `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`, `:26`) |
 | 목적(한 문장) | 총 포트폴리오 가치·미배분 현금·배분 내역을 보고 실행별 배분 자본을 조정(리밸런스)한다 (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:115`, `:137`, `:174`) |
 | 진입 조건 | `/portfolio`는 `protect()`로 감싸져 `ProtectedRoute`(로그인 가드)만 거친다 (`frontend/apps/web/src/router.tsx:133`, `:70-72`). `AdminRoute`는 없고 기능 플래그 가드도 이 라우트에는 없다. `ProtectedRoute` 내부 동작은 미확인 |
-| 사용자 준비물 | 로그인 세션, 배분된 실행(allocation)이 있어야 표에서 재조정 가능(없으면 빈 상태 안내, `PortfolioPage.tsx:179`). 재조정 입력값은 실행별 새 배분 자본(숫자) (`PortfolioPage.tsx:147`, `:160-165`). 그 외 계좌·권한 요건은 미확인 |
+| 사용자 준비물 | 로그인 세션, 배분된 실행(allocation)이 있어야 표에서 재조정 가능(없으면 빈 상태 안내, `PortfolioPage.tsx:181`). 재조정 입력값은 실행별 새 배분 자본(숫자) (`PortfolioPage.tsx:147`, `:160-165`). 그 외 계좌·권한 요건은 미확인 |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
