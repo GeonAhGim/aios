@@ -35,10 +35,11 @@
 <!-- BLOCK:J2-ScreenerPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `submitted !== null && query.isLoading` (`ScreenerPage.tsx:313`) | `<LoadingState />` (`ScreenerPage.tsx:313`) | 대기 | 구현됨 (`ScreenerPage.tsx:313`) |
+| 빈 상태 (미실행) | `submitted === null` (`ScreenerPage.tsx:312`) | `<EmptyState>{t("screener.results.beforeRun")}</EmptyState>` → "필터를 구성하고 실행하세요." (`ScreenerPage.tsx:312`, `facts:36`) | 필터 구성 후 `handleRun` (`ScreenerPage.tsx:171-177`) 클릭 | 구현됨 (`ScreenerPage.tsx:312`) |
+| 빈 상태 (실행 후 결과 없음) | `submitted !== null && !query.isError && !query.isLoading && rows.length === 0` (`ScreenerPage.tsx:317-318`) | `<EmptyState>{t("screener.results.empty")}</EmptyState>` → "조건에 맞는 종목이 없습니다." (`ScreenerPage.tsx:317-318`, `facts:37`) | 필터 조건 수정 후 `handleRun` 재실행 | 구현됨 (`ScreenerPage.tsx:317-318`) |
+| 정상 | `rows.length > 0` (`ScreenerPage.tsx:320`) | 총 개수 `screener.results.totalLabel` (`ScreenerPage.tsx:322-324`), 1,000행 상한 초과 시 `screener.results.truncated` 경고 (`ScreenerPage.tsx:325`), 각 행에 심볼+Badge+`screener.results.viewInChart` 링크 (`ScreenerPage.tsx:327-341`) | 각 행의 차트 링크로 이동(`/chart?instrument_id=...`), 필터 수정 후 재실행 | 구현됨 (`ScreenerPage.tsx:320-344`) |
+| 낡은 데이터(신선도 초과) | — | — | — | 없음 — `refetchInterval` 지정 없음, `staleTime`도 명시하지 않음(`ScreenerPage.tsx:143-147`). 라이브러리 기본값의 실제 stale 시간은 `main.tsx:15`의 `new QueryClient()` 옵션 없음으로 미확인 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
