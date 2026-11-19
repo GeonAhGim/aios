@@ -19,6 +19,8 @@
     "test:hardcoded-colors": "node --test scripts/check_hardcoded_colors.test.mjs",
     "check:a11y-baseline": "node scripts/check_a11y_baseline.mjs",
     "test:a11y-baseline": "node --test scripts/check_a11y_baseline.test.mjs",
+    "check:perf-single-sample": "node scripts/check_perf_single_sample.mjs",
+    "test:perf-single-sample": "node --test scripts/check_perf_single_sample.test.mjs",
     "check:lockfile-workspaces": "node scripts/check_lockfile_workspaces.mjs",
     "test:lockfile-workspaces": "node --test scripts/check_lockfile_workspaces.test.mjs",
     "bench:density": "npm run bench:density --workspace=packages/chart-engine",

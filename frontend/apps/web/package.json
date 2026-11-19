@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:e2e": "vite build",
-    "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs && node ../../scripts/check_hardcoded_colors.mjs && node ../../scripts/check_a11y_baseline.mjs",
+    "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs && node ../../scripts/check_hardcoded_colors.mjs && node ../../scripts/check_a11y_baseline.mjs && node ../../scripts/check_perf_single_sample.mjs",
     "preview": "vite preview",
     "serve:e2e": "vite build && vite preview --strictPort",
     "test": "vitest run",
