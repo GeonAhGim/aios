@@ -13,10 +13,10 @@
 <!-- BLOCK:J1-ExchangeManagementPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1(개인 트레이더) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22`(P1 = 개인 트레이더(투자자), 핵심 과업: 전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독). 거래소 연동은 J1("시작·온보딩")의 선행 단계로 P1 전용 [확인] |
+| 목적(한 문장) | 거래소 API 인증 정보를 등록·해지하고 연결된 거래소의 포트폴리오 현황을 확인하여 모의/실제 거래를 위한 데이터 경로를 확보한다 |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:115` — `/exchanges` 라우트. `protect()`(`router.tsx:70` → `ProtectedRoute`, `ProtectedRoute.tsx:9`) 감싸짐: (1) 인증 토큰 필요(`ProtectedRoute.tsx:20`), (2) `me` 클레임 존재(`ProtectedRoute.tsx:29`), (3) MFA 미활성 시 `/onboarding/mfa-setup`로 리다이렉트(`ProtectedRoute.tsx:32-34`), (4) MFA 활성화且 위험 프로필 미작성 시 `/onboarding/risk-assessment`로 리다이렉트(`ProtectedRoute.tsx:35-41`). 이 조건을 모두 통과한 인증 사용자만 접근 가능 [확인]. 기능 플래그 없음 [확인] |
+| 사용자 준비물 | 로그인(토큰 확보), MFA 설정(또는 `/onboarding/mfa-setup` 완료), 위험 프로필 작성(MFA 활성화 시 필요, `ProtectedRoute.tsx:35-41`), 거래소 API 키/시크릿(또는 패스프레이즈 — 거래소별 상이, Bitget은 패스프레이즈 필요 `ExchangeManagementPage.tsx:82`) [확인] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
