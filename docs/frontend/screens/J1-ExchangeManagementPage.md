@@ -24,12 +24,12 @@
 <!-- BLOCK:J1-ExchangeManagementPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useExchangeCredentials` | `frontend/packages/shared-hooks/src/useExchanges.ts:5` | TODO | TODO |
-| `useRegisterExchangeCredential` | `frontend/packages/shared-hooks/src/useExchanges.ts:12` | TODO | TODO |
-| `useRevokeExchangeCredential` | `frontend/packages/shared-hooks/src/useExchanges.ts:20` | TODO | TODO |
-| `useExchangeBalance` | `frontend/packages/shared-hooks/src/useExchanges.ts:28` | TODO | TODO |
-| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | TODO | TODO |
-| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18` | TODO | TODO |
+| `useExchangeCredentials` | `frontend/packages/shared-hooks/src/useExchanges.ts:5` | `useQuery` — 1회 조회(폴링 옵션 미설정). 수동 `refetch()` 호출: 등록/해지 `onSuccess` 시 `qc.invalidateQueries({ queryKey: ["exchangeCredentials"] })`로 자동 refetch(`useExchanges.ts:16,24`), 화면에서 수동 refetch 버튼 없음 [확인] | `ApiError` 발생 시 react-query의 기본 동작: `error` 상태에 쌓이지만 화면에 표시하는 코드 없음(`ExchangeManagementPage.tsx:21`에서 `error` 변수는 등록 전용 [확인]) |
+| `useRegisterExchangeCredential` | `frontend/packages/shared-hooks/src/useExchanges.ts:12` | `useMutation` — `mutateAsync()` 호출 시 POST `/api/v1/exchange-credentials` 1회 전송. `postIdempotent` 자동 생성: 키 미전송 시 16~128자 Idempotency-Key 자동 생성(`frontend/packages/api-client/src/clients/exchange.ts:54`, `frontend/packages/api-client/src/clients/exchange.test.ts:50`). `onSuccess` 시 `exchangeCredentials` 무효화(`useExchanges.ts:16`) [확인] | `mutateAsync`가 `ApiError` 던짐. 화면(`ExchangeManagementPage.tsx:78-84`)에서 `registerWithRetry()` 호출 후 `catch` 블록(`:96-101`)이 `ApiError`면 그대로, 아니면 `t("legacy.exchangeManagementPage.t2")`("등록에 실패했습니다.")로 오류 메시지 생성. `setFromError(err)`로 필드별 오류 추출(`useFieldErrors.ts:19` → `extractFieldErrors`) [확인] |
+| `useRevokeExchangeCredential` | `frontend/packages/shared-hooks/src/useExchanges.ts:20` | `useMutation` — `mutateAsync(exchange)` 호출 시 DELETE `/api/v1/exchange-credentials/:exchange` 1회 전송(`frontend/packages/api-client/src/clients/exchange.ts:61-63`). `onSuccess` 시 `exchangeCredentials` 무효화(`useExchanges.ts:24`) [확인] | `mutateAsync`가 `ApiError` 던짐. 화면(`ExchangeManagementPage.tsx:50-60`)에서 `performRevoke` → `revokeWithRetry` 호출 후 `catch`가 `revokeError` 상태에 `{exchange, error}` 저장. `ApiError`면 그대로, 아니면 "해지에 실패했습니다." [확인] |
+| `useExchangeBalance` | `frontend/packages/shared-hooks/src/useExchanges.ts:28` | `useQuery` — `enabled: !!exchange`(`useExchanges.ts:32`). `selectedExchange` 상태(`ExchangeManagementPage.tsx:37`)가 truthy일 때만 GET `/api/v1/exchange-credentials/:exchange/balance` 조회. 폴링 옵션 미설정 — 1회 조회 [확인] | `ApiError` 발생 시 react-query 기본 동작. `ExchangeManagementPage.tsx:38`에서 `data: balances`만 destrucure — `error`/`isLoading` 미사용. `CredentialListCard`로 전달되지 않음 [확인] |
+| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | 로컬 상태 훅 — 외부 API 호출 없음. `setFromError(err)`가 `extractFieldErrors(err)` 호출하여 `Record<string, string>` 세팅(`useFieldErrors.ts:19`). `clearField(field)`가 해당 필드 오류만 삭제(`useFieldErrors.ts:22-28`) [확인] | `extractFieldErrors`가 필드 오류가 없는 오류 타입이면 빈 객체 `{}` 반환. `setFromError(null)` 호출 시 상태 변경 없음(React state setter에 null 전달, 기존 값 유지) [확인] |
+| `useConflictRetry` | `frontend/apps/web/src/hooks/useConflictRetry.ts:18` | `mutate` 함수 래퍼. 409 중 `classifyStateConflict(err) === "refetch_retry"`일 때만 `refetch()` 1회 후 `mutate` 재시도 정확히 1회(`useConflictRetry.ts:27-29`). 그 외 409(idempotency, invalid_transition)·400·5xx는 즉시 재던짐. 무한 재시도 금지 [확인] | 재시도 후에도 실패하면 원본 `ApiError`가 `catch` 블록으로 전파. 호출부(`ExchangeManagementPage.tsx:53-57, 96-101`)가 `error` 상태에 적재하여 사용자에게 안내 [확인] |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
