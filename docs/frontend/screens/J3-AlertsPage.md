@@ -24,10 +24,10 @@
 <!-- BLOCK:J3-AlertsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useMyAlerts` | `frontend/packages/shared-hooks/src/useAlerts.ts:5` | TODO | TODO |
-| `useIndicators` | `frontend/packages/shared-hooks/src/useStrategyBuilder.ts:10` | TODO | TODO |
-| `useCreateAlert` | `frontend/packages/shared-hooks/src/useAlerts.ts:12` | TODO | TODO |
-| `useCancelAlert` | `frontend/packages/shared-hooks/src/useAlerts.ts:20` | TODO | TODO |
+| `useMyAlerts` | `frontend/packages/shared-hooks/src/useAlerts.ts:5` | 1회 조회(`useQuery`에 폴링 설정 없음, `frontend/packages/shared-hooks/src/useAlerts.ts:6-9`). `useCreateAlert.onSuccess`/`useCancelAlert.onSuccess`에서 `qc.invalidateQueries({ queryKey: ["myAlerts"] })`(`frontend/packages/shared-hooks/src/useAlerts.ts:16`, `frontend/packages/shared-hooks/src/useAlerts.ts:24`)로 무효화 후 자동 재조회 | react-query 기본: 로딩/에러 상태 설정. AlertsPage:77에서 `isLoading` 분기, `LoadingState` 표시(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:132`) |
+| `useIndicators` | `frontend/packages/shared-hooks/src/useStrategyBuilder.ts:10` | 1회 조회(`useQuery`에 폴링 설정 없음, `frontend/packages/shared-hooks/src/useStrategyBuilder.ts:11`) | `indicatorList?.indicators ?? ["RSI", "SMA", "EMA"]`로 기본값 폴백(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:104`) |
+| `useCreateAlert` | `frontend/packages/shared-hooks/src/useAlerts.ts:12` | 버튼 클릭(`AlertsPage.tsx:222`) 시 1회 POST(`apiClient.createAlert`, `frontend/packages/shared-hooks/src/useAlerts.ts:15`). 성공 시 `myAlerts` 쿼리 무효화(`frontend/packages/shared-hooks/src/useAlerts.ts:16`) | `setError(err)`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:127`) → `CreateAlertError` 컴포넌트가 `classifyBadRequest`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:35`) → `BadRequestNotice`, `classifyForbidden`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:36`) → `ForbiddenNotice`, 그 외 `routeApiError`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:37`) → `ErrorMessage`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:39`)로 라우팅 |
+| `useCancelAlert` | `frontend/packages/shared-hooks/src/useAlerts.ts:20` | 버튼 클릭(`AlertsPage.tsx:263`) 시 1회 PATCH(`apiClient.cancelAlert`, `frontend/packages/shared-hooks/src/useAlerts.ts:23`). 성공 시 `myAlerts` 쿼리 무효화(`frontend/packages/shared-hooks/src/useAlerts.ts:24`) | mutation error 상태가 설정되나 AlertsPage에서는 `loading={cancelAlert.isPending}`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:267`) 외 별도 오류 표시 없음. 실패 시 버튼이 비활성화되지 않고 원래 상태로 복귀 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
