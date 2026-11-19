@@ -24,7 +24,7 @@ from uuid import uuid4
 import asyncpg
 
 from src.data.models.base import AssetClass
-from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.api import PostgresAuditEventRepository
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.adapters.postgres_calendar_repository import (
     PostgresCalendarRepository,
