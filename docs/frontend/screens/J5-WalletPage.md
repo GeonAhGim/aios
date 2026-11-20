@@ -34,10 +34,10 @@
 <!-- BLOCK:J5-WalletPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading`이 `true`일 때 (`WalletPage.tsx:13`, `:51`) | 잔액 자리에 `…` 표시 (`:51`). 이 문구는 사실 시트 키가 없는 하드코딩 리터럴. 제출 버튼은 `requestTopup.isPending`일 때 `loading` 속성으로 비활성화 (`:83`) | 없음 | 구현됨(`:51`), 문구 `…`은 시트 키 없음 |
+| 빈 상태 | 잔액이 `0`이거나 `balance`가 `undefined`일 때 (`:51`) | `0 크레딧` 표시 (`:51`). 별도 빈 상태 UI 없음. 신청 내역 목록 없음. | 충전 금액 입력 및 신청 | 구현됨(`:51`), 단 갭: `useWalletBalance`의 `error`를 구조분해하지 않아 (`:13`) 조회 실패 시에도 `0 크레딧`으로 오표시 |
+| 정상 | `balance?.balance`가 `undefined`가 아닌 값으로 조회 성공 | `${balance} 크레딧` (`:51`), 입금 안내 `legacy.walletPage.t4` (`:69`). 신청 성공 시 `legacy.walletPage.t5` 접수 알림 (`:80-81`) | 충전 금액 수정, 충전 신청 버튼 클릭 | 구현됨 |
+| 낡은 데이터(신선도 초과) | dataUpdatedAt이 staleTime(React Query 기본 5분)을 초과했으나 재페치 안 된 상태. useWalletBalance에 staleTime/refetchOnWindowFocus 명시 설정 없음 (`useWallet.ts:6-9`). 충전 성공 시 walletBalance 쿼리 무효화 (`useWallet.ts:17`) | 화면에 신선도 표시·경고 없음 (`:13`). dataUpdatedAt/isStale 사용 안 함 | 창 포커스 시 React Query 기본 refetchOnWindowFocus: true로 재조회 (기본값) | 없음 (신선도 표시·경고 UI 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
