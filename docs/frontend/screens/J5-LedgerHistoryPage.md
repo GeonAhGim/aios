@@ -33,10 +33,10 @@
 <!-- BLOCK:J5-LedgerHistoryPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `query.isLoading`이 true — `LedgerHistoryPage.tsx:82`에서 `LedgerEntryList`에 `isLoading={true}` 전달 | `LedgerEntryList`가 `<LoadingState />` 렌더(회색 로딩 인디케이터) | 사용자 상호작용 비활성화(로딩 중에는 버튼도 `disabled` 상태) | 구현됨 — `frontend/apps/web/src/components/LedgerEntryList.tsx:115-116` |
+| 빈 상태 | `query.data`가 있고 `entries.length === 0`, `query.isError` false — `LedgerHistoryPage.tsx:82`의 entries prop이 빈 배열 | `<EmptyState>` 컴포넌트 표시, 문구 키 `legacy.ledgerEntryList.t10` | "이전" 버튼(`cursorPage.hasPrev`일 때 활성화, `LedgerHistoryPage.tsx:87-88`), "다음" 버튼(`cursorPage.hasNext`일 때 활성화, `LedgerHistoryPage.tsx:89-90`) | 구현됨 — `frontend/apps/web/src/components/LedgerEntryList.tsx:119-120` |
+| 정상 | `query.data`가 있고 `entries`가 비어 있지 않으며 `query.isError` false | `<PageHeader>` 제목 `legacy.ledgerHistoryPage.title1`("원장 내역", `LedgerHistoryPage.tsx:69`), `<DataFreshness>`로 `as_of` 기준 시각·경과 시간 표시(70), `<LedgerEntryList>`가 각 엔트리를 `<JournalEntryCard>`로 렌더(82), 하단에 페이지네이션 버튼(85-92) | "이전" 버튼 → `cursorPage.prev` 호출 → cursor 변경 → `useQuery`가 새 `queryKey`로 재조회(87-88), "다음" 버튼 → `cursorPage.next` 동일 흐름(89-90) | 구현됨 — `frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx:68-92`, `frontend/apps/web/src/hooks/useCursorPage.ts:32-42` |
+| 낡은 데이터(신선도 초과) | `DataFreshness` 내부 `deriveFreshness`가 `isStale: true` 반환 — `ageSec >= staleAfterSec`일 때(`frontend/packages/api-client/src/envelope.ts:127`), 기본 `staleAfterSec=300`(`frontend/apps/web/src/components/DataFreshness.tsx:20`) | `DataFreshness`가 `legacy.dataFreshness.t2`("N분 전") 텍스트와 `legacy.dataFreshness.t3`("낡음") 경고 배지 렌더(`frontend/apps/web/src/components/DataFreshness.tsx:32-37`) | 명시적 새로고침 버튼 없음. "이전"/"다음" 페이지네이션 시 새 queryKey로 자동 재조회. 에러 표시 컴포넌트의 재시도 핸들러는 에러 상태에서만 표시되므로 신선도 초과 시에는 동작하지 않음 | 구현됨 — `frontend/apps/web/src/components/DataFreshness.tsx:34-36`, `frontend/packages/api-client/src/envelope.ts:127` |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
