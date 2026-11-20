@@ -92,7 +92,12 @@
 <!-- BLOCK:J1-ExchangeManagementPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| TODO | | |
+| 등록 실패 (submitRegistration catch) | `legacy.exchangeManagementPage.t2` → "등록에 실패했습니다." (`ExchangeManagementPage.tsx:100`) | `RegisterCredentialError` 컴포넌트(`RegisterCredentialForm.tsx:89`)가 taxonomy 분류: (1) 403 → `ForbiddenNotice` (`errorMessage.t1` trace_id) (2) 400 → `BadRequestNotice` (`getApiErrorMessage(errorCode, message)` 매핑) (3) 5xx/429 → `ErrorMessage` + "다시 시도" 버튼 (`errorMessage.t2` 카운트다운, `t3`) (`ExchangeCredentialErrors.tsx:27-50`) | 예 — `error instanceof ApiError ? error.traceId : null` (`ExchangeCredentialErrors.tsx:45`) |
+| 등록 필드 오류 (submitRegistration → setFromError) | `useFieldErrors`가 `extractFieldErrors`로 필드별 오류 추출 (`ExchangeManagementPage.tsx:101`, `useFieldErrors.ts:19`) | 각 Field 컴포넌트의 `error` prop에 표시 (`RegisterCredentialForm.tsx:48,57,65,74`) — 인라인 필드 오류 배너. `fieldErrors`가 비어 있으면 `RegisterCredentialError`의 `ErrorMessage`도 병렬 노출 | 예 — ApiError.traceId가 ErrorMessage로 전달 (`ExchangeCredentialErrors.tsx:45`) |
+| 해지 실패 (performRevoke catch) | `err instanceof ApiError ? err : new Error("해지에 실패했습니다.")` (`ExchangeManagementPage.tsx:56`) — ApiError면 `redactSecret(error.message)`, 아니면 고정 문구 | `RevokeCredentialError` 컴포넌트(`CredentialListCard.tsx:84`)가 taxonomy 분류: (1) 403 → `ForbiddenNotice` (2) 400 → `BadRequestNotice` (3) 5xx/429 → `ErrorMessage` + 재시도 버튼 (`ExchangeCredentialErrors.tsx:53-67`) | 예 — `error instanceof ApiError ? error.traceId : null` (`ExchangeCredentialErrors.tsx:63`) |
+| 해지 재시도 버튼 (handleRetryRevoke) | — (재시도 버튼 클릭 시 재호출) | `handleRetryRevoke()`(`ExchangeManagementPage.tsx:67-72`)가 `revokeError` 상태를 null로 초기화 후 `performRevoke` 재호출 | 동일 경로 |
+| 포지션 조회 실패 (ExchangePositionsCard) | `exchangePositions.notFoundTitle` → "이 거래소의 자격증명이 없습니다." (`catalog.ko.ts:36`) — NotFoundState title | `PositionsQueryError` 컴포넌트 재사용 (`ExchangePositionsCard.tsx:47-50`): (1) 404 RESOURCE_NOT_FOUND → `NotFoundState` (재시도 버튼 없음) (2) 403 → `ForbiddenNotice` (3) 5xx/429 → `ErrorMessage` + 재시도 (`ExchangePositionsCard.tsx:50`) | 예 — `error instanceof ApiError ? error.traceId : null` (`PositionsQueryError.tsx:32`) |
+| 등록 폼 secret 노출 방지 | — (보안 동작) | F-5(task-10642): 등록 실패 시 `apiSecret`/`apiPassphrase`가 빈 문자열로 초기화됨 (`ExchangeManagementPage.tsx:97-98`). `secretsCleared` 상태가 true가 되면 `RegisterCredentialForm.tsx:83-86`에서 `t("legacy.registerCredentialForm.secretsClearedNotice")` 배너 노출 | 해당 없음 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
