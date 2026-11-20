@@ -44,10 +44,10 @@
 <!-- BLOCK:J6-MembersPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 폼 제출 시 서버 400 반환. 브라우저 `required` 검증(`MembersPage.tsx:267`)은 클라이언트 측만. 서버 400 전용 분기 없음. | `handleGrant` catch(`MembersPage.tsx:193-195`) → `setActionError(err)` → `MutationErrorBanner`(`MembersPage.tsx:98`) → `classifyMembershipError(err)`(`MembersPage.tsx:99`) → `last_owner_denied` 아님 → `classifyForbidden(err)`(`MembersPage.tsx:101`) → null(400는 403 아님) → `ErrorMessage(message=describeMembershipError(...))`(`MembersPage.tsx:102`). 서버 400 전용 UI 분기는 없고 고정 문구로만 표시. | 없음. `refresh()` 미호출. 버튼 다시 활성화. | 부분 |
+| 인증 필요/세션 만료(401) | API 호출 시 토큰 만료로 401 반환. 토큰은 `useAuthStore.getState().token`(`MembersPage.tsx:162`) 공급. 로그인 리다이렉트 코드는 이 파일에 없음. | 목록 조회 실패: `ListErrorBanner`(`MembersPage.tsx:83-96`) → `classifyForbidden` null → `routeApiError`(`MembersPage.tsx:24,85`) → auth_required kind → `ErrorMessage`(`MembersPage.tsx:88-94`). 뮤테이션 실패: `MutationErrorBanner`(`MembersPage.tsx:98-102`) → `classifyMembershipError` → unknown_denied → `ErrorMessage(message=describeMembershipError("unknown_denied"))` → "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요." | 없음. `ErrorMessage`는 auth_required에 대해 재시도 버튼 안 봄(retryable 분류 "none"). | 부분 |
+| 권한 없음/MFA 필요(403) | API 호출 시 403 반환. `classifyForbidden`(`MembersPage.tsx:19,84,101`)이 네 갈래(mfa_required/tenant_mismatch/policy/forbidden)로 분류. 버튼 `title` `NO_PERMISSION_TITLE`(`MembersPage.tsx:64,129,138,290`)는 403 응답이 아니라 `canManage=false` 사전 차단. 마지막 소유자 거부 403(`POLICY_*`/`RISK_*`)은 `classifyMembershipError`(`MembersPage.tsx:99-100`)가 `last_owner_denied`로 먼저 잡음. | 목록 조회 실패: `ListErrorBanner`(`MembersPage.tsx:84`) → `classifyForbidden` 참 → `ForbiddenNotice`(`MembersPage.tsx:84`). 뮤테이션 실패: `MutationErrorBanner`(`MembersPage.tsx:101`) → `classifyForbidden` 참 → `ForbiddenNotice`(`MembersPage.tsx:101`). `ForbiddenNotice`(`ForbiddenNotice.tsx:36`)는 `getApiErrorMessage`로 문구 표시(예: AUTHZ_FORBIDDEN → "이 작업을 수행할 권한이 없습니다.", `POLICY_*` → "정책에 의해 거부된 요청입니다. 세부 사유를 확인해주세요."). MFA일 때 `ForbiddenNotice`(`ForbiddenNotice.tsx:42-46`)가 `onStepUp` 버튼 표시하지만 MembersPage는 `onStepUp`을 전달하지 않음. | MFA일 때 `onStepUp` 가능하지만 MembersPage 미전달. 나머지 재시도 없음. | 부분 |
+| 충돌/상태 불일치(409) | grant/suspend/revoke 중 409 반환. `classifyMembershipError`(`MembersPage.tsx:99`) → `routeApiError`가 invalid_transition(409) → `last_owner_denied`. | `ErrorMessage(message=describeMembershipError("last_owner_denied"))`(`MembersPage.tsx:100`) → "테넌트에는 활성 소유자(OWNER)가 최소 1명 있어야 합니다." | 없음. `refresh()` 호출 안 됨(`MembersPage.tsx:181,192,205`는 성공 경로에만 있음). traceId 전달 안 됨(`MembersPage.tsx:100`에 `traceId` 없음, `ListErrorBanner`의 `traceId`(`MembersPage.tsx:88-91`)와 대비). | 부분 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
