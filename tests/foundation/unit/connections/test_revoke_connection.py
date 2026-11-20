@@ -320,7 +320,12 @@ async def test_revoke_connection_perf_budget_p95_latency(
     samples = await perf_budget.samples_async(_fn, n=n_samples)
 
     wall_ms_list = sorted(s.wall_ms for s in samples)
-    p95_ms = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
+    # p95 인덱스: n=50 일 때 int(50*0.95)=47. 0.95는 ADR-2026-09-09-C
+    # Decision 1의 "p95" 명세를 따름 — 50 샘플 중 상위 5% (=상위 2.5개)
+    # 를 잘라내므로 인덱스 47(0-based)가 정확히 해당 위치.
+    # min(...)는 n이 작을 때 indexerror 방지 (숫자 불변: n>=20 보장).
+    p95_idx = int(n_samples * 0.95)  # == 47 for n=50
+    p95_ms = wall_ms_list[min(p95_idx, len(wall_ms_list) - 1)]
     assert p95_ms < 50.0, f"revoke_connection p95 latency {p95_ms:.3f}ms exceeded 50ms budget"
 
 
