@@ -77,7 +77,7 @@
 <!-- BLOCK:J3-AlertsPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면은 가격/지표 알림 생성·취소만 처리함. 알림 생성(`POST /alerts`, `AlertsPage.tsx:222`)은 모니터링 조건 등록이며 주문/실행/LIVE 전환/위임장 변경/출금 등 금전적 결과로 직결되는 행동이 아님. 알림 취소(`PATCH /alerts/:id`, `AlertsPage.tsx:263`)도 등록 삭제일 뿐 자산 이동 없음. `useCreateAlert`의 요청 바디(`AlertsPage.tsx:215-220`)는 `{exchange, symbol, indicator, operator, threshold, period, timeframe}` 뿐이며 amount/price/fee 위치 관련 필드가 없음. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
