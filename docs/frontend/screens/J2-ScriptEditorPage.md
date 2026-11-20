@@ -108,9 +108,12 @@
 <!-- BLOCK:J2-ScriptEditorPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 컴파일 버튼은 `mutation.isPending`이 true이거나 소스 문자열이 공백일 때 비활성화된다(`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:244`). | 단위/컴포넌트 테스트: `mutation.isPending=true` 또는 `source=""`일 때 `<Button disabled>` 검증 |
+| A2 | 컴파일 실패 시 `ApiError`이고 `isScriptCompileErrorDetails`를 만족하면 `ScriptEditor` 마커 1개(`line`/`col`/`code`)를 표시하고 `ErrorMessage`는 띄우지 않는다(`:213-223`, `:225`). 그 외 실패(401/403/409/429/5xx/네트워크)는 `ErrorMessage`로 `traceId`·`errorCode`·`message`를 전달한다(`:248-254`). | 단위/컴포넌트 테스트: `isScriptCompileErrorDetails=true`인 `ApiError` 응답 시 마커 1개+ErrorMessage 없음, 그 외 `ApiError` 시 ErrorMessage에 traceId 표시 |
+| A3 | 편집기 내용을 변경하면 이전 컴파일/백테스트 결과가 즉시 제거된다 — `mutation.reset()`과 `clearScriptPreview`가 호출되어 `preview.instanceIds`가 비워진다(`:227-234`). | 단위/컴포넌트 테스트: `handleSourceChange` 호출 후 `mutation.reset()`과 `clearScriptPreview` 호출 확인, 미리보기 패널 `null` 검증 |
+| A4 | 백테스트 요청 시 URL에 `instrument_id`가 없으면 `throw new Error(...backtestNeedsInstrument...)`하고(`:163`), 실패 시 `role="alert"` div(`:145`)에 `getApiErrorMessage` 결과를 표시한다(`:144-150). | 단위/컴포넌트 테스트: `instrument_id` 없이 백테스트 시 에러 던짐, `backtest.isError` 시 `role="alert"` div에 에러 메시지 표시 |
+| A5 | 컴파일 성공 시 결과 패널에 스크립트 해시(`:118`), 명령 수(`:122`), 시리즈 수(`:124`), 연산 수(`:126`), 플롯 수(`:128`), 컴파일 시간 `elapsedMs`(`:130`)가 표시된다. | 단위/컴포넌트 테스트: `mutation.isSuccess` 시 `compile-preview-hash` 등 `data-testid` 요소에 올바른 값 렌더링 |
+| A6 | "차트에서 백테스트" 버튼 클릭 시 `/chart?script_hash=<hash>`로 라우트 이동한다(`:197-198`). | 단위/컴포넌트 테스트: `handleOpenChart` 호출 시 `navigate`가 `/chart?script_hash=...` 호출 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
