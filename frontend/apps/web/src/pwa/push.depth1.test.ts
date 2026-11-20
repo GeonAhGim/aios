@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 import {
   PushPermissionDeniedError,
   PushPlatformUnsupportedError,
@@ -74,8 +74,9 @@ describe("push depth1: failure injection", () => {
 });
 
 describe("push depth1: performance", () => {
-  // 로컬 실측: 변환 n=20000 약 1ms 미만, 토큰 직렬화 1000회 약 2ms. 예산 50ms는
-  // 실측의 30배 이상 여유이며 O(n^2) 회귀(수백 ms 이상)만 잡는다.
+  // Local measurements: conversion n=20000 ~1ms, token serialization 1000x ~2ms.
+  // Budget 50ms is 30x+ above measured, catches only O(n^2) regressions (hundreds of ms+).
+  // Uses bestOfMs (BEST_OF_RUNS=5, min) to dodge shared-host contention.
   const BASE_MS = 50;
   const big = "A".repeat(20000);
 
@@ -87,18 +88,23 @@ describe("push depth1: performance", () => {
   }
 
   it("urlBase64ToUint8Array(n=20000)는 예산 안에 끝난다", () => {
-    const start = performance.now();
     const out = urlBase64ToUint8Array(big);
-    const elapsed = performance.now() - start;
     expect(out.length).toBe(15000);
+    const elapsed = bestOfMs(() => {
+      const start = performance.now();
+      urlBase64ToUint8Array(big);
+      return performance.now() - start;
+    });
     expect(elapsed).toBeLessThan(perfBudgetMs(BASE_MS));
   });
 
   it("toDeviceTokenRequest 1000회 직렬화는 예산 안에 끝난다", () => {
     const sub = { toJSON: () => ({ endpoint: "https://x", keys: { p256dh: "a", auth: "b" } }) };
-    const start = performance.now();
-    for (let i = 0; i < 1000; i += 1) toDeviceTokenRequest(sub as unknown as PushSubscription, "iOS");
-    const elapsed = performance.now() - start;
+    const elapsed = bestOfMs(() => {
+      const start = performance.now();
+      for (let i = 0; i < 1000; i += 1) toDeviceTokenRequest(sub as unknown as PushSubscription, "iOS");
+      return performance.now() - start;
+    });
     expect(elapsed).toBeLessThan(perfBudgetMs(BASE_MS));
   });
 
