@@ -66,8 +66,8 @@
 <!-- BLOCK:J5-LedgerHistoryPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx:87`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx:89`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx:87`) | `cursorPage.hasPrev`이 true — `useCursorPage.ts:53`에서 `navigator.getState().hasPrev` 기반. 버튼은 `disabled={!cursorPage.hasPrev}`(87행)로 비활성화 방지. | `cursorPage.prev` 호출 → `useCursorPage.ts:38-42`에서 `navigator.prev()` 실행 후 `rerender()`. `cursorPage.cursor` 변경 → `useQuery`(50-53행)가 새 `queryKey`로 자동 재조회 → `fetchPage` 호출 → `query.data` 갱신 → 목록 이전 페이지 표시. `committed` 상태도 58-60행에서 동기화. | 버튼이 `disabled`이므로 클릭 이벤트 자체가 발생하지 않음(React가 DOM 레벨에서 차단). `hasPrev`가 true인 경우에도 `navigator.prev()`는 내부 상태 이동만 하므로 실패 경로 없음. | 동일 화면(`/wallet/ledger`) — 이전 페이지 데이터로 갱신된 목록 표시. 라우트 이동 없음. |
+| `<Button>` (`frontend/apps/web/src/routes/wallet/LedgerHistoryPage.tsx:89`) | `cursorPage.hasNext`이 true — `useCursorPage.ts:54`에서 `meta != null && meta.next_cursor != null` 기반. 직전 조회 응답의 `data.meta.page.next_cursor`가 있을 때만 true. 버튼은 `disabled={!cursorPage.hasNext}`(89행)로 비활성화 방지. | `cursorPage.next` 호출 → `useCursorPage.ts:32-36`에서 `meta.next_cursor` 확인 후 `navigator.next(meta)` 실행 → `rerender()`. `cursorPage.cursor` 변경 → `useQuery`(50-53행)가 새 `queryKey`로 자동 재조회 → `fetchPage` 호출 → `query.data` 갱신 → 목록 다음 페이지 표시. `committed` 상태도 58-60행에서 동기화. | 버튼이 `disabled`이므로 클릭 이벤트 자체가 발생하지 않음. `hasNext`가 true이더라도 `meta.next_cursor`가 null인 경우(53행 조건)에는 `next()`가 즉시 리턴(no-op). 실패 시 에러 표시 없음, 단순히 이전 상태로 유지. | 동일 화면(`/wallet/ledger`) — 다음 페이지 데이터로 갱신된 목록 표시. 라우트 이동 없음. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
