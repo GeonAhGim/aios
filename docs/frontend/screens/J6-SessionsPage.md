@@ -56,10 +56,10 @@
 <!-- BLOCK:J6-SessionsPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | API 응답 상태 423 (`accountLockout.ts:10` `AUTH_ACCOUNT_LOCKED`) 또는 429 (`retryable.ts:28` `RATE_LIMIT_EXCEEDED`). `ErrorBanner`(`SessionsPage.tsx:63-76`) → `classifyForbidden`(`SessionsPage.tsx:10`) null → `routeApiError`(`SessionsPage.tsx:13`) → `deriveLockout`(errorRouting.ts:125, 423 → `account_locked`) 또는 `classifyRetry`(errorRouting.ts:119, 429 → `backoff_retry`). | 423 → `ErrorMessage`(`SessionsPage.tsx:68`)에 잠금 안내(traceId 없음). 429 → `ErrorMessage`에 백오프 재시도 안내(`retryAfterSec` 표시). 둘 다 `SessionsPage.tsx:187`(query error) 또는 :188(action error)에서 표시. | 423 → 대기(재시도 버튼 없음). 429 → `ErrorMessage`의 `onRetry` prop(`SessionsPage.tsx:73`)으로 `query.refetch()` 재시도(`retryAfterSec` 후). | 423 구현됨 errorRouting.ts:125-126 → `ErrorMessage`. 429 구현됨 errorRouting.ts:119-121 → `ErrorMessage`(`retryAfterSec` 제공). |
+| 서버 오류(5xx) | API 응답 상태 500/502/503. `routeApiError` → `classifyServerError`(errorRouting.ts:115): 502/503 → `backoff_retry`, 500 → `server_fatal`. | 502/503 → `ErrorMessage`에 백오프 재시도 안내. 500 → `ErrorMessage`에 `traceId`(`SessionsPage.tsx:71`) 노출, 재시도 불가 안내. | 502/503 → `onRetry` prop(`SessionsPage.tsx:73`)으로 재시도. 500 → 대기 또는 관리자에게 trace_id 보고. | 502/503 구현됨 errorRouting.ts:116 → `backoff_retry`. 500 구현됨 errorRouting.ts:117 → `server_fatal`(traceId 노출). |
+| 네트워크 단절 | `fetchSessions`(`SessionsPage.tsx:134`)가 네트워크 실패(타임아웃, 연결 끊김 등)로 예외 던짐. `query.isError` true, `classifyForbidden` null, `routeApiError` → `{kind: "unknown"}`. | `ErrorBanner`(`SessionsPage.tsx:63-76`)(:187) → `ErrorMessage`에 오류 메시지 표시. `canRetry` false (`SessionsPage.tsx:66`, errorRouting.ts:132 → `unknown`) → 재시도 버튼 없음. | 사용자가 페이지 새로고침 또는 브라우저 재시도 수동으로 재조회. | 구현됨(표시) — 재시도 버튼 없음(`ErrorMessage`에서 `onRetry` 미제공, :66-73). |
+| 부분 실패(일부 데이터만 실패) | `parseSessionView`(`SessionsPage.tsx:139`)가 일부 raw 항목에서 null 반환. `rows`(`SessionsPage.tsx:137-140`)에 `view: null` 항목이 섞임. | 정상 파싱 행은 `SessionRow`(`SessionsPage.tsx:197-203`)로 표시. 실패 행은 `Alert tone="danger"`(`SessionsPage.tsx:206`)로 `legacy.sessionsPage.t9` "세션 정보를 해석할 수 없습니다." 표시. | 실패 행에 대한 사용자 행동 없음(정보 전용). 정상 행은 여전히 `폐기` 버튼 사용 가능. | 구현됨 `SessionsPage.tsx:192-212` (행별 :196-208 분기). |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
