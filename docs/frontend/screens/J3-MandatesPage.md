@@ -128,9 +128,10 @@
 <!-- BLOCK:J3-MandatesPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 일시정지/재개 실패 후 에러 배너가 사라져야 함. `createError`(`:102`)·`activateError`(`:108`)는 핸들러 시작 시 `null`로 초기화되므로 한 번만 노출. | `lifecycleError`(`:99`)에 `setLifecycleError(null)` 호출이 파일 전체에 없음(`:153-154`의 `onError`에서만 할당). 일시정지 실패 → 재시도 성공 후에도 이전 에러가 배너에 잔류. | 중 | 명세 수정(영구 노출 의도라면 문서화) 또는 구현 수정(별도 리프) |
+| G2 | §4 활성화 행: "`pendingRevision.state === `"PROPOSED`"`를 전제로 활성화 버튼 활성화." | `:162`에서 `pendingRevision` non-null만 확인, `:169`에서 버튼 렌더 시 상태 검사 없음. `pendingRevision.state`가 `"PROPOSED"`가 아닌 경우(예: `"DRAFT"`)에도 버튼이 표시됨. | 중 | 명세 수정(현재 구현은 non-null 전제) |
+| G3 | §7 i18n 행: 모든 사용자-facing 문자열이 i18n 키로 노출되어야 함. | `"없음"`(`:28`), `"개정안 제안"`/`"초안 작성"`(`:183`) 하드코딩 한국어. `useTranslation()` 사용 중이지만 세 문자열만 누락. | 낮음 | 구현 수정 후보(별도 리프) — i18n 키 추가 필요 |
+| G4 | §5 멱등성 행: mutation 재시도 시 idempotencyKey로 중복 처리 방지. | `useMandates.ts:20,28,36,45,53`의 모든 mutation 훅이 idempotencyKey 인자를 받지 않음. `frontend/packages/api-client/src/clients/mandates.ts:23-47`의 API 호출에도 idempotency 헤더 설정 없음. | 낮음 | 명세 수정(현재 구현은 idempotencyKey 미지원) 또는 구현 수정(별도 리프) |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
