@@ -80,7 +80,10 @@
 <!-- BLOCK:J2-ScreenerPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면의 유일한 서버 호출은 `useQuery` + `client.runScreen`(`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:143-147`)이며 조회(스크리닝 실행)일 뿐, 주문·실행 생성·LIVE 전환·위임장 변경·출금 등 상태를 바꾸는 mutation/POST 호출이 없다. 호출 경로 `frontend/packages/api-client/src/clients/screener.ts:27-32`의 `runScreen`은 `POST /v1/foundation/screener/run`(`frontend/packages/api-client/src/apiRoutes.ts:431`)를 쓰지만, 스크리닝 정의(input)을 받아 종목 목록(output)을 반환하는 조회 API이다. |
+| 확인 절차 | 해당 없음(조회 전용, 확인 대화상자 없음) |
+| 멱등성 | `queryKey: ["screener-run", submitted]`(`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:144`)와 `enabled: submitted !== null`(`:146`)으로 `submitted` 변경 시 1회만 fetch — 중복 호출 방지. 서버 측 멱등성: 미확인(서버단 구현을 읽지 않음) |
+| 불확실 결과 표시 | 조회 실패 시 `ScreenerErrorBanner`(`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:314-316`)가 `ErrorMessage`로 errorCode·message·traceId 표시(`:109-115`) — 금전 행동의 불확실 결과 표시 요건과는 무관 |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
