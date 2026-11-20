@@ -98,10 +98,10 @@
 <!-- BLOCK:J1-ConnectionWizardPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | testid: `wizard-step-indicator`(`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:80`), `wizard-masked-key`(`frontend/apps/web/src/routes/onboarding/ConnectionWizardPage.tsx:179`). aria-label: 권한 체크박스 `aria-label={scope}`(`:121`), 확인 체크박스 `aria-label={t("connectWizard.steps.permissions.confirmLabel")}`(`:151`). `<fieldset>`/`<legend>`(`:112-115`) 사용. 키 입력 `type="password"`, `autoComplete="off"`(`:104`, `:109`). `<Field>`(`:99`, `:102`)는 `frontend/packages/ui-web/src/Field.tsx:18-24`에서 자식이 단일 Input이면 `useId()`로 id를 주입하고 `htmlFor`로 label 연결 — 프로그래밍적 연결 보장. | 단계 전환 시 헤딩/포커스 이동 없음(`:96`, `:137`, `:169` — 파일 내 ref/focus 호출 0건). 성공 Alert(`:85-93`)에 aria-live="polite" 또는 role="status" 없음. 오류 WizardActionError(`:188`)에 role/aria-live 미지정. `<Link>`가 `<Button>`을 감침(`:88-91`): WCAG 4.1.2 대화형 요소 중첩. 대비(WCAG 2.2 AA 대비비)는 CSS 토큰 미확인 — '미확인'. |
+| i18n/지역화 | 화면 `t()` 키 25개는 facts 시트(`docs/frontend/facts/ConnectionWizardPage.facts.md:10-33`)에 모두 등록됨. 카탈로그 누락 키: "없음". 보간 `{{step}}/{{total}}`(`:81`), 마스킹 `•` 문자(`:36-37`)는 로케일 의존 없음. | 권한 코드 scope 값(`:126`, `:144`, `:148`)이 READ_BALANCE 등 원문으로 출력 — t() 키 아님. aria-label={scope}(`:121`)도 동일 값. 검토 단계에서 capabilityProfile.join(", ")(`:185`)도 원문 나열. 날짜·숫자 포맷 호출 없음(해당 호출 없음). |
+| 성능 예산 | useEffect, 타이머, useQuery, 폴링 0건. 데이터 훅 useBeginConnection(`:42`)는 mutation 전용(`frontend/packages/shared-hooks/src/useConnections.ts:22` — useMutation). onSuccess에서 qc.invalidateQueries(`:24`) — connections 키 무효화(1회 재조회). 입력 상태 useState(`:45-50`)가 페이지 컴포넌트에 있어 키 입력마다 페이지 전체 리렌더. providerStepValid(`:56`), maskKey(`:180`) 매 렌더 계산 but 비용 작음. | 성능 예산 수치: 미확인(`docs/frontend/README.md`, `docs/design/`에서 budget|p95|LCP|INP Grep 결과 없음). |
+| 텔레메트리 | 파일 import(`:1-10`)에 분석·로깅·Sentry 모듈 없음. 오류는 WizardActionError(`:19-30`) → classifyForbidden(`:20`) → ForbiddenNotice 또는 ErrorMessage(`:23-28`) 전달. ErrorMessage(`frontend/apps/web/src/components/ErrorMessage.tsx`), ForbiddenNotice(`frontend/apps/web/src/components/ForbiddenNotice.tsx`)에서 captureException|Sentry|reportError|analytics|track Grep 결과: 0건. | 제출 성공(onSuccess `:67`)·실패(onError `:68`) 이벤트 추적 없음. 오류 보고 호출 미확인(검색 범위: ErrorMessage.tsx, ForbiddenNotice.tsx, ConnectionWizardPage.tsx — 모두 0건). |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
