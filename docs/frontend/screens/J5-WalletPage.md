@@ -13,10 +13,10 @@
 <!-- BLOCK:J5-WalletPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 (개인 트레이더) — `docs/frontend/PERSONAS_AND_JOURNEYS.md:22` 표 P1 행("J1~J6 전체 [확인]"). 운영자 측 충전 승인(`/admin/wallet-topups`)은 P8 몫(`router.tsx:161`). |
+| 목적(한 문장) | 보유 크레딧을 확인하고 충전 금액을 신청하면, 입금 후 관리자 확인으로 크레딧이 반영된다. (`WalletPage.tsx:48-51` 잔액 표시, `:58-84` 신청 폼) |
+| 진입 조건 | 1) 라우트 가드: `router.tsx:141`이 `protect(<WalletPage />)`로 `/wallet`를 감싼다. `protect`는 `router.tsx:70-72`에서 `ProtectedRoute`로 감김. 2) 플래그 조건: 없음. 3) 토큰 없으면 `/login?next=...`로 리다이렉트: `ProtectedRoute.tsx:20-21`. 4) MFA 미완료 시 `/onboarding/mfa-setup`로 강제: `ProtectedRoute.tsx:32-34`. 5) 적합성평가 미완료 시 `/onboarding/risk-assessment`로 강제: `ProtectedRoute.tsx:35-41`. |
+| 사용자 준비물 | 1) 로그인 세션(토큰 보유). 2) MFA 설정 완료(`ProtectedRoute.tsx:32`). 3) 적합성평가 완료(`ProtectedRoute.tsx:35`). 4) 충전 금액: 정수, 최소 1(`WalletPage.tsx:62`), 기본값 30000(`WalletPage.tsx:16`). 1크레딧 = 1원(`WalletPage.tsx:58`). 5) 실제 계좌 입금: 문구 `WalletPage.tsx:69`("신청 후 실제 계좌로 입금하면 관리자 확인 즉시 크레딧이 반영됩니다"). 입금 계좌 정보 출처: 미확인. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
