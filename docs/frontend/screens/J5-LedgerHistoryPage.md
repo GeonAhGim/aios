@@ -44,10 +44,10 @@
 <!-- BLOCK:J5-LedgerHistoryPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `query.isError` true, `routeApiError` 결과의 `kind`가 `field_errors` — `LedgerHistoryPage.tsx:62`에서 `routeApiError(query.error)` 호출 | `ErrorMessage` 컴포넌트 렌더(`LedgerHistoryPage.tsx:74-80`), 필드별 오류는 `fieldErrors` prop으로 전달되지 않음(본 화면에 입력 필드 없음). `getApiErrorMessage`(`@aios/shared-types`)가 `errorCode`를 한국어 메시지로 변환. `traceId` 노출(`legacy.errorMessage.t1` 키, `ErrorMessage.tsx:60`). | `routeApiError.kind`가 `refetch_retry` 또는 `backoff_retry`일 때만 `onRetry` 활성화(`LedgerHistoryPage.tsx:63-64`) — 입력 오류(400) 갈래는 일반적으로 재시도 없음. `field_errors` 갈래는 `ErrorMessage` 내부에서 `fieldErrors` prop이 없으므로 배너만 표시. | 구현됨 — `LedgerHistoryPage.tsx:62-64,74-80`, `errorRouting.ts:94-96`, `ErrorMessage.tsx:36-37` |
+| 인증 필요/세션 만료(401) | `query.isError` true, `routeApiError` 결과의 `kind`가 `auth_required` — `LedgerHistoryPage.tsx:62`에서 `routeApiError(query.error)` 호출, `isSessionExpiredErrorCode`가 true 반환 | `ErrorMessage` 컴포넌트 렌더(`LedgerHistoryPage.tsx:74-80`), `getApiErrorMessage`가 세션 만료 메시지 반환. `traceId` 노출(`legacy.errorMessage.t1` 키). | `auth_required` 갈래는 재시도 없음(`refetch_retry`/`backoff_retry` 아님). 재로그인 유도 필요하지만 화면 내 별도 버튼 없음. | 구현됨 — `LedgerHistoryPage.tsx:62-64,74-80`, `errorRouting.ts:128-130`, `ErrorMessage.tsx:36-37` |
+| 권한 없음/MFA 필요(403) | `query.isError` true, `routeApiError` 결과의 `kind`가 `mfa_required`, `tenant_mismatch`, `policy_denied`, 또는 `forbidden` — `LedgerHistoryPage.tsx:62`에서 `routeApiError(query.error)` 호출, `classifyForbidden`가 true 반환 | `ErrorMessage` 컴포넌트 렌더(`LedgerHistoryPage.tsx:74-80`). `policy_denied`/`forbidden` 갈래는 `reasonCodes`를 포함하지만 `ErrorMessage`가 이를 표시하는지는 미확인. `traceId` 노출(`legacy.errorMessage.t1` 키). | 권한 오류는 재시도로 해결되지 않으므로 재시도 버튼 비활성화. `mfa_required`는 MFA 재요청 필요하지만 화면 내 별도 MFA 플로우 없음. | 구현됨 — `LedgerHistoryPage.tsx:62-64,74-80`, `errorRouting.ts:98-102`, `ErrorMessage.tsx:36-37` |
+| 충돌/상태 불일치(409) | `query.isError` true, `routeApiError` 결과의 `kind`가 `idempotency_new_key`, `idempotency_missing_header`, `refetch_retry`, `invalid_transition`, `data_coverage_missing`, 또는 `wallet_balance_drift` — `LedgerHistoryPage.tsx:62`에서 `routeApiError(query.error)` 호출, `classifyIdempotencyFailure` 또는 `classifyStateConflict`가 true 반환 | `ErrorMessage` 컴포넌트 렌더(`LedgerHistoryPage.tsx:74-80`). `refetch_retry` 갈래는 재시도 가능(`backoff_retry`일 때 `retryAfterSec` 카운트다운, `ErrorMessage.tsx:49-53`). `idempotency_new_key`/`idempotency_missing_header`는 재시도 금지(멱등키 문제). | `refetch_retry`일 때만 `onRetry` 활성화(`LedgerHistoryPage.tsx:63-64`). 나머지는 재시도 불가. | 구현됨 — `LedgerHistoryPage.tsx:62-64,74-80`, `errorRouting.ts:111-113,104-109`, `ErrorMessage.tsx:36-37` |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
