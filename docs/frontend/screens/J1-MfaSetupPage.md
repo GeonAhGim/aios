@@ -123,7 +123,7 @@
 |---|---|---|---|---|
 | G1 | subtitle("Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요")가 `t()`로 국제화되어야 함. | `MfaSetupPage.tsx:81` — `subtitle="Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요"` 하드코딩 영문/한문混杂. `t()` 호출 없음. [확인] | 낮음(영문 locale에서도 작동하지만 한글이 그대로 표시됨) | `수정 필요` — `subtitle={t("legacy.mfaSetupPage.subtitle")}`로 변경하고 i18n 리소스에 ko/en 키 추가. |
 | G2 | `setupMfa.mutate`의 `onSuccess` 콜백(`:55-58`)에서 `QRCode.toDataURL`이 실패할 때 try/catch가 없어 `qrDataUrl`이 null로 영구 남음. | `MfaSetupPage.tsx:57` — `await QRCode.toDataURL(result.provisioningUri)`가 try/catch 없음. 예외 시 `onError` 콜백(`:59-61`)으로 안 가고 React unhandled error. | 중(사용자가 QR 생성 실패 시 재시도 방법 모름) | `수정 필요` — `onSuccess` 내부 또는 `useEffect`에서 try/catch로 감싸 `setSetupError`로 오류 전달. |
-| G3 | 401 세션 만료 응답이 `MfaSetupPage`에서 명시적으로 처리되지 않음. | `MfaSetupPage.tsx:74` catch에서 `routeApiError`를 호출하지 않고 `err instanceof ApiError ? err : new Error(...)`만 함. `ErrorMessage`에 `routed.kind`가 전달되지 않음. `ProtectedRoute`가 세션 만료를 감지하고 로그인으로 리다이렉트할 가능성 있으나 MfaSetupPage 내부 검증 없음. [확인] | 낮음(ProtectedRoute가 401을 가로챌 것으로 예상되나 명시적 가드 없음) | `미확인` — `ProtectedRoute.tsx`에서 401을 처리하는지 확인 후 필요시 `MfaError`에 `routeApiError` 결과 전달. |
+| G3 | 401 세션 만료 응답이 `MfaSetupPage`에서 명시적으로 처리되지 않음. | `MfaSetupPage.tsx:74` catch에서 `routeApiError`를 호출하지 않고 `err instanceof ApiError ? err : new Error(...)`만 함. `ErrorMessage`에 `routed.kind`가 전달되지 않음. `ProtectedRoute`가 세션 만료를 감지하고 로그인으로 리다이렉트할 가능성 있으나 MfaSetupPage 내부 검증 없음. [확인] | 낮음(ProtectedRoute가 401을 가로챌 것으로 예상되나 명시적 가드 없음) | `미확인` — ProtectedRoute.tsx에서 401을 처리하는지 확인 후 필요시 `MfaError`에 `routeApiError` 결과 전달. |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
