@@ -86,13 +86,13 @@
 <!-- BLOCK:J6-AccountDeletionPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyBadRequest` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:26`) | TODO | TODO | TODO |
-| `BadRequestNotice` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:26`) | TODO | TODO | TODO |
-| `classifyForbidden` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:27`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:27`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:28`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:30`) | TODO | TODO | TODO |
-| `Alert` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:150`) | TODO | TODO | TODO |
+| `classifyBadRequest` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:26`) | — (판단 함수, 문구 없음) | 400 응답을 5 갈래(field/disclosure_retired/mfa_invalid/...)로 분류. true 반환 시 `BadRequestNotice` 표시 | 없음 |
+| `BadRequestNotice` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:26`) | `getApiErrorMessage(errorCode, message)` — shared-types/apiError.ts EXACT_MESSAGES 매핑 | `field`: 인라인 필드 오류 중복 방지로 배너 숨김(details.fields 비어있으면 배너). `disclosure_retired`: '최신 revision 재조회' 버튼. `mfa_invalid`: '코드 재입력' 버튼. 나머지: 재시도 버튼 없음. `Alert tone="danger"` | 노출 안 함 |
+| `classifyForbidden` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:27`) | — (판단 함수, 문구 없음) | 403 응답을 3 갈래(policy/mfa_required/tenant_mismatch)로 분류. true 반환 시 `ForbiddenNotice` 표시 | 없음 |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:27`) | `getApiErrorMessage(errorCode, message)` — shared-types/apiError.ts EXACT_MESSAGES 매핑 | `policy`: `DenialReasons` 하위 컴포넌트 표시. `mfa_required`: `onStepUp` 버튼(현재 호출부에서 전달 안 함). 나머지: 재시도 버튼 없음. `Alert tone="danger"` | 노출 안 함 |
+| `routeApiError` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:28`) | — (판단 함수, 문구 없음) | 400/403 외 ApiError를 `RoutedApiError`로 분류(idempotency_failure/data_coverage_missing/wallet_balance_drift/기타). kind="backoff_retry"면 `afterSec` 반환 | `ErrorMessage`에서 traceId 받음 |
+| `ErrorMessage` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:30`) | `getApiErrorMessage(errorCode, message)` — shared-types/apiError.ts EXACT_MESSAGES 매핑. traceId 노출 시 `legacy.errorMessage.t1({traceId})` | `classifyRetry`로 backoff/refetch 판별. backoff일 때 retryAfterSec 카운트다운. 재시도 가능 시 `legacy.errorMessage.t3` 버튼. `Alert tone="danger"` | `legacy.errorMessage.t1`에 traceId 삽입 노출(`AccountDeletionPage.tsx:33`) |
+| `Alert` (`frontend/apps/web/src/routes/settings/AccountDeletionPage.tsx:150`) | `deletionResult` 문자열 — `legacy.accountDeletionPage.t16({val})` (`AccountDeletionPage.tsx:80`) | 탈퇴 성공 시 `tone="success"` 알럿. 탈퇴 예약 시각 표시. 로그아웃 버튼(`legacy.accountDeletionPage.t11`) 아래 배치 | 노출 안 함 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
