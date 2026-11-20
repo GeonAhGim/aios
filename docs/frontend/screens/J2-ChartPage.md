@@ -111,9 +111,9 @@
 <!-- BLOCK:J2-ChartPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | `instrument_id` 쿼리 파라미터 없이 `/chart`에 진입하면 `fetchCandles`를 호출하지 않고 `NoInstrumentSelected` 안내만 표시한다(`ChartPage.tsx:157-158`, `enabled: instrumentId !== null && instrumentId.trim().length > 0` 조건 `:138`). | `ChartPage.test.tsx:21-27` — `renderPage(fetchCandles, null)` 후 `fetchCandles` 호출 0회 + `/심볼을 먼저 선택하세요/` 텍스트 존재 검출 |
+| A2 | 캔들 조회 실패 시 `ErrorMessage`를 표시하고, `routeApiError` 분류가 `refetch_retry` 또는 `backoff_retry`일 때만 재시도 버튼이 나타난다(`ChartPage.tsx:161-162`, `:220-227`). 그 외 분류(서버 오류 등)는 재시도 버튼을 숨긴다. | `ChartPage.test.tsx` — 재시도 가능 오류(503 등)와 재시도 불가 오류 모의 비교 테스트. 재시도 가능 시 `onRetry` prop 전달, 불가 시 undefined 단언 |
+| A3 | 캔들 조회가 성공하면 `CandlestickChart`에 데이터 포인트를 전달하고, `ChartPanes` → `IndicatorParityPanel` → `StrategyMarkers` → `BacktestPanel` → `CompareSymbols` → `DrawingsList` 순으로 하위 컴포넌트를 렌더한다(`ChartPage.tsx:233-286`). 빈 캔들 배열(`points.length === 0`)일 때 `"표시할 캔들이 없습니다."`(`legacy.chartPage.t2`, `:230-231`)를 `EmptyState`로 표시한다. | `ChartPage.test.tsx:11-18` — `okResult()` 모의 후 `candlestick-chart` testid 존재 + `fetchCandles` 올바른 인자로 1회 호출 단언. 빈 배열 입력 시 `EmptyState` 검출 테스트 필요 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
