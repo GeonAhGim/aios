@@ -70,9 +70,9 @@
 <!-- BLOCK:J2-ScriptEditorPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:133`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:136`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:244`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:133`) | `mutation.isSuccess`로 `CompilePreview` 렌더, 버튼 `disabled` 없음 (`ScriptEditorPage.tsx:256`, `:133`). 편집 시 `mutation.reset()`(`:229`)으로 전제 사라짐. | `handleOpenChart`(`:197-198`)가 `navigate("/chart?script_hash=<scriptHash>")` 호출 (`router.tsx:120`). | 이 화면에 실패 처리 경로 없음. `navigate` 실패 처리 미확인. | `/chart` (`router.tsx:120`). `/chart`는 `script_hash`로 아무것도 조회하지 않음 (`:194-196` 주석). |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:136`) | 컴파일 성공(`CompilePreview` 렌더), `backtest.isPending` 아님(`:139`). 실행 중 라벨 `scriptEditorPage.backtestRunning`(`:141`). `runBacktest` prop 주입 시(`:261`) 기본 함수 대신 그것 사용. | `backtest.isSuccess`이면 `BacktestSummary` 인라인 렌더(`:152`, `:87-99`). 화면 이동 없음. | (a) `instrument_id` 없음 → `defaultRunBacktest`가 `throw new Error`(`:163`) → `backtest.error instanceof Error` → `role="alert"` div(`:145`)에 메시지. (b) `ApiError` → `errorCode`를 `getApiErrorMessage`에 전달(`:146-148`). | 동일 화면 (이동 없음). |
+| `<Button>` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:244`) | `mutation.isPending` 아니고 `source.trim().length > 0`(`:244`). 실행 중 라벨 `"컴파일 중..."`(`:245`, 하드코딩). | `mutation.isSuccess`이면 `CompilePreview` 렌더(`:256-263`), 서브패널 `useEffect`(`:204-211`)로 갱신. 화면 이동 없음. | `ApiError`且`isScriptCompileErrorDetails` → `markers`(`:213-223`)로 에디터에 단일 표시. 그 외 → `showGenericError`(`:225`) → `ErrorMessage`(`:249-253`)에 `errorCode`·`message`·`traceId` 전달. | 동일 화면 (이동 없음). |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
