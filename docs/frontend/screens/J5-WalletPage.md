@@ -58,10 +58,10 @@
 <!-- BLOCK:J5-WalletPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | `routeApiError(error)`가 `{kind:"backoff_retry"}` 반환 (`errorRouting.ts:121`, `WalletPage.tsx:43`). 423(잠김)은 `deriveLockout`(`errorRouting.ts:125-126`)이 `{kind:"account_locked", retryAfterSec}` 반환 | `ErrorMessage` 배너(`WalletPage.tsx:71-77`)가 `retryAfterSec` 값을 받아 초 단위 카운트다운 표시(`ErrorMessage.tsx:49-53`). 버튼은 `remainingSec > 0` 시 비활성화(`ErrorMessage.tsx:66`) | `ErrorMessage` 내 재시도 버튼(`ErrorMessage.tsx:66-67`) 클릭 시 `attemptTopup()` 재호출(`WalletPage.tsx:76`). `canRetry`는 `routed?.kind === "backoff_retry"`(`WalletPage.tsx:43`) 판정. 423(account_locked)은 재시도 불가(`classifyRetry` → `kind:"none"`) | 구현됨. 429(`RATE_LIMIT_EXCEEDED`)는 `BACKOFF_ERROR_CODES`(retryable.ts:27)에 등록되어 `classifyRetry`(retryable.ts:40)가 `kind:"backoff"` 반환. `ErrorMessage.tsx:38-40`에서 판별, 카운트다운 후 재시도 버튼 활성화. 423은 `deriveLockout`(errorRouting.ts:125)가 `account_locked` 분류 — 재시도 불가 |
+| 서버 오류(5xx) | `routeApiError(error)`가 `{kind:"server_fatal", traceId:?}` 또는 `{kind:"backoff_retry"}` 반환 (`errorRouting.ts:116-117`). 502/503/500 중 `BACKOFF_ERROR_CODES`(retryable.ts:27)에 등록된 코드만 재시도 가능 | `ErrorMessage`(ErrorMessage.tsx:36)가 `getApiErrorMessage`(shared-types/src/apiError.ts:106)로 메시지 변환. `traceId` 있으면 `legacy.errorMessage.t1`(ErrorMessage.tsx:60)로 노출. `server_fatal`은 재시도 불가(`classifyRetry` → `kind:"none"`) | `server_fatal`은 재시도 버튼 미노출(`ErrorMessage.tsx:39: canRetry=false`). `backoff_retry`(502/503 중 재시도 가능 코드)는 429와 동일 카운트다운 재시도 | 구현됨. `errorRouting.ts:115-117`에서 `classifyServerError` 결과에 따라 `server_fatal`/`backoff_retry` 분류. `classifyServerError`(serverError.ts)가 502/503/500 중 재시도 가능 코드 집합 정의 |
+| 네트워크 단절 | `requestTopup.mutateAsync`가 네트워크 연결 실패 시 throw (`useWallet.ts:16`, `WalletPage.tsx:25`) | `err instanceof ApiError`가 false이므로 `new Error(t("legacy.walletPage.t7"))`로 래핑(`WalletPage.tsx:30`). `ErrorMessage`가 일반 메시지 표시 | `routeApiError`는 `ApiError`가 아닌 `Error`를 받으면 `{kind:"unknown"}` 반환(`errorRouting.ts:86`). 재시도 불가(`canRetry=false`). 같은 `idempotencyKey` 유지(재시도 가능 가정, `useIdempotentSubmit.ts:46`) | 구현됨. 네트워크 오류는 `ApiError`가 아니므로 `t("legacy.walletPage.t7")`("충전 요청에 실패했습니다.") 표시. `useIdempotentSubmit`이 같은 키 유지하여 재시도 허용(5xx/네트워크는 재시도 가능 가정) |
+| 부분 실패(일부 데이터만 실패) | `useWalletBalance`는 성공했으나 `useRequestTopup`이 실패(`WalletPage.tsx:13-14` 독립 훅). 또는 그 반대 | 잔액 `Stat`은 정상 표시(`:51`). 폼 아래 `ErrorMessage`가 오류 표시(`:71-77`). `submitted` 상태 `null`(`:27`) | 버튼은 `requestTopup.isPending`이 false면 재제출 가능(`:83`). `setError`로 오류 상태 유지(`:30`). 잔액 조회 실패는 `Stat`에서 "…" 표시(`:51`) | 구현됨. `useQuery`/`useMutation`은 독립적(`useWallet.ts:5-18`). 잔액 조회 실패도 `WalletPage.tsx:13`에서 `error` 구조분해하지 않으므로("0 크레딧" 또는 "…"으로 보인다 — st-a 블록 39줄 참고). 톱업 실패만 `ErrorMessage` 표시 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
