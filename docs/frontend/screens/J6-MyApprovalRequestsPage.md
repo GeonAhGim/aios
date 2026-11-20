@@ -56,10 +56,10 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423(계정 잠금) 또는 429(속도 제한) 응답 시, `RequestActionError`(MyApprovalRequestsPage.tsx:24-36)가 `classifyForbidden` false → `routeApiError` 분류 → `ErrorMessage`에 `retryAfterSec` 전달. | `ErrorMessage` 컴포넌트에 `errorCode`/`message`/`retryAfterSec` 전달(MyApprovalRequestsPage.tsx:30-34). `retryAfterSec` 기반 카운트다운 표시. | `ErrorMessage`가 `retryAfterSec` 기반 재시도 버튼 노출. | 구현됨 (MyApprovalRequestsPage.tsx:24-36: `RequestActionError` → `ErrorMessage`에 `retryAfterSec` 전달) |
+| 서버 오류(5xx) | 502/503/500 응답 시, `RequestActionError`(MyApprovalRequestsPage.tsx:24-36)가 `classifyForbidden` false → `routeApiError` 분류 → `ErrorMessage`에 `traceId` 또는 `retryAfterSec` 전달. | `ErrorMessage`에 `traceId`(fatal 시, MyApprovalRequestsPage.tsx:32) 또는 `retryAfterSec`(backoff 시, MyApprovalRequestsPage.tsx:33) 전달. | fatal: trace_id 노출 + 재시도 없음. backoff: `retryAfterSec` 기반 백오프 카운트다운 + 재시도 버튼. | 구현됨 (MyApprovalRequestsPage.tsx:24-36: `routeApiError` 결과에 따라 `traceId`/`retryAfterSec` 전달) |
+| 네트워크 단절 | React Query(`useQuery`)가 네트워크 오류 감지 → `isError === true`. `useMyApprovalRequests`(MyApprovalRequestsPage.tsx:104). | `isError` 분기(MyApprovalRequestsPage.tsx:112-113): `<RequestActionError error={error} onRetry={() => refetch()} />`. `ErrorMessage`가 `onRetry`로 목록 재조회 가능. | `onRetry={() => refetch()}` 클릭 시 `apiClient.listMyApprovalRequests()` 재호출(useApprovals.ts:8). | 구현됨 (MyApprovalRequestsPage.tsx:112-113: `isError` → `RequestActionError` + `onRetry={() => refetch()}`) |
+| 부분 실패(일부 데이터만 실패) | 승인/거부 mutation(`useApproveMyRequest`/`useRejectMyRequest`)이 단일 요청 ID에서만 실패. 전체 목록 조회는 성공. | 각 `RequestCard`가 자체 `error` state(MyApprovalRequestsPage.tsx:49)를 갖고, 실패 시 해당 카드 내부에 `<RequestActionError>` 렌더링(MyApprovalRequestsPage.tsx:79). 다른 카드는 정상 유지. | 승인/거절 버튼 클릭 시 `handle` 함수(MyApprovalRequestsPage.tsx:57-65)가 `try/catch` → `setError`. 성공 시 `onSuccess` 훅(useApprovals.ts:16,24)이 목록 자동 갱신. | 구현됨 (MyApprovalRequestsPage.tsx:49: `useState<unknown>(null)`, 57-65: `handle`, 79: `{error !== null && <RequestActionError error={error} />}`) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
