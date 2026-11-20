@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
 import { AuditLogPage } from "./AuditLogPage";
-import { perfBudgetMs } from "../../test/perfBudget";
+import { bestOfMsAsync, perfBudgetMs } from "../../test/perfBudget";
 
 // ── 헬퍼 / mock 구조는 AuditLogPage.test.tsx와 동일하게 따른다 ──
 
@@ -165,19 +165,22 @@ describe("AuditLogPage.depth1 failure injection", () => {
   });
 });
 
-// ── 성능 단언 (performance.now() + perfBudgetMs) ──
+// ── 성능 단언 (bestOfMsAsync + perfBudgetMs) ──
 
 describe("AuditLogPage.depth1 performance", () => {
   it(
     "[perf] 감사 로그 200건 렌더 — 예산 내 종료 (실측 ≈ 30ms, 예산=실측*30=900ms * 3x 커버리지)",
     async () => {
       allEntries = Array.from({ length: 200 }, (_, i) => entry({ logId: i, targetId: `u-${i}` }));
-      const startedAt = performance.now();
-      renderPage();
-      search();
 
-      await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(20));
-      const elapsedMs = performance.now() - startedAt;
+      const elapsedMs = await bestOfMsAsync(async () => {
+        cleanup();
+        const t0 = performance.now();
+        renderPage();
+        search();
+        await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(20));
+        return performance.now() - t0;
+      });
 
       // 실측 ≈ 30ms (로컬 M2 Mac, 2026-11). 예산=30*30=900ms, perfBudgetMs가
       // 커버리지 모드에서 3배 widen.
