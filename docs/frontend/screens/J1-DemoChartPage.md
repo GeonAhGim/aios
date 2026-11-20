@@ -79,7 +79,7 @@
 <!-- BLOCK:J1-DemoChartPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. `DemoChartPage.tsx:1-7` 임포트는 UI 컴포넌트, React, 라우터, i18n, `demoBacktest`, `demoDataset`뿐이며 주문/실행/LIVE 전환/위임장/출금 API나 mutation 훅이 없다. 실행 버튼 핸들러 `:28-35`는 `setIsRunning`/`setResult`와 `runDemoBacktest(bars)`만 호출하고 버튼은 `:66`(`data-testid="demo-backtest-run"`). `demoBacktest.ts:3-7` 주석대로 실 계좌·주문 엔진과 분리된 클라이언트 전용 SMA 교차 시뮬레이션이며 `:28-83`은 순수 계산(현금·포지션·거래 카운터만 갱신). `demoDataset.ts:52-62`의 `findDemoInstrument`/`getDemoDailyCandles`는 동기 함수 + PRNG 결정론적 생성이므로 네트워크 호출·변경 요청 없음. 실제 금전 이동이나 위험 행동이 없어 확인 절차·멱등성 가드가 필요하지 않다. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
