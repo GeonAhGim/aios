@@ -76,7 +76,7 @@
 <!-- BLOCK:J1-OnboardingFlowPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. 이 화면은 온보딩 진행 상황(거래소 연결·전략 생성·페이퍼 실행 완료 여부)을 **전용 읽기용**으로 표시하고, 각 단계의 `<Link>`로 해당 페이지(거래소 연결 페이지, 전략 빌더, 페이퍼 배포 페이지)로 **네비게이션**만 한다(`OnboardingFlowPage.tsx:68-69, 94`). 소스에 Mutation 훅(`useMutation`)이 없고, 주문·실행 생성·LIVE 전환·위임장 변경·출금 등 금전·위험 행동이 전혀 없음. 모든 훅(`useExchangeCredentials`, `useMyStrategies`, `usePaperDeployments`)은 조회 전용(read-only) — `shared-hooks/src/useExchanges.ts:5`, `shared-hooks/src/useStrategyBuilder.ts:14`, `shared-hooks/src/usePaperControl.ts:7`. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
