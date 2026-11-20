@@ -95,10 +95,10 @@
 <!-- BLOCK:J1-SignupPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `Input` 필드에 `htmlFor`/`id` 매칭: email(`:75-77`), password(`:89-91`). `Button`에 `type="submit"`(`:111`). 비밀번호 필드에 `autocomplete="new-password"`(`:95`), 이메일에 `autocomplete="email"`(`:80`). `role="note"`으로 MFA 안내(`:104`), `role="status"`으로 잠금 카운트다운(`:108`). 오류 배너는 `SignupError` → `BadRequestNotice`/`ForbiddenNotice`/`ErrorMessage`가 자체적으로 `role="alert"` 또는 `role="status"`를 쓴다(하위 컴포넌트 확인 필요). 키보드 TAB 순서: email → password → Button → Login Link(HTML 순서 그대로). 포커스 관리: 제출 실패 시 특정 필드로 포커스 이동하는 코드는 없음(`:65-68` — `setError`만 호출). | **개선**: 포커스 이동 미구현. 제출 실패 시 첫 오류 필드(email)로 `focus()` 이동이 바람직(WCAG 2.2 AA 3.3.1). `Field` 컴포넌트의 `aria-describedby`가 `error` 메시지와 연결되는지 하위 확인 필요. |
+| i18n/지역화 | 모든 가시 문자열이 i18n 키로 추출됨(`catalog.en.legacyC.ts:70-80`, `catalog.ko.legacyC.ts:72-82`). 키 접두사 `legacy.signupPage.`. 포함: title1, label2, label3, t4(카운트다운), t5(버튼), t6+t7(로그인 링크), t8(실패 메시지), mfaPrenotice. 숫자 형식: 카운트다운 `{{lockoutRemainingSec}}`는 정수만 표시(`Math.max(0, sec-1)`). 통화/날짜/시간대 없음. 복수형 없음. | **확인**: `t6`가 `"이미 계정이 있으신가요?{{val}}"`로 `val: " "`(공백)을 전달받아 연결함(`:114`). 영어판은 `"Already have an account?{{val}}"`으로 동일 패턴. 지역화 갭 없음. |
+| 성능 예산 | 렌더 비용: 폼 요소 2개, 버튼 1개, 링크 1개 — 경량. 외부 요청 없음(초기 마운트 시 `useSignup`은 mutation 전용, `isPending` false). POST `/auth/register`는 1회만 발생. LCP/INP 영향: 최소. 폴링/재시도 없음. | **확인**: 이 화면은 차트·긴 목록·이미지 없음. LCP는 `<h1>`(타이틀)으로 이미 DOM에 존재. INP는 버튼 클릭 1회만 발생. 성능 예산 초과 위험 없음. |
+| 텔레메트리 | 코드에서 명시적 telemetry/event 추적 없음(`:1-121`). 오류는 `ErrorMessage.traceId`로 `error.traceId`를 표시(`:33`) — 개발자 디버깅용일 뿐 이벤트 로깅 아님. `useSignup.onSuccess`에서 `qc.invalidateQueries({ queryKey: ["me"] })` 후 네비게이트(`:63-64`) — React Query 캐시 무효화만 있고 이벤트 기록 없음. | **개선**: 회원가입 성공/실패 이벤트(종류, 결과 코드) 추적 없음. WCAG 3.3.1 포커스 이동 구현 전까지 telemtry 우선순위 낮음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
@@ -106,9 +106,9 @@
 <!-- BLOCK:J1-SignupPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 이메일과 비밀번호(12자 이상)를 입력하고 "가입하기"를 누르면 `/onboarding/mfa-setup`로 이동한다. | `SignupPage.test.tsx:54-61` — `mutateAsync` mock 성공 후 `screen.getByText("MFA 설정 페이지")` 검출 |
+| A2 | 회원가입 실패 시 원본 API 메시지(raw error)를 사용자에게 노출하지 않는다(400→BadRequestNotice 매핑 문구, 403→ForbiddenNotice, 그 외→"회원가입에 실패했습니다.", 423→카운트다운 안내). | `SignupPage.test.tsx:65-143` — 423/400/NetworkError/VALIDATION_INVALID_FIELD 네 가지 실패 경로에서 raw message(`"raw lock detail"`, `"ECONNRESET"`)가 렌더되지 않음을 검증 |
+| A3 | MFA 사전 고지 문구("다음 단계에서 Google Authenticator 등 인증 앱이 필요합니다. 가입 전에 미리 설치해두세요.")가 초기 마운트 시 항상 표시된다. | `SignupPage.test.tsx:43-51` — `screen.getByText`로 사전 고지 문구 존재 검출 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -116,9 +116,9 @@
 <!-- BLOCK:J1-SignupPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 제출 실패 시 첫 오류 필드로 포커스 이동(WCAG 2.2 AA 3.3.1) | 포커스 이동 코드 없음(`:65-68` — `setError`만 호출, `useRef`로 input 참조 안 함) | 개선 | Phase 1 |
+| G2 | `protect(...)` 없이 `/signup`이 공개 라우트 — 이미 로그인한 사용자가 `/signup`에 접근할 때 리다이렉트 여부 미확인 | `router.tsx:85`에서 `/signup`은 `protect` 없이 직접 렌더링. 로그인 상태 체크 후 리다이렉트 코드 없음 | 개선 | Phase 1 |
+| G3 | `Field` 컴포넌트의 `error` prop이 `aria-describedby`로 오류 메시지 요소와 연결되는지 불명 | `Field` 컴포넌트 소스 미확인(하위 컴포넌트 의존). `error` prop 전달은 확인(`:75`, `:89`) | 개선 | 확인 후 기록 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
