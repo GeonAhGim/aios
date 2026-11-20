@@ -97,10 +97,10 @@
 <!-- BLOCK:J2-ScriptEditorPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `role="alert"`이 백테스트 오류 div(:145)에 적용되어 스크린 리더 알림 보장. 미리보기 패널(:74)은 `<ul>`/`<li>`로 시맨틱 마크업 사용. | 컴파일/백테스트 버튼(:133, :137, :244)에 `aria-label` 또는 `aria-busy` 없음. "컴파일 중" 상태 시 `aria-busy="true"` 또는 `aria-disabled` 추가 필요. "차트에서 백테스트" 버튼(:133)에 `aria-label` 누락. |
+| i18n/지역화 | `legacy.scriptEditorPage.t1`~`t8`, `title9`는 `catalog.ko.legacyB.ts:185~194`, `catalog.en.legacyB.ts:183~192`에 모두 존재. `scriptEditorPage.runBacktest` 등은 `catalog.ko.extra.ts:97~102`, `catalog.en.extra.ts:13~18`에 존재. 누락 키 없음. | 하드코딩 한국어 문자열 2곳: 컴파일 버튼(:245, `"컴파일 중..."`/`"컴파일"`), 차트 버튼 텍스트(:134, `"차트에서 백테스트"`). 이들을 i18n 키로 교체해야 `useTranslation()` 호출 없이 고정 언어가 표시됨. |
+| 성능 예산 | 컴파일/백테스트 모두 `useMutation`으로 온디맨드 실행. 폴링(`setInterval`/`refetchInterval`) 없음. 컴파일 성공 후 `useEffect`(:204)가 `syncScriptPreview`를 호출하나 `mutation.data` 변경 시에만 실행. 편집 시 `mutation.reset()`(:229)과 `clearScriptPreview`(:232)로 이전 결과 즉시 정리. | 미검진 — 렌더 빈도 측정(React DevTools Profiler) 또는 `performance.mark` 기반 테스트 없음. 컴파일 응답에 plot 개수만 포함되므로 `syncScriptPreview`는 가벼운 동기 함수로 판단됨. |
+| 텔레메트리 | `ScriptEditorPage.tsx`에서 `reportError`, `captureException`, `Sentry`, `telemetry`, `analytics` 호출 없음. 오류는 `ErrorMessage`(:249)와 `Alert`(:116)로만 사용자에게 표시. | 미확인 가능 — 페이지 레벨 오류 보고가 구현되지 않음. `mutation.isError`(:225) 시 `traceId`/`errorCode`를 콘솔 로깅하거나 오류 추적 서비스(Sentry 등)로 전송하지 않음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
