@@ -55,10 +55,10 @@
 <!-- BLOCK:J6-DecisionHistoryPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423(AUTH_ACCOUNT_LOCKED): 세션/계정 잠금. 429(RATE_LIMIT_EXCEEDED): 과부하 | 423: `ErrorMessage` 컴포넌트(`ComplianceDecisionLookupPanel.tsx:61-65`, `ErrorMessage.tsx:57-71`)가 `getApiErrorMessage`로 에러 문구 표시. `classifyRetry`가 `AUTH_ACCOUNT_LOCKED`를 모르므로 `none` → 재시도 버튼 없음(`ErrorMessage.tsx:39`). 429: `ErrorMessage`가 `retryAfterSec` 카운트다운(초 단위, `ErrorMessage.tsx:49-53`) + 재시도 버튼(`ErrorMessage.tsx:66`) | 423: 재시도 버튼 없음(잠금 해제는 별도 프로세스). 429: 카운트다운 후 재시도 버튼 활성화(클릭 시 `ComplianceDecisionLookupPanel.tsx:44`의 `handleLookup` 재호출) | 423: 구현됨(에러 표시만, 재시도 없음 — `ErrorMessage.tsx:39-40`, `ComplianceDecisionLookupPanel.tsx:61-65`, `accountLockout.ts:27-29`). 429: 구현됨(`ErrorMessage.tsx:38-39`, `retryable.ts:27-31`, `errorRouting.ts:119-121) |
+| 서버 오류(5xx) | 500(INTERNAL_ERROR), 502(EXCHANGE_FATAL): 재시도 불가. 503(EXCHANGE_UNAVAILABLE, DEPENDENCY_NOT_READY): 재시도 가능 | 500/502: `ErrorMessage`가 에러 문구 + trace_id 노출(`ErrorMessage.tsx:60`). 재시도 버튼 없음(`classifyRetry` → `none`). 503: `ErrorMessage`가 `retryAfterSec` 카운트다운 + 재시도 버튼. | 500/502: 수동 새로고침 또는 운영자 조치. 503: 카운트다운 후 재시도 | 500/502: 구현됨(`serverError.ts:30`, `errorRouting.ts:117`). 503: 구현됨(`serverError.ts:25-28`, `errorRouting.ts:116`) |
+| 네트워크 단절 | axios/fetch 실패: `errorCode` 필드 없는 plain `Error`. 모든 분류기(classifyBadRequest/classifyForbidden/classifyRetry/classifyServerError)가 `null`/`serverError.ts:51`의 `not_applicable` 반환 | `ErrorMessage` 컴포넌트가 `getApiErrorMessage(null, error.message)`로 기본 문구 표시(`ErrorMessage.tsx:36`). 재시도 배선은 `onRetry` 전달 여부 — `ComplianceActionError`는 `onRetry`를 받지만 `ErrorMessage.tsx:38-39`의 `classifyRetry`가 plain `Error`에서 `none` → `canRetry=false`. 재시도 버튼 없음. | 수동 새로고침 또는 네트워크 복구 후 재조회 | 구현됨(에러 표시는 됨, 재시도 버튼 없음 — `ErrorMessage.tsx:38-39`, `errorRouting.ts:132`). 재시도 배선 없음(`ComplianceActionError.tsx:11-24`의 `onRetry`가 `canRetry=false`로 무시됨) |
+| 부분 실패(일부 데이터만 실패) | `ComplianceDecisionLookupPanel`과 `EventLineageLookupPanel`은 서로 독립적으로 렌더(`DecisionHistoryPage.tsx:27-28`). 한 패널의 실패가 다른 패널에 영향 없음 | 각 패널이 개별 에러 표시. 성공한 패널은 정상 데이터 표시, 실패한 패널은 해당 패널의 에러 컴포넌트 표시 | 각 패널별로 재조회. 페이지 수준 통합 재시도 없음 | 구현됨(패널 독립 렌더 — `DecisionHistoryPage.tsx:27-28`). 페이지 수준 통합 실패 처리 없음(사실 시트의 버튼/핸들러 목록 비어 있음) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
