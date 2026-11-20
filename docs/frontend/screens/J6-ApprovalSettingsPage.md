@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-ApprovalSettingsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 — 개인 트레이더(투자자). 여정 J6("설정·승인·감사")의 주체. 승인 방식(SOLO/DUAL)을 직접 설정·변경한다. [확인: PERSONAS_AND_JOURNEYS.md §3 표 — J6는 P1(+P2) 중심] |
+| 목적(한 문장) | 거래 실행의 승인 방식을 SOLO(1인 승인, 강제 대기 60초) 또는 DUAL(서로 다른 두 계정 순차 서명) 중 하나로 설정하고, DUAL 모드일 때 2차 승인자 연락처를 등록한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:148` — `/settings/approval` 라우트는 `protect(<ApprovalSettingsPage />)`로 보호됨. `protect()`는 `ProtectedRoute` 컴포넌트(`frontend/apps/web/src/components/ProtectedRoute.tsx`)를 통과해야 함: (1) 로그인 세션 보유(`router.tsx:70-72`), (2) MFA 활성화(`ProtectedRoute.tsx:32-34`), (3) 위험도 평가 완료(`ProtectedRoute.tsx:35-41`). FeatureFlagGate 미적용(`router.tsx:93-111` 중 없음). |
+| 사용자 준비물 | 로그인 세션, MFA 설정 완료, 위험도 평가 완료. DUAL 모드 선택 시 2차 승인자의 연락처 정보(이메일 또는 전화번호). |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
