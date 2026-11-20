@@ -24,7 +24,8 @@
 <!-- BLOCK:J5-LedgerHistoryPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | TODO | TODO |
+| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | 훅 자체는 상태 계산만 하고 네트워크 요청이 없다(25-59행). `next()`/`prev()` 호출 시 `rerender()`로 리렌더링(30·35·41·46행). 폴링 없음. 호출처(`LedgerHistoryPage.tsx:48`)에서 직전 성공 응답의 `meta.page`(45-60행)를 주입받아 cursor를 관리. | 훅 자체는 에러 처리가 없고 `hasNext`/`hasPrev`만 반환(54행). 실제 에러 경로는 호출처에서 `query.isError`(73행)로 분기하여 `ErrorMessage`(74-80행) 표시. |
+| `useQuery` | `@tanstack/react-query` (외부 패키지) | `queryKey: ["ledgerHistoryPage", cursorPage.cursor]`, `queryFn: () => fetchPage(cursorPage.cursor)`(50-53행). 폴링 설정 없음 → 폴링 없음. 1회 조회 후 이전/다음 버튼(87·89행) 클릭 시 cursor 변경 → 새 queryKey로 재조회. 수동 새로고침은 `ErrorMessage.onRetry`(79행)의 `query.refetch()`만 있음. | 기본 `fetchPage`(28-29행)는 항상 reject하며 메시지 "원장 내역 조회 API가 아직 제공되지 않습니다." 오류는 `query.isError`(73행)에서 `ErrorMessage`(74-80행)로 표시, 목록(82행)과 페이지 버튼(85행) 숨김. 재시도 가능 여부: `routeApiError`(62행) 결과의 `kind`가 `refetch_retry` 또는 `backoff_retry`일 때 `onRetry` 활성화(79행). `routeApiError` 내부 결정 로직은 미확인. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
