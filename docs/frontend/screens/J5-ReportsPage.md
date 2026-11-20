@@ -56,10 +56,10 @@
 <!-- BLOCK:J5-ReportsPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | `statusCode=423` + `errorCode="AUTH_ACCOUNT_LOCKED"` (`errorRouting.ts:125-126` → `account_locked`) 또는 `statusCode=429` + `errorCode="RATE_LIMIT_EXCEEDED"` (`errorRouting.ts:119-121` → `backoff_retry`) | `ErrorMessage` (`ReportsPage.tsx:25`): `getApiErrorMessage`로 매핑된 한국어 문구 + `retryAfterSec` 카운트다운 + 재시도 버튼(카운트다운 0 전에는 disabled) (`ErrorMessage.tsx:49-66`) | 재시도 버튼 클릭(`onRetry` → `refetch`, `ReportsPage.tsx:30-31`); 카운트다운 후 수동 활성화 | 구현됨 (`ReportsPage.tsx:22-31`, `ErrorMessage.tsx:49-66`, `accountLockout.ts:41-50`, `retryable.ts:27-31`) |
+| 서버 오류(5xx) | `statusCode=503` + `errorCode="EXCHANGE_UNAVAILABLE"`/`"DEPENDENCY_NOT_READY"` (`errorRouting.ts:115-116` → `backoff_retry`) 또는 `statusCode=502`/`500` + `errorCode="EXCHANGE_FATAL"`/`"INTERNAL_ERROR"` (`errorRouting.ts:117` → `server_fatal`) | retryable(503): `ErrorMessage` + `retryAfterSec` 카운트다운 + 재시도 버튼 (`ReportsPage.tsx:22-31`, `ErrorMessage.tsx:49-66`)<br>fatal(500/502): `ErrorMessage` + `traceId` 노출 (`ErrorMessage.tsx:60`) + 재시도 버튼 없음 | retryable: 재시도 버튼 클릭 → `refetch` (`ReportsPage.tsx:30-31`)<br>fatal: 페이지 새로고침 또는 관리자 문의 | 구현됨 (`ReportsPage.tsx:22-31`, `serverError.ts:25-30`, `errorRouting.ts:115-117`) |
+| 네트워크 단절 | `fetch` throw (DNS 실패, 연결 거부, 타임아웃 등) → react-query가 `isError=true`, `error`에 `Error` 인스턴스 설정 | `ErrorMessage` (`ReportsPage.tsx:25`): `error.message` 직접 노출 (`ReportsPage.tsx:27`); `errorCode`/`traceId` 없음(plain Error이므로); 재시도 버튼 있음(`onRetry` 전달, `ReportsPage.tsx:30-31`) | 재시도 버튼 클릭 → `refetch` (`ReportsPage.tsx:30-31`) | 구현됨 (`ReportsPage.tsx:27-30`, `ReportsPage.test.tsx:100-111`) |
+| 부분 실패(일부 데이터만 실패) | `useReport` 훅이 부분 데이터 반환(`shared-hooks/src/usePortfolio.ts:29`): `dailyPnl=[]` 또는 `strategyContributions=[]` | `dailyPnl=[]`: 손익 추이 카드 숨김 (`ReportsPage.tsx:76`), 문구 없음<br>`strategyContributions=[]`: `EmptyState` ("해당 기간 거래 내역이 없습니다.", `ReportsPage.tsx:115`)<br>기타 지표(수익률 등)는 정상 표시 | 시작일/종료일 변경 후 재조회 | 구현됨 (`ReportsPage.tsx:76`, `:91`, `:115`) — 단, `dailyPnl=[]` 시 안내 문구 없음(`ReportsPage.tsx:76` 조건부 렌더링만) |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
