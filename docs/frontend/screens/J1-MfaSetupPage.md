@@ -78,7 +78,8 @@
 <!-- BLOCK:J1-MfaSetupPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음(금전·위험 거래 아님) — 화면에 주문·실행 생성·LIVE 전환·위임장 변경·출금 호출이 없다. 있는 호출은 두 개뿐: `setupMfa.mutate` (MFA 설정 발급, `MfaSetupPage.tsx:54`, 호출 경로: `useAuth.ts:66-67` → `apiClient.setupMfa()`), `verifyMfa.mutateAsync` (TOTP 검증, `MfaSetupPage.tsx:71`, 호출 경로: `useAuth.ts:70-76` → `apiClient.verifyMfa({ totpCode })`). 성공 시 `/onboarding/risk-assessment`로 네비게이트(`:72`) 외 별도 거래 호출 없다. |
+| 위험 행동 메모 | 확인 절차: 비밀번호 재확인 등 추가 확인 없이 `setupMfa.mutate`를 직접 호출한다(`MfaSetupPage.tsx:54`). 멱등성: 클라이언트는 최초 마운트 1회 가드만 둔다(`:49`, `:52-53`). 서버 측 멱등성은 이 리프에서 읽지 않았으므로 '미확인'. 불확실 결과 표시: 실패는 `t7`/`t8` 문구로 표시한다(`:60`, `:74`). 요청이 처리됐는지 모르는 상태를 구분하는 표시는 확인되지 않았다. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
