@@ -106,9 +106,9 @@
 <!-- BLOCK:J3-NotificationCenterPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 로딩 중(`!history`)에는 `LoadingState`만 보이고, 로드 후 이력이 없으면 "표시할 알림 이력이 없습니다."(`notificationCenter.empty`)가 보이며, 이력이 있으면 날짜별 다이제스트 카드(날짜 제목, "{{count}}건", 전체/발송됨/실패 Stat 3개, 항목 목록)가 렌더된다 (`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:70-76`, `:78-105`) | 컴포넌트 테스트(조회 모의: 지연/빈 배열/정상 데이터). 현재 이 화면 전용 테스트 존재 여부는 미확인 |
+| A2 | 채널 필터 변경(`Select`)은 `useMemo`로 필터링된 결과만 다이제스트에 반영한다 — "ALL"은 전체, "EMAIL"/"PUSH"/"IN_APP"은 해당 채널만 필터링(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:41-44`) | 컴포넌트 테스트(부정): 필터 변경 시 `computeDailyDigest` 호출 입력 변경 단언. `useNotificationHistory` 재요청 없음(클라이언트 측 필터링) |
+| A3 | 조회 실패 시 `routeApiError` 분류가 `refetch_retry`/`backoff_retry`이면 재시도 버튼이 보이고 `refetch()`를 호출하며, 403은 `ForbiddenNotice`로 바뀐다 (`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:19-29`, `:70-71`) | 컴포넌트 테스트(부정): 403/503/NetworkError 모의 후 렌더 결과 단언. 현재 이 화면 전용 테스트 존재 여부는 미확인 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
