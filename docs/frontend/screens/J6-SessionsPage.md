@@ -34,10 +34,10 @@
 <!-- BLOCK:J6-SessionsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | 최초 조회 중 (`!query.isError && query.isLoading`, :190). 재조회(`invalidateQueries`, :157) 중에는 `isLoading`이 아니므로 로딩 표시가 나오지 않는다. | `LoadingState` — "불러오는 중..." (:35, Feedback.tsx:35). 시트 밖 문구. | 없음(대기). | 구현됨 `SessionsPage.tsx:190` |
+| 빈 상태 | 조회 성공이고 `rows.length === 0` (:191). `rows`는 :137에서 `query.data ?? []`로 만든다. | `EmptyState` — `legacy.sessionsPage.t8` = "활성 세션이 없습니다." (:191). | 없음. 페이지 헤더의 「전체 로그아웃」 버튼(:182-183)은 그대로 보인다. | 구현됨 `SessionsPage.tsx:191` |
+| 정상 | 조회 성공이고 `rows.length > 0` (:192-212). 파싱 실패 항목(`parseSessionView`가 null)은 `legacy.sessionsPage.t9` "세션 정보를 해석할 수 없습니다."(:206) Alert가 나온다. | 행마다 — `legacy.sessionsPage.t1` "이 기기"(현재 세션, :96), `t2` "폐기됨"(폐기 시각 있음, :97), `t3`·`t4` 생성/최근 활동 시각(:100), `t5` "폐기" 버튼(`canRevoke`일 때만, :104-106). 제목 `title6` "활성 세션"(:180), 버튼 `t7` "전체 로그아웃"(:183). | 「폐기」(`handleRevoke`, :142-163), 「전체 로그아웃」(`handleRevokeAll`, :168-174). | 구현됨 `SessionsPage.tsx:192-212` (행별 :104-106 인용) |
+| 낡은 데이터(신선도 초과) | `useQuery`(:132-135)에 staleTime·refetchInterval 설정 없음. 갱신 경로는 마운트 시 1회 조회와 폐기 성공 후 `invalidateQueries`(:157)뿐. 전역 `QueryClient`(main.tsx:15)도 기본 생성자로 설정 없음. | 오래된 데이터를 "낡음" 표시로 알려주는 문구는 시트에 없다. 재조회 실패(`query.isError`) 시 기존 목록은 숨겨지고 `ErrorBanner`만 보인다(:187, :192 가드). | 「다시 시도」 버튼(`onRetry`, :187, :73, `refetch_retry`/`backoff_retry`일 때만). | 「낡음 표시」 없음(근거: :132-135에 staleTime/refetchInterval 없음, main.tsx:15 기본 생성자). 「다시 시도」 구현됨 `SessionsPage.tsx:187` |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
