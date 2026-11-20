@@ -34,10 +34,10 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `useMyApprovalRequests`의 `isLoading === true` (마운트 시 API 호출 중) | `LoadingState` 컴포넌트 렌더링 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:114-115`) | 없음(비활성). 버튼도 `loading` 상태. | 구현됨 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:114-115`: `{isLoading ? <LoadingState /> : ...}`) |
+| 빈 상태 | `requests` 배열이 있고 `length === 0` (조회 성공 but 데이터 없음) | `EmptyState` 컴포넌트에 `t("legacy.myApprovalRequestsPage.t5")` ("대기 중인 승인 요청이 없습니다.") 표시 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:122-123`) | 없음. 승인 요청이 없으므로 조작 불가. | 구현됨 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:122-123`: `: <EmptyState>{t("legacy.myApprovalRequestsPage.t5")}</EmptyState>`) |
+| 정상 | `requests` 배열이 있고 `length > 0` | 각 항목을 `RequestCard`로 렌더링 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:116-121`). 각 카드는 요청 액션명, scope/모드 뱃지, 생성일시, 1차 서명 완료 여부, 승인/거절 버튼, 타이머 카운트다운 표시. | 승인 버튼(기다시간 경과 후 활성화, `remaining > 0` 시 disabled) 또는 거절 버튼 클릭. 각 버튼은 `useApproveMyRequest`/`useRejectMyRequest` mutation trigger. 성공 시 목록 자동 갱신. 실패 시 `RequestActionError` 표시. | 구현됨 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:44-100`: `RequestCard` 컴포넌트, `handle` 함수, 승인/거절 버튼, `useApproveMyRequest`/`useRejectMyRequest` mutation 바인딩) |
+| 낡은 데이터(신선도 초과) | `useMyApprovalRequests`는 폴링/자동 재조회 미설정 (`frontend/packages/shared-hooks/src/useApprovals.ts:5-9`: `queryFn` 1회 조회, 폴링 옵션 없음) | 별도 UI 없음. 마운트 시 1회만 조회하므로 페이지 체류 중 백엔드 상태 변경 시 stale 데이터 표시 가능. | `refetch` 함수 expose됨 (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:104`) but 사용자 노출 refetch 버튼 없음. `isError` 시에만 `onRetry={() => refetch()}`. | 없음 (신선도 모니터링 또는 stale-time 갱신 로직 없음. `useQuery` 기본 `staleTime: 0`이므로 다음 render 시 이미 stale로 간주되나 UI 피드백 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
