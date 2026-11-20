@@ -117,9 +117,9 @@
 <!-- BLOCK:J3-MandatePage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 활성 리비전(`activeRevision`)과 대기 중 개정안(`pendingRevision`)이 모두 없을 때("빈 상태"), `legacy.mandatesPage.t8`("위임장 미설정(주문 차단)") 경고 배지와 `mandatePage.listEmpty`("등록된 위임장이 없습니다.") 안내 문구를 표시하며, `<MandateRuleForm>`이 초안 작성 모드로 렌더된다 (`MandatePage.tsx:118~121`, `:184~188`) | 컴포넌트 테스트(조회 모의: `activeRevision=null`, `pendingRevision=null`) — 배지와 빈 목록 문구 단언 |
+| A2 | `handleCreate`는 `activeRevision`이 있으면 `proposeAmendment.mutate()`를, 없으면 `createDraft.mutate()`를 호출한다. 버튼 라벨은 활성 리비전 유무에 따라 `mandatePage.amendSubmitLabel`("개정안 제안") 또는 `mandatePage.draftSubmitLabel`("초안 작성")로 전환된다 (`MandatePage.tsx:59~62`, `:185`) | 컴포넌트 테스트(부정+성공): `activeRevision` 유무별 mutation 호출 단언 + 라벨 단언 |
+| A3 | `useMandateStatus`의 `isError` 분기(`:83~92`)에서 `MandateActionError(error, onRetry=refetch)`를 렌더하고, `createError`/`activateError`/`lifecycleError` 상태가 채워지면 각각 해당 위치(`:190~194`, `:176~180`, `:147~159`)에 `MandateActionError` 배너를 노출한다. `activateError`는 409 경합 시 `classifyStateConflict(err) === "refetch_retry"`면 `refetch()`로 재조회한다 (`:70~75`) | 컴포넌트 테스트(부정 포함): `isError=true` 모의 → 재시도 버튼 + `refetch` 호출 단언. `createError`/`activateError`/`lifecycleError` 각각 모의 → 배너 노출 단언. 409 모의 → `refetch` 재조회 단언 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -127,9 +127,9 @@
 <!-- BLOCK:J3-MandatePage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | §7 텔레메트리: 오류 발생 시 Sentry 등 외부 에러 모니터링으로 전달해야 한다 (`isError`, `createError`, `activateError`, `lifecycleError` 모두) | `MandatePage.tsx:1~201`에 텔레메트리 호출(reportError, captureException, logEvent, telemetry, analytics)이 단 하나도 없음. `MandateActionError` 컴포넌트도 traceId를 `legacy.errorMessage.t1`("지원코드: {{traceId}}")로 표시만 하고 외부 보고 없음. [MandatePage.tsx:1~201, docs/frontend/facts/MandatePage.facts.md:60~62] | 낮음 | 명세 수정(현재 구현은 UI 노출만) 또는 구현 수정(별도 리프) |
+| G2 | §6 성능: `useMandateStatus`는 1회 조회(`useQuery`)이며 폴링/자동 갱신 옵션 미설정. `refetch()` 수동 재조회만 가능. mutation 훅 5개(`createDraft`, `proposeAmendment`, `activate`, `pause`, `resume`)는 모두 `isPending` 상태로 로딩 표시 | 폴링 미설정 → 데이터 신선도 자동 갱신 없음(의도적일 수 있음). 성능 측정 포인트(deferred paint, React profiler) 미정의. 렌더 분기는 `isLoading`, `isError`, `activeRevision`/`pendingRevision` 유무만 체크 | 낮음 | 명세 수정(현재 구현은 의도적 정적 조회) 또는 구현 수정(폴링 옵션 추가, 별도 리프) |
+| G3 | §4 i18n: 모든 사용자-facing 문자열이 i18n 키로 노출되어야 함 | `mandatePage.pageTitle`/`listTitle`/`listEmpty`/`activeLabel`/`pendingLabel`/`noneLabel`/`draftSubmitLabel`/`amendSubmitLabel`과 `legacy.mandatesPage.t1~t6`, `t8~t10`, `t15`, `t16`이 모두 `catalog.ko.ts:438~`, `catalog.en.ts:485~` 등 ko/en 쌍으로 등록됨. 누락 키 없음. [MandatePage.tsx:32~39, 87, 98, 107~108, 113, 117~121, 133, 142, 153, 165, 170, 185] | 없음 | 충족 — 모든 사용 키가 카탈로그에 ko/en 쌍으로 존재 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
