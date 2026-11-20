@@ -24,12 +24,12 @@
 <!-- BLOCK:J6-ConnectionsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useConnections` | `frontend/packages/shared-hooks/src/useConnections.ts:13` | TODO | TODO |
-| `useBeginConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:20` | TODO | TODO |
-| `useConfirmConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:28` | TODO | TODO |
-| `useSyncConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:36` | TODO | TODO |
-| `useRevokeConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:44` | TODO | TODO |
-| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | TODO | TODO |
+| `useConnections` | `frontend/packages/shared-hooks/src/useConnections.ts:13` | `useQuery`로 마운트 시 1회 조회. 폴링 interval 설정 없음. 화면 '새로고침' 버튼(`ConnectionsPage.tsx:210-211`) + 4개 mutation 성공 시 queryKey 무효화로 GET 재조회. 전역 staleTime 기본값은 미확인. | `ConnectionsPage.tsx:180-181`에서 isError면 목록 대신 에러 컴포넌트 표시. 새로고침 버튼 숨김(`:209`). 403은 ForbiddenNotice 경로, 그 외는 ErrorMessage(errorCode/message/traceId/retryAfterSec 전달). 네트워크 단절/401/429/5xx 처리 근거는 이 범위에 없음 → 미확인. |
+| `useBeginConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:20` | 변경 요청(mutations, POST 성격). 성공 시 onSuccess 콜백(`:24`)에서 CONNECTIONS_QUERY_KEY 무효화 → useConnections가 GET 재조회. 페이지는 성공 시 폼 필드 초기화(`ConnectionsPage.tsx:133-137`). | 실패 시 onError 콜백(`:138-141`)에서 setCreateError + setFromError 호출. 폼 하단 에러 컴포넌트(`:272`) 표시. 필드별 오류는 fieldErrors 맵으로 ConnectionsPage.tsx:219(providerCode), `:230`(opaqueAccountRef), `:260`(requested_capability_profile)에 text-danger 클래스로 표시. |
+| `useConfirmConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:28` | 변경 요청(mutations). 성공 시 onSuccess 콜백(`:32`)에서 CONNECTIONS_QUERY_KEY 무효화 → 목록 GET 재조회. 행 버튼은 loading 속성(`ConnectionsPage.tsx:73`)으로 진행 상태 표시. | onError 콜백(`:150`)에서 setRowError로 행 오류 저장. 해당 행 아래에 에러 컴포넌트(`:198-202`)로 표시. 403/그 외 구분은 에러 컴포넌트(`:25-36`)에서 처리. |
+| `useSyncConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:36` | 변경 요청(mutations). 성공 시 onSuccess 콜백(`:40`)에서 CONNECTIONS_QUERY_KEY 무효화 → 목록 GET 재조회. 응답 스냅샷은 React Query 캐시에 넣지 않고 snapshots 로컬 상태(`ConnectionsPage.tsx:159`)에 저장 — 무효화로 갱신되지 않고 페이지 언마운트 시 사라짐. 행 버튼은 loading 속성(`:75`)으로 진행 상태 표시. | onError 콜백(`:160`)에서 setRowError로 행 오류 저장. 해당 행 아래에 에러 컴포넌트(`:198-202`)로 표시. |
+| `useRevokeConnection` | `frontend/packages/shared-hooks/src/useConnections.ts:44` | 변경 요청(mutations). 성공 시 onSuccess 콜백(`:48`)에서 CONNECTIONS_QUERY_KEY 무효화 → 목록 GET 재조회. 행 버튼은 loading 속성(`:77`)으로 진행 상태 표시. | onError 콜백(`:169`)에서 setRowError로 행 오류 저장. 해당 행 아래에 에러 컴포넌트(`:198-202`)로 표시. |
+| `useFieldErrors` | `frontend/apps/web/src/hooks/useFieldErrors.ts:15` | 로컬 `useState` 기반 폼 상태, 네트워크 호출 없음. 갱신 = 생성 실패 시 `setFromError`(`ConnectionsPage.tsx:140`), 입력 변경 시 `clearField`(`:224`, `:235`, `:253`). `setFromError(null)`(`:129`)는 폼 재제출 시 이전 오류 초기화. | 매핑은 `shared-types`의 `extractFieldErrors`(`useFieldErrors.ts:2,19`, 주석 `:11`에서 VALIDATION_INVALID_FIELD)가 담당. 매핑 세부는 `fieldErrors.ts` 미확인. `ConnectionsPage.tsx:129`의 `setFromError(null)` 동작은 미확인. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
