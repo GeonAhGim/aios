@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P7(기관) — 거버넌스·승인 체인, 승인 요청 처리 [확인: PERSONAS_AND_JOURNEYS.md §2 표 P7, `approvals` 라우트] |
+| 목적(한 문장) | 사용자가 직접 생성한 FD-10.1(SOLO/DUAL) 승인 요청을 조회하고, 강제 대기시간 이후 본인이 직접 승인 또는 거절한다. [확인: MyApprovalRequestsPage.tsx:15-17 주석, t4 문구] |
+| 진입 조건 | `router.tsx:147` — `/approval-requests` 라우트. `protect()` 래퍼가 `ProtectedRoute` 가드 적용. `ProtectedRoute.tsx:20-21`: 미로그인(`!token`) 시 `/login?next=...` 리다이렉트. `ProtectedRoute.tsx:32-33`: MFA 미설정(`!me.mfaEnabled`) 시 `/onboarding/mfa-setup` 리다이렉트. `ProtectedRoute.tsx:35-41`: 위험 프로필 미설정(`!riskProfile`) 시 `/onboarding/risk-assessment` 리다이렉트. [확인] |
+| 사용자 준비물 | 로그인 세션, MFA 활성화, 위험 프로필 설정 [확인: ProtectedRoute.tsx 조건 순서] |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
