@@ -78,7 +78,7 @@
 <!-- BLOCK:J1-ConnectionWizardPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면은 공급자 계정 연결 요청(onboarding) 전용이며, 주문·실행 생성·LIVE 전환·위임장 변경·출금 등 금전·위험 행동이 없음. 선택 가능한 권한은 `READ_BALANCE`/`READ_POSITION`/`READ_ACTIVITY` 세 가지 읽기 전용 스코프뿐(`ConnectionWizardPage.tsx:12`). i18n `connectWizard.steps.permissions.readonlyNotice`가 명시적으로 "주문·출금 권한은 요청되지 않습니다"(`:141`)고 안내. `useBeginConnection` mutation(`useConnections.ts:20-25`)은 연결 요청 생성 API(`apiClient.beginConnection`) 호출만 수행하고, 주문/실행/출금 등 금전 동작을 포함하지 않음. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
