@@ -76,7 +76,7 @@
 <!-- BLOCK:J3-NotificationCenterPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 화면은 알림 이력 조회 전용(읽기). `useNotificationHistory()`(`frontend/packages/shared-hooks/src/useAccountSettings.ts:45`)는 `useQuery`로 `apiClient.getNotificationHistory`(`frontend/packages/api-client/src/clients/notifications.ts:19`)를 HTTP GET(`http.ts:197` default method="GET")으로 호출할 뿐이며, `useMutation`을 쓰는 곳은 `requestAccountDeletion`(`frontend/packages/shared-hooks/src/useAccountSettings.ts:40-42`)뿐이고 이 페이지는 이를 import하지 않는다(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:1-10`). 액션은 채널 필터 `<Select>`(`:55-66`)와 실패 시 `refetch()`(`:71`)뿐이고, 발송·재발송·취소 버튼은 없다(`:93-103`). 실제 발송은 백엔드 책임(`:33-35` 주석). 조회 전용이라 적용할 확인 절차·멱등 키·불확실 결과 표시 없음. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
