@@ -87,7 +87,9 @@
 <!-- BLOCK:J1-DemoChartPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| TODO | | |
+| 미등록 데모 종목 (`findDemoInstrument`가 `null`, `DemoChartPage.tsx:37`) | `demoMode.chart.unknownInstrument` ("알 수 없는 데모 종목입니다.", `DemoChartPage.tsx:51`) | `Link to=/onboarding/demo`로 돌아가기 버튼 제공(`:44-47`) | 노출 없음 |
+| 백테스트 실행 중 예외 (`runDemoBacktest` 비정상 종료, `DemoChartPage.tsx:32`) | 없음(try/catch 미구현) | `isRunning`이 `true`로 고정되어 버튼이 로딩 상태로 정지(`:70` `LoadingState` 표시). 재로그인 또는 페이지 새로고침 필요. | 노출 없음 |
+| 데모 모드 기능 플래그 비활성화 (`FeatureFlagGate` 가드, `router.tsx:109`) | `common.featureDisabled` (`FeatureFlagGate.tsx:17`) | 플래그 활성화 대기. 관리자에게 문의. | 노출 없음 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
