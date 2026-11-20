@@ -51,10 +51,10 @@
 <!-- BLOCK:J4-SafetyControlsPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `routeApiError(error)`가 `field_errors`·`disclosure_retired`·`mfa_invalid` 반환 (`shared-types/src/errorRouting.ts:94–99`) | `ErrorMessage` 컴포넌트(`SafetyControlsPage.tsx:38`) — API 오류 메시지로 표시. `fieldErrors`가 있으면 배너 숨김(`ErrorMessage.tsx:55`) — 필드별 이미 표시 중. trace_id: `ErrorMessage.tsx:60`에서 `legacy.errorMessage.t1` 키로 노출 | `classifyRetry`가 "none"이 아니면 재시도 버튼(`ErrorMessage.tsx:39,61-67`). `field_errors`면 재시도 불가(필드 수정 필요) | `구현됨` — `SafetyControlsPage.tsx:36-44`에서 `routeApiError` 결과 전달, `ErrorMessage.tsx:55`에서 `fieldErrors` 체크 후 렌더링 분기 |
+| 인증 필요/세션 만료(401) | `routeApiError(error)`가 `auth_required` 반환 (`shared-types/src/errorRouting.ts:127` — `isSessionExpiredErrorCode` 판정) | `ErrorMessage` 컴포넌트(`SafetyControlsPage.tsx:38`) — "인증이 필요합니다" 문구 표시. trace_id: ApiError일 때 `legacy.errorMessage.t1`로 노출 | `classifyRetry`가 "none"(세션 만료는 retry 아님) → 재시도 버튼 없음. 사용자 재로그인 필요 | `구현됨` — `routeApiError`가 `auth_required` 감지, `ErrorMessage`가 API 메시지 번역. 재시도 버튼 없음 |
+| 권한 없음/MFA 필요(403) | `classifyForbidden(error)`가 truthy (`SafetyControlsPage.tsx:35`) | `ForbiddenNotice` 컴포넌트(`SafetyControlsPage.tsx:35`) — `classifyForbidden` 결과 4갈래(forbidden, mfa_required, tenant_mismatch, policy). API 메시지로 문구 표시. policy 갈래면 `DenialReasons` 상세 표시(`ForbiddenNotice.tsx:41`). MFA 갈래면 onStepUp 버튼(`ForbiddenNotice.tsx:42-46`) | MFA 갈래면 `onStepUp` 버튼. 나머지 갈래는 재시도 버튼 없음(`ForbiddenNotice.tsx:42` — 재시도해도 같은 결과 반복) | `미완` — `ForbiddenNotice`는 표시되나 `SafetyControlActionError` props에 `onStepUp`이 전달되지 않음(`SafetyControlsPage.tsx:34` 시그니처에 없음). MFA 단계 상승 액션 누락 |
+| 충돌/상태 불일치(409) | `routeApiError(error)`가 `refetch_retry`·`invalid_transition` 반환 (`shared-types/src/errorRouting.ts:113–115`) | `ErrorMessage` 컴포넌트(`SafetyControlsPage.tsx:38`) — `getApiErrorMessage`로 메시지 표시. trace_id: ApiError일 때 `legacy.errorMessage.t1`로 노출 | `refetch_retry`면 `classifyRetry`가 refetch → 재시도 버튼 즉시 활성화(`ErrorMessage.tsx:39,66`). `invalid_transition`면 재시도 불가 | `구현됨` — `routeApiError`가 `refetch_retry`/`invalid_transition` 감지, `ErrorMessage.tsx:39`에서 `classifyRetry`로 재시도 가능 판정 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
