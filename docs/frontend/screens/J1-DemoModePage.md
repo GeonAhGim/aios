@@ -74,7 +74,11 @@
 <!-- BLOCK:J1-DemoModePage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면에 금전·위험 행동(주문, 실행 생성, LIVE 전환, 위임장 변경, 출금 등)이 없다. `DemoModePage.tsx:9~41`에 API 호출(fetch/axios/React Query)·상태 변경 호출·입력 폼이 없고, 유일한 행동은 `<Link to="/onboarding/demo/{id}">` 네비게이션(`DemoModePage.tsx:29~33`)뿐이다. 사실 시트 `Error handling calls` 표 공백(`DemoModePage.facts.md:35~38`), `Form fields` 표 공백(`DemoModePage.facts.md:18~21`)도 일치 |
+| 확인 절차 | 해당 없음 — 금전 행동 자체가 없음 | 해당 없음 |
+| 멱등성 | 해당 없음 — 상태 변경 API 호출이 없음(`DemoModePage.tsx:9~41`) | 해당 없음 |
+| 불확실 결과 표시 | 해당 없음 — 비동기 서버 호출이 없음(`DemoModePage.tsx:9~41`) | 해당 없음 |
+| 다음 단계 화면(DemoChartPage)의 금전 행동 | 미확인 — 이 리프의 범위는 현재 화면(`DemoModePage.tsx:9~41`)뿐. `router.tsx:107~113`에서 `DemoChartPage`로 라우트되나, 그 화면의 금전 행동 여부는 확인하지 않음 | 미확인 |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
