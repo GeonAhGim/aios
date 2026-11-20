@@ -24,7 +24,9 @@
 <!-- BLOCK:J6-SessionsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| TODO | | |
+| 세션 목록 (`useQuery`, queryKey: `["sessions"]`) | `SessionsPage.tsx:132-135` — `queryFn: fetchSessions` | 마운트 시 1회 조회. 폴링 미설정(반복 갱신 없음). `queryClient.invalidateQueries({ queryKey: ["sessions"] })`로 수동 갱신 — `handleRevoke` 성공 시(현재 세션 아닌 경우) `SessionsPage.tsx:157`에서 호출. | `ErrorBanner` 컴포넌트(`SessionsPage.tsx:63-76`)가 오류 분류: `classifyForbidden`(`SessionsPage.tsx:10`) true → `ForbiddenNotice`(`SessionsPage.tsx:64`) 표시. 그 외 → `routeApiError`(`SessionsPage.tsx:13`)로 라우트 후 `ErrorMessage`(`SessionsPage.tsx:68`) 표시. `ErrorMessage`는 `backoff_retry` 또는 `refetch_retry`일 때 `onRetry` 버튼 제공(사용자 재시도). `fetchSessionsDefault`(`SessionsPage.tsx:53-54`)는 현재 `SessionsRouteNotImplementedError`를 던짐(서버 API 미구현 중). |
+| 개별 세션 폐기 (`handleRevoke`) | `SessionsPage.tsx:142-163` — `client.revoke(view.sessionId)` | 사용자가 "폐기" 버튼 클릭 시 1회 요청(`SessionsPage.tsx:105-106`). `window.confirm` 확인 필요. | `try/catch`로 `actionError`에 저장(`SessionsPage.tsx:159`) → `ErrorBanner(error={actionError})`(`SessionsPage.tsx:188`) 표시. 현재 세션이면 `navigate("/login")`(`SessionsPage.tsx:154`)으로 리다이렉트. 비동기 실패 시 `setPendingId(null)`(`SessionsPage.tsx:161`)로 버튼 비활성화 해제. |
+| 전체 로그아웃 (`handleRevokeAll`) | `SessionsPage.tsx:168-174` — `client.revokeAll()` → `logoutClient.logoutAll()` | 사용자가 "전체 로그아웃" 버튼 클릭 시 1회 요청(`SessionsPage.tsx:182-183`). `window.confirm` 확인 필요(`SessionsPage.tsx:169`). | `logout.ts`의 logoutAll은 "best-effort"(서버 결과 무시, 로컬 정리만 보장, task-454 decision) — 여기서 성공/실패 분기하지 않음. 무조건 `navigate("/login", { replace: true })`(`SessionsPage.tsx:173`). `pendingAll` 상태(`SessionsPage.tsx:122`)로 버튼 로딩 표시. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
