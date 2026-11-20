@@ -131,9 +131,9 @@
 <!-- BLOCK:J3-PortfolioPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 재조정 입력 칸에 `label` 또는 `aria-label`이 있어야 한다(접근성 기준) | `Input`에 `placeholder`만 있고 `label`/`aria-label`이 없음 (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:157-165`, 사실 시트: label 없음) | medium | 미구현 — 후순위 |
+| G2 | 금액 입력에 숫자 형식·음수 허용 여부 등 클라이언트 검증이 있어야 한다 | `type="number"`이지만 음수·형식 검증 없이 문자열이 그대로 서버로 전송된다 (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:158`). 서버 측 검증은 미확인 | medium | 미구현 — 후순위 |
+| G3 | 포트폴리오 조회(GET /portfolio)에 ApiResponse 봉투(`meta.as_of`)가 아직 적용되지 않음 | `DataFreshness`가 `dataUpdatedAt`로 대체 중(stale 배지永不 뜨는Known issue) (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:90-94`). PLT-19 예정 | low | PLT-19로 이관 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
