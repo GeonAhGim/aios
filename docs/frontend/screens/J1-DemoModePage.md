@@ -114,9 +114,9 @@
 <!-- BLOCK:J1-DemoModePage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 페이지 렌더 시 `DEMO_INSTRUMENTS`(3종목)만큼 `<li>` 항목이 렌더되며, 각 항목에 종목 라벨(`BTC/USDT`, `ETH/USDT`, `SOL/USDT`)과 "(샘플)" 태그가 표시된다 | `DemoModePage.tsx:20~35` — `DEMO_INSTRUMENTS.map()`으로 3개 `<li>` 생성, 라벨은 `instrument.label:25`, 태그는 `demoMode.sampleTag:27` |
+| A2 | 각 종목의 "데모 시작" 버튼 클릭 시 `/onboarding/demo/{instrument.id}`로 라우팅된다 (`/onboarding/demo/DEMO-BTCUSDT` 등) | `DemoModePage.tsx:29~33` — `<Link to={...}>`가 `<Button>`을 감싸고 `to` 속성에 `/onboarding/demo/${instrument.id}` 사용. 테스트 ID `demo-start-{id}`(`:30`)로 선택 가능 |
+| A3 | 페이지의 모든 가시 텍스트는 i18n 키를 통해 internationalization된다. 하드코딩된 문자열이 없다 | `DemoModePage.tsx:10` — `useTranslation()`으로 `t` 함수 획득. `:15`(`pageTitle`), `:16`(`description`), `:18`(`instrumentListLabel`), `:27`(`sampleTag`), `:31`(`startCta`) 모두 `t()` 호출. `demoDataset.ts`의 라벨(`BTC/USDT` 등)은 종목 식별자 표시용(사용자 대상 번역 텍스트 아님) |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -124,9 +124,9 @@
 <!-- BLOCK:J1-DemoModePage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 버튼에 `aria-label` 등 접근성 속성이 명시되어야 함(WCAG 2.1 4.1.2) | `DemoModePage.tsx:30` — `<Button>`에 `aria-label` 속성 없음. `<Link>`가 감싸고 있어 버튼 텍스트("데모 시작")가 접근성 이름으로 사용되나, 명시적 속성 없음 | 낮음 | 후속 작업 권장 — 현재 `Link`→`Button` 구조에서 버튼 텍스트가 접근성 이름으로 충분하므로 즉시 수정 필수 아님 |
+| G2 | `Link`로 감싸진 `<Button>`의 접근성 중첩(`Link`→`Button`→`<button>`)이 스크린 리더에 중복 네비게이션 신호를 보내지 않아야 | `DemoModePage.tsx:29~33` — `<Link>`가 `<Button>`을 감싸고, `Button` 내부에서 `<button>`으로 렌더됨. `role` 속성 재정의 없음. `react-router-dom` v6+에서 `Link`→`button` 중첩은 알려진 패턴이나, 중복 `role=navigation` 신호 가능성 | 낮음 | `Button` 컴포넌트의 `variant="ghost"`가 `<span>`으로 렌더링되도록 하면 중첩 제거 가능(후속 작업 권장) |
+| G3 | i18n 카탈로그에 `demoMode.*` 키 누락 시 런타임에 키 문자열 그대로 표시되나, 누락 감지 메커니즘 부재 | `catalog.en.ts:335~340`, `catalog.ko.ts:350~355`에 5개 키 모두 정의됨. 그러나 새 키 추가 시 누락 시 자동 경보 없음 | 낮음 | i18n 키 누락 검사는 `scripts/frontend_spec/` 또는 별도 CI 게이트로 추가 가능(후속 작업 권장) |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
