@@ -33,10 +33,10 @@
 <!-- BLOCK:J4-ReconciliationPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `useReconciliationStates`의 `isLoading === true` — `useQuery`(`shared-hooks/src/useReconciliation.ts:11`) 마운트 후 첫 `queryFn`(`apiClient.listReconciliationStates()`, `shared-hooks/src/useReconciliation.ts:13`)가 아직 완료되지 않음 | `<LoadingState />` 컴포넌트 표시 (`ReconciliationPage.tsx:117`) | 대기 | `구현됨` — `ReconciliationPage.tsx:116-117`: `{isLoading ? <LoadingState /> : ...}` |
+| 빈 상태 | `data`가 truthy하지만 `data.states.length === 0` — API는 200 OK를 반환했으나 불일치 항목 없음 | `<EmptyState>{t("legacy.reconciliationPage.t5")}</EmptyState>` → "대사 상태가 없습니다." (`ReconciliationPage.tsx:121`, i18n 키 `legacy.reconciliationPage.t5`) | 없음 (데이터가 없는 것이 정상일 수 있음) | `구현됨` — `ReconciliationPage.tsx:120-121`: `: <EmptyState>{t("legacy.reconciliationPage.t5")}</EmptyState>` |
+| 정상 | `data && data.states.length > 0` — 불일치 항목 1개 이상 존재 | 각 항목별 카드(`<li>`) 렌더링 (`renderState`, `ReconciliationPage.tsx:65-108`). 카드 내: `targetType · targetRef` + `<StatusBadge>` (line 70-73), `blockingReason` (line 75), "최근 확인: ..." + "최근 정상: ..." + "revision ..." (line 76-81), resolvable 항목은 `<Textarea>` placeholder "해소 사유" (line 85) + `<Button>` "불일치 해소" (line 98) | resolvable 항목: 해소 사유 입력 후 "불일치 해소" 버튼 클릭 → `POST /reconciliation/resolve/:targetRef` 호출 (`handleResolve`, `ReconciliationPage.tsx:52-63`) | `구현됨` — `ReconciliationPage.tsx:118-119`: `{data.states.map(renderState)}`, `renderState` 함수 (line 65-108) |
+| 낡은 데이터(신선도 초과) | react-query useQuery에서 staleTime 미설정 → 기본값 0 (즉시 stale 표시). 하지만 UI에서 stale 상태를 감지하는 로직 없음 (shared-hooks/src/useReconciliation.ts:11-14에 staleTime/gcTime 설정 없음) | 없음 | 없음 | 없음 — shared-hooks/src/useReconciliation.ts:11-14: staleTime 미설정. frontend/apps/web/src/routes/admin/ReconciliationPage.tsx: stale 체크 없음. window focus 시 refetch는 발생하지만(react-query 기본값), 사용자에게 낡은 데이터임을 알리는 UI 없음 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
