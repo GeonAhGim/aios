@@ -24,8 +24,8 @@
 <!-- BLOCK:J4-ReconciliationPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useReconciliationStates` | `frontend/packages/shared-hooks/src/useReconciliation.ts:10` | TODO | TODO |
-| `useResolveReconciliation` | `frontend/packages/shared-hooks/src/useReconciliation.ts:17` | TODO | TODO |
+| `useReconciliationStates` | `frontend/packages/shared-hooks/src/useReconciliation.ts:10` | `useQuery` 1회 조회 (`queryKey: ["reconciliationStates"]`, `queryFn: apiClient.listReconciliationStates()`). `refetchInterval` 미설정 → 폴링 없음. 마운트 시 1회 GET `/reconciliation/list`(route: `reconciliation.list`, `api-client/clients/reconciliation.ts:17`). window focus 시 자동 refetch (react-query 기본값). | `useQuery`의 `isError`/`error` 상태 발생 → 페이지 렌더링 114-115행에서 `<ReconciliationActionError error={error} onRetry={() => refetch()} />` 표시. 에러 분류: `classifyBadRequest`(400) → `BadRequestNotice`, `classifyForbidden`(403) → `ForbiddenNotice`, 그 외 → `ErrorMessage`(trace_id, retryAfterSec 포함). retry 버튼 클릭 시 `refetch()` 재시도. |
+| `useResolveReconciliation` | `frontend/packages/shared-hooks/src/useReconciliation.ts:17` | `useMutation` — 사용자가 `<Button>`(91행) 클릭 시 수동 호출. `mutationFn`: POST `/reconciliation/resolve/:targetRef`(route: `reconciliation.resolve`, `api-client/clients/reconciliation.ts:24`). `onSuccess`: `qc.invalidateQueries({ queryKey: RECONCILIATION_STATES_QUERY_KEY })` → `useReconciliationStates` 자동 refetch (18-22행). | 페이지 59-62행에서 `onError: (err) => setActionError({ targetRef, error: err })` → `actionError` 상태 설정 → 101-105행에서 `<ReconciliationActionError error={actionError.error} />` 표시. 에러 분류는 `ReconciliationActionError` 컴포넌트(25-38행)에서 동일 3-way 패턴(classifyBadRequest → BadRequestNotice, classifyForbidden → ForbiddenNotice, 그 외 → ErrorMessage). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
