@@ -108,9 +108,9 @@
 <!-- BLOCK:J1-DemoChartPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 유효한 `instrumentId`(`DEMO-BTCUSDT` 등)로 진입 시 데모 종목 라벨이 헤더에 표시되고, `demo-chart-canvas` testid를 가진 캔버스에 일봉 차트가 렌더된다. | `DemoChartPage.tsx:61` — `${instrument.label} · ${t("demoMode.chart.pageTitle")}` 헤더, `:62` `data-testid="demo-chart-canvas"`, `:63` `<CandlestickChart data={chartPoints} height={280} />`. `chartPoints`는 `useMemo(() => toChartPoints(bars), [bars])`(`:23`)로 `getDemoDailyCandles`(`demoDataset.ts:59`)의 365일 일봉에서 생성. |
+| A2 | "지금 백테스트 실행" 버튼 클릭 시 `runDemoBacktest(bars)`가 `setTimeout(0)`으로 비동기 틱에 미루어 실행되고, 완료 후 `demo-backtest-summary` 섹션에 최종 자산·거래 횟수·최대 낙폭이 표시된다. | `DemoChartPage.tsx:28-35` — `handleRunBacktest`가 `setIsRunning(true)` → `setTimeout` → `runDemoBacktest(bars)` → `setResult` → `setIsRunning(false)`. `:71-84`에서 `result && !isRunning` 조건 하에 `<section data-testid="demo-backtest-summary">` 렌더. `result.finalEquity.toFixed(2)`(`:77`), `result.trades`(`:80`), `result.maxDrawdownPct.toFixed(2)`(`:81`). |
+| A3 | 알 수 없는 `instrumentId`로 진입 시 `EmptyState`에 "알 수 없는 데모 종목입니다." 문구와 `/onboarding/demo`로 돌아가는 버튼이 표시된다. | `DemoChartPage.tsx:37-55` — `!instrument` 조건 참 시 `EmptyState` 렌더(`:42-52`), `:51` `{t("demoMode.chart.unknownInstrument")}`, `:44-47` `<Link to="/onboarding/demo">` + `<Button>`으로 백링크. `findDemoInstrument(instrumentId)`(`demoDataset.ts:52`)가 `undefined` 반환하면 `!instrument` 조건의 분기가 타당. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
