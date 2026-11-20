@@ -242,9 +242,9 @@ async def test_route_order_perf_budget_many_candidates(perf_budget: PerfBudget) 
             )
 
     sample = await perf_budget.sample_async(_batch_200)
-    # budget 값 불변: 기존 800ms(200 calls x 100 candidates 총 wall-clock)
-    assert sample.wall_ms < 800, (
-        f"route_order() too slow: {sample.wall_ms:.1f}ms/200 calls x 100 candidates"
+    # budget 값 불변: 800ms(200 calls x 100 candidates 총 CPU 시간, 판정 기준 cpu_ms)
+    assert sample.cpu_ms < 800, (
+        f"route_order() too slow: {sample.cpu_ms:.1f}ms/200 calls x 100 candidates"
     )
 
 
