@@ -121,9 +121,9 @@
 <!-- BLOCK:J2-ScriptEditorPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 컴파일 버튼 텍스트("컴파일", "컴파일 중...")가 i18n 키로 번역되어야 함 | `"컴파일 중..."`과 `"컴파일"`이 하드코딩 문자열(`ScriptEditorPage.tsx:245`) — facts 시트에 해당 키 없음 | medium | 신규 i18n 키 추가(compile/compiling) 후 t 함수로 교체 |
+| G2 | "차트에서 백테스트" 버튼 텍스트가 i18n 키로 번역되어야 함 | `"차트에서 백테스트"`가 하드코딩 문자열(`ScriptEditorPage.tsx:134`) — facts 시트에 해당 키 없음 | medium | 신규 i18n 키 추가(openChartInChartPage) 후 t 함수로 교체 |
+| G3 | 백테스트 결과 finalEquity 표시 시 통화 단위/포맷팅 적용 | result.finalEquity가 raw 값으로 직접 표시(`ScriptEditorPage.tsx:92`) — 소수점·통화 기호 없음 | low | toLocaleString 또는 통화 포맷 유틸 적용(후속 task) |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
