@@ -102,9 +102,12 @@
 <!-- BLOCK:J1-LoginPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 빈 이메일 또는 빈 비밀번호를 제출하면 브라우저 `required` 속성(frontend/apps/web/src/routes/auth/LoginPage.tsx:70, :81)에 의해 폼 제출이 차단되고 네트워크 호출이 발생하지 않는다. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:1 — submitLoginForm은 라벨 "이메일"/"비밀번호"에 값을 채운 후 버튼 클릭(:32~34). 빈 값으로 직접 form 제출을 시도할 때 event.preventDefault가 호출되지 않는지 검증하는 negative test 미작성 — 제안: fireEvent.submit without filling required fields → mutateAsync 호출 없음 확인 |
+| A2 | `?next` 쿼리가 `/`로 시작하고 `//`로 시작하지 않으면 그 경로로, 그렇지 않으면 `/dashboard`로 이동한다 [확인: `sanitizeNextPath`(frontend/apps/web/src/routes/auth/LoginPage.tsx:14~:17)]. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:39 — ?next=/wallet 시 /wallet로 이동(:40~47), next 없음 시 /dashboard(:49~56), next=%2F%2Fevil.example 시 /dashboard(:60~67). 모두 pass |
+| A3 | 423(`AUTH_ACCOUNT_LOCKED`) 응답 시 이메일·비밀번호·TOTP 입력과 로그인 버튼이 `disabled`가 되고(frontend/apps/web/src/routes/auth/LoginPage.tsx:73, :84, :94, :111), `role="status"` 안내(`legacy.loginPage.t5`, :107~:111)가 뜬다. 카운트다운이 0이 되면 자동으로 해제된다. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:72 — 423 + retry_afterSec 45초 잠금 고정(:77~88), 기본 60초(:90~98), 카운트다운 0 후 해제(:100~118). 모두 pass |
+| A4 | 429(`RATE_LIMIT_EXCEEDED`, `backoff_retry`) 응답 시 재시도 버튼이 있고 `retryAfterSec` 카운트다운 후 활성화된다 [확인: `routeApiError`(frontend/apps/web/src/routes/auth/LoginPage.tsx:60) → `backoff_retry`(:116~:117), `canRetry`(:61), `ErrorMessage`(:103~:104)]. 423 잠금은 별도 경로(:125~:126)로 겹치지 않는다. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:146 — 429 재시도 버튼 비활성→카운트다운→활성화→재시도 성공(:147~:181). pass |
+| A5 | 로그인 실패 시 `navigate`를 호출하지 않고 `/login`에 머물며 `ErrorMessage`를 표시한다 [확인: `attemptLogin` catch(frontend/apps/web/src/routes/auth/LoginPage.tsx:45~:48)에서 `setError`만 호출, `navigate`는 success path(:44)에서만 호출]. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:1 — 실패 시 이동 없음에 대한 negative test 미작성 — 제안: mutateAsync rejection 후 screen.queryByText("대시보드 페이지")가 없음을 확인 |
+| A6 | 비-`ApiError`(네트워크 등) 실패 시 문구는 `legacy.loginPage.t9`이고 `traceId`는 노출하지 않는다 [확인: `LoginPage.tsx:46` — `new Error(t("legacy.loginPage.t9"))`, `:102` — `traceId`는 `error instanceof ApiError`일 때만 전달]. | frontend/apps/web/src/routes/auth/LoginPage.test.tsx:1 — 비-ApiError 실패 시 ErrorMessage에 traceId가 전달되지 않음을 검증하는 테스트 미작성 — 제안: mutateAsync가 Error 객체 reject → ErrorMessage에 traceId prop 없음 확인 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
