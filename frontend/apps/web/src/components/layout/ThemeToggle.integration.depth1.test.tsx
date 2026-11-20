@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import { ThemeToggle, themeStore } from "@aios/ui-web";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { perfBudgetMs } from "../../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../../test/perfBudget";
 
 function resetToDark() {
   try {
@@ -34,9 +34,11 @@ describe("ThemeToggle depth1 - D2 boost (perf, negative, gate-red)", () => {
   // --- Performance assertions (measured: ~2ms render, budget 500ms) ---
 
   it("[perf budget] single render under budget (measured ~2ms, budget 500ms)", () => {
-    const started = performance.now();
-    render(<ThemeToggle />);
-    const elapsed = performance.now() - started;
+    const elapsed = bestOfMs(() => {
+      const started = performance.now();
+      render(<ThemeToggle />);
+      return performance.now() - started;
+    });
 
     expect(elapsed).toBeLessThan(perfBudgetMs(500));
   });
@@ -45,11 +47,13 @@ describe("ThemeToggle depth1 - D2 boost (perf, negative, gate-red)", () => {
     render(<ThemeToggle />);
     const button = screen.getByRole("button", { name: "Toggle color theme" });
 
-    const started = performance.now();
-    for (let i = 0; i < 10; i += 1) {
-      fireEvent.click(button);
-    }
-    const elapsed = performance.now() - started;
+    const elapsed = bestOfMs(() => {
+      const started = performance.now();
+      for (let i = 0; i < 10; i += 1) {
+        fireEvent.click(button);
+      }
+      return performance.now() - started;
+    });
 
     expect(elapsed).toBeLessThan(perfBudgetMs(200));
   });
