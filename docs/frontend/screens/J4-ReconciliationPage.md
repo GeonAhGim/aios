@@ -66,7 +66,7 @@
 <!-- BLOCK:J4-ReconciliationPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:91`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:91`) | `RESOLVABLE_RECONCILIATION_STATUSES.has(state.aggregateStatus)` (`ReconciliationPage.tsx:66`)가 true일 때 — `aggregateStatus`가 해소 가능한 상태 목록에 포함. 사용자가 `<Textarea>`(`ReconciliationPage.tsx:84-90`)에 해소 사유를 입력 후 클릭. onClick: `handleResolve(state.targetRef)` (`ReconciliationPage.tsx:96`) | `handleResolve`(`ReconciliationPage.tsx:52-63`)에서 `reason.trim()`이 비어 있으면 `setActionError(null)` 후 `resolve.mutate({ targetRef, body: { reason } })` 호출(`ReconciliationPage.tsx:59-60`). mutation `onSuccess`(`shared-hooks/src/useReconciliation.ts:18-22`): `qc.invalidateQueries({ queryKey: RECONCILIATION_STATES_QUERY_KEY })` → `useReconciliationStates` 자동 refetch → 페이지 상태 갱신. `actionError` 상태 초기화(`ReconciliationPage.tsx:58`) | 사유 미입력: `reason.trim()`이 빈 문자열 → `setActionError({ targetRef, error: new Error("해소 사유를 입력하세요.") })`(`ReconciliationPage.tsx:55`). mutation 실패: `onError`(`ReconciliationPage.tsx:61`) → `setActionError({ targetRef, error: err })`. 에러는 `ReconciliationActionError` 컴포넌트(`ReconciliationPage.tsx:101-105`)에서 3-way 분류(classifyBadRequest→`<BadRequestNotice>`, classifyForbidden→`<ForbiddenNotice>`, 그 외→`<ErrorMessage>`) 표시. 같은 targetRef의 에러만 렌더링(`ReconciliationPage.tsx:101`: `actionError?.targetRef === state.targetRef`) | 동일 화면 유지 — `router.tsx:175`의 `/admin/reconciliation` 경로에 머무름. navigate 호출 없음. 데이터 refetch 후 동일 페이지에 갱신된 목록 표시 |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
