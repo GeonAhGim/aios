@@ -74,7 +74,7 @@
 <!-- BLOCK:J1-SignupPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. `handleSubmit`(`frontend/apps/web/src/routes/auth/SignupPage.tsx:57`)은 `signup.mutateAsync({ email, password })`(`frontend/apps/web/src/routes/auth/SignupPage.tsx:63`) 한 번과 `navigate("/onboarding/mfa-setup")`(`frontend/apps/web/src/routes/auth/SignupPage.tsx:64`)뿐. `useSignup`(`frontend/packages/shared-hooks/src/useAuth.ts:20`)은 POST `/auth/register`, `setToken`, `invalidateQueries(["me"])`만 수행. 계정 생성은 인증 상태 변경일 뿐 주문·실행 생성·LIVE 전환·위임장 변경·출금 등 금전·위험 행동이 없음. 확인 절차·멱등성·불확실 결과 표시: 중복 제출 차단(동일 키 생성 시도)은 `SignupPage.tsx:111`의 `loading`/`disabled`로 UI层面만 방지. 백엔드 `/auth/register`가 금전 상태를 만드는지는 이 작업에서 열람하지 않았으므로 미확인(백엔드 미열람). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
