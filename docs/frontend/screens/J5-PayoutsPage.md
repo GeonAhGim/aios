@@ -36,10 +36,10 @@
 <!-- BLOCK:J5-PayoutsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `query.isLoading === true` (`PayoutsPage.tsx:235`) | `<LoadingState />` 컴포넌트 표시 (`PayoutsPage.tsx:236`) | 없음 — 데이터 조회 대기 중 | 구현됨 (`PayoutsPage.tsx:235-236`) |
+| 빈 상태 | `items.length === 0`且`!query.isLoading`且`!query.isError` (`PayoutsPage.tsx:237`) | `<EmptyState>`에 섹션별 빈 문구 — 홀드: "보류 중인 홀드가 없습니다." (`PayoutsPage.tsx:279`), 정산 배치: "정산 배치가 없습니다." (`PayoutsPage.tsx:288`) | 없음 — 표시할 데이터 없음 | 구현됨 (`PayoutsPage.tsx:237-238`) |
+| 정상 | `items.length > 0`且`!query.isLoading`且`!query.isError` (`PayoutsPage.tsx:239`) | 각 항목을 `HoldCard`(`PayoutsPage.tsx:75-88`) 또는 `PayoutBatchCard`(`PayoutsPage.tsx:132-182`)로 렌더링. 페이지네이션 버튼 보임 (`PayoutsPage.tsx:243-250`) | 정산 배치 RELEASED 상태 시 외부 참조번호·브레이크글래스 그랜트 ID 입력 후 "정산 확정" 버튼 클릭 (`PayoutsPage.tsx:147-172`). 이전/다음 페이지네이션 (`PayoutsPage.tsx:245-248`) | 구현됨 (`PayoutsPage.tsx:239-240, 243-250`) |
+| 낡은 데이터(신선도 초과) | `deriveFreshness(asOf, now).isStale === true` (`DataFreshness.tsx:22,34`). 기본 `staleAfterSec=300` (`DataFreshness.tsx:20`) | `DataFreshness` 컴포넌트가 "N분 전" 문구 (`DataFreshness.tsx:33`) + `isStale`일 때 "데이터가 오래되었습니다." 경고 배지 (`DataFreshness.tsx:35-36`) 표시 | 없음 — 표시 전용. 명시적 갱신 버튼 없음(에러 경로에서만 refetch) | 구현됨 (`DataFreshness.tsx:20-40`, `PayoutsPage.tsx:224,280,289`) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
