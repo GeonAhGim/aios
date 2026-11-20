@@ -119,9 +119,9 @@
 <!-- BLOCK:J1-ConnectionWizardPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 키 마스킹 시 길이 자체도 노출되지 않아야 함 (주석 33-34줄: "길이 자체도 노출하지 않기 위해 실제 길이에 비례시키지 않는다") | `maskKey` 함수 36줄: 길이 ≤4일 때 `"•".repeat(value.length)`로 `•` 개수가 키 길이를 그대로 노출. 길이 >4일 때만 고정 6-dot로 길이 숨김 | 하 | 유지(명세 A2가 "4 이하 전체 • 가림"을 요구하므로 의도적 구현). 주석 33-34줄의 "길이 노출 금지" 명시와 코드 동작 간 불일치만 수정 필요 |
+| G2 | review 단계에서 표시하는 providerCode와 서버로 전송하는 값이 동일해야 함 | review 단계 175줄: `{providerCode}`로 trim 전 원본 표시. 제출 62줄: `providerCode.trim()`으로 trim 적용. 화면에 공백이 그대로 보이나 서버 전송 시 제거됨 | 중 | review 단계 175줄을 `{providerCode.trim()}`으로 수정하거나, 입력 단계에서 이미 trim 해서 저장하도록 `providerCode` state 초기화/변환 |
+| G3 | 제출 버튼 클릭 시 중복 제출 방지 로직 필요 | `handleSubmit` 58-71줄: `isPending` 체크 없이 바로 `beginConnection.mutate()` 호출. 사용자가 `연결하기` 버튼을 빠르게 여러 번 클릭하면 `mutate`가 중복 호출될 수 있음. 193줄의 `loading={beginConnection.isPending}` prop이 Button에서 onClick 차단을 하는지는 ui-web 내부 미확인 | 중 | `handleSubmit` 시작부에 `if (beginConnection.isPending) return;` 방패 추가, 또는 Button 컴포넌트가 loading 시 onClick을 차단하도록 보장 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
