@@ -24,9 +24,9 @@
 <!-- BLOCK:J6-EvidenceChainPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | TODO | TODO |
-| `useAuditTimeline` | `frontend/packages/shared-hooks/src/useEvidence.ts:15` | TODO | TODO |
-| `useVerifyAuditChain` | `frontend/packages/shared-hooks/src/useEvidence.ts:22` | TODO | TODO |
+| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | 네비게이션 상태 훅(비 네트워크). `meta`(next_cursor)를 props로 받아 `next()`/`prev()`/`reset()` 콜백 제공. `meta`가 null이면 `next()`는 no-op(line 33). `hasNext`는 `meta != null && meta.next_cursor != null`로 결정(line 54). EvidenceChainPage.tsx:42-43에서 `committed` 상태의 `nextCursor`를 `meta`로 전달. | 네트워크 호출 없음. `meta` 누락 시 `hasNext=false`, `next()` no-op. |
+| `useAuditTimeline` | `frontend/packages/shared-hooks/src/useEvidence.ts:15` | React Query `useQuery`. `queryKey: ["auditTimeline", params]`(line 17). 폴링 설정 없음 — 마운트 시 1회 조회. `cursor`(pager.cursor) + `limit: 20` 파라미터(line 44). | `timeline.isError` 시 페이지에 별도 렌더 없음 — `timeline.data`가 undefined이므로 `items=[]` → `EmptyState` 표시(EvidenceChainPage.tsx:60, 119). `EvidenceActionError`는 `verify` 훅 전용(line 89). 403 처리가 누락됨. |
+| `useVerifyAuditChain` | `frontend/packages/shared-hooks/src/useEvidence.ts:22` | React Query `useMutation`(line 23). `mutationFn: (tenantId) => apiClient.verifyAuditChain(tenantId)`. 사용자 버튼 클릭 시 `verify.mutate(tenantId.trim() || undefined)`로 수동 트리거(EvidenceChainPage.tsx:57). `isPending`으로 버튼 로딩 표시(line 79). | `verify.isError` 시 `EvidenceActionError(verify.error)` 렌더(EvidenceChainPage.tsx:87-91). 403 → `ForbiddenNotice`, 그 외 → `ErrorMessage`(traceId+retryAfterSec). 409 ChainIntegrityError는 페이지에서 재계산하지 않음(주석: line 36-38). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
