@@ -24,8 +24,8 @@
 <!-- BLOCK:J6-MembersPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useTenant` | `frontend/apps/web/src/hooks/useTenant.ts:60` | TODO | TODO |
-| `useMe` | `frontend/packages/shared-hooks/src/useAuth.ts:10` | TODO | TODO |
+| `useTenant` | `frontend/apps/web/src/hooks/useTenant.ts:60` | Zustand 스토어(모듈 로드 시 1회 `createTenantStore()` → `activeTenantId` 초기화). 사용자 테넌트 전환 시 `setActiveTenant()` 호출로 반응성 갱신(`useTenantStore` subscribe). 폴링 없음. | 스토어 초기화 실패 시 `activeTenantId=null` → 화면에서 `EmptyState` 표시(`MembersPage.tsx:218-227`). 403 AUTH_TENANT_MISMATCH 시 `handleForbidden()`이 `TenantMismatchFallback`를 반환하고 `activeTenantId`를 personal(null)로 리셋(`useTenant.ts:39-43`). 호출부는 fallback 값을 활용해 안내 배너 표시 가능. |
+| `useMe` | `frontend/packages/shared-hooks/src/useAuth.ts:10` | react-query `useQuery` — `queryKey: ["me"]`, `queryFn: () => apiClient.getMe()`, `enabled: !!token`(useAuthStore.token 존재 시 1회 조회). `retry: false`(재시도 없음). 폴링 없음(반응 옵션에 refetch 관련 설정 없음). 로그인/로그아웃/Signup 시 `qc.invalidateQueries({ queryKey: ["me"] })`로 캐시 무효화 후 자동 재조회(`useAuth.ts:27,39,74`). | `retry: false`이므로 첫 조회 실패 시 즉시 `isError=true`. 호출부(`MembersPage.tsx:151`)는 `data: me`만 destruct하고 error 상태를 무시 — 컴포넌트 레벨에서 오류 UI 미표시. `me`가 undefined면 `resolvedCurrentUserId`가 `null`이 되어 `canManageMembers=false`(최소권한). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
