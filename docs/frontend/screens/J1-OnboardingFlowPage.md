@@ -96,10 +96,10 @@
 <!-- BLOCK:J1-OnboardingFlowPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `<ol>`(line 73)으로 단계 순서 semantics 제공. `<span>` 번호 배지(line 83)는 장식용(`font-semibold`, 시각적 구분). `<Link>`이 `<Button>`을 감싸(line 94-96) 키보드 포커스 가능. `PageHeader`(line 60)는 heading semantics 포함. `LoadingState`(line 63)는 컴포넌트 내부 aria 처리에 의존. | `aria-label`/`aria-live` 없음 — 로딩/완료 상태 변경 시 screen reader 알림 부재(line 62-71). 번호 배지(span, line 83)에 `aria-hidden="true"` 없음(장식적 숫자가 accessibility tree에 노출). CTA `<Button>`에 `aria-current="step"` 미부여(line 93-96)로 현재 단계 식별 불가. WCAG 2.5.3(ラ벨명), 4.1.2(이름·역할·값) 미준수 항목 존재. |
+| i18n/지역화 | 사용 키 15건 모두 catalog.en.ts·catalog.ko.ts에 존재: `onboarding.pageTitle`(en:276/ko:283), `onboarding.completeTitle`(en:280/ko:287), `onboarding.completeDescription`(en:281/ko:288), `onboarding.goToDashboard`(en:282/ko:289), `onboarding.stepDone`(en:278/ko:285), `onboarding.stepUpcoming`(en:279/ko:286), `onboarding.steps.{connectExchange,createStrategy,runPaper}.{title,description,cta}`(en:286-302/ko:294-310). `useTranslation()` 사용(line 45) — 리터럴 문자열 직접 사용 없음. | `t(step.titleKey as any)` 등 `as any` 캐스트 3건(line 87, 88, 95) — 타입 안전성 손실. react-i18next `TFunction`이 키 타입을 좁혀주지 않아 `as any`로 우회. catalog에 키가 모두 있어 runtime fallback은 정상 동작하나, 키 삭제/이름 변경 시 tsc가 잡지 못함. |
+| 성능 예산 | 훅 3개(mount 시 3회 동시 API 조회): `useExchangeCredentials`(line 46), `useMyStrategies`(line 47), `usePaperDeployments`(line 48). react-query default `staleTime: 0` → 매 렌더 stale, `refetchOnWindowFocus: true`로 윈도우 포커스 시 재조회. `deriveOnboardingProgress`(line 51-55) — 단순 객체 탐색, O(n) (n=3). 렌더: 1회 마운트 시 `<ol>` 3-card 순회, DOM 노드 수 적음(~20). 폴링/interval 없음. | `staleTime: 0` + `refetchOnWindowFocus: true` 조합 — 윈도우 포커스(탭 전환, 알림 센터 등) 시 3개 훅이 모두 재조회(line 46-48). 온보딩 페이지는 빈번한 탭 전환 시 불필요한 서버 부하 발생 가능. `refetchInterval` 설정 없음(데이터 변경 시 자동 갱신 없음). |
+| 텔레메트리 | 오류 보고 호출 여부 미확인 — `OnboardingFlowPage.tsx`(line 1-110 전체)에 `captureException`(Sentry 등), `trackEvent`(analytics), `logError`(내부) 호출 없음. react-query `isError` 분기(line 52-54)에서 에러 상태가 `deriveOnboardingProgress`로 전달될 뿐, 별도 에러 리포팅/로그 호출 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
