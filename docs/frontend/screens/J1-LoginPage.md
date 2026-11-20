@@ -91,10 +91,10 @@
 <!-- BLOCK:J1-LoginPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | 제목 "AIOS 로그인"이 `<h1>`(`AuthLayout.tsx:34`)으로 렌더됨 — 문서 내 유일한 h1 [확인]. 각 필드는 `<Field>`가 `<label htmlFor={...}>`(`Field.tsx:29`)를 생성하고, `htmlFor`/`id` 쌍: email(`LoginPage.tsx:66`→`:68`), password(`:77`→`:79`), totp(`:88`→`:90`) 모두 매칭 [확인]. `Field.tsx:12~16` 주석에서 task-2688로 `useId()` 자동 id 주입 로직 확인 — `htmlFor` 생략 시 자동 연결 [확인]. 잠금 상태 안내(`<p role="status">`)가 `LoginPage.tsx:108`에서 `role="status"` 사용 [확인]. 폼에 `role="form"` 또는 `aria-label`은 없음(폼이 유일한 콘텐츠이므로 필요 없음). `ErrorMessage`가 `fieldErrors` 있을 때 배너를 숨김(`ErrorMessage.tsx:55`) — 배너 숨김 시 스크린리더에도 노출 안 됨 [확인]. 자동완성: 이메일 `autoComplete="email"`(`:71`), 비밀번호 `autoComplete="current-password"`(`:82`) 설정 [확인]. MFA 필드에 `autoComplete` 속성 없음 — 미확인(사용 필요 여부 불명). `data-testid` 속성 전무 [확인]. | **갭 1**: MFA hint("설정한 경우만 입력")가 하드코딩 한글(`LoginPage.tsx:88`) — 스크린리더 사용자가 언어 설정과 다를 경우 읽기 어려움. **갭 2**: MFA 필드(`LoginPage.tsx:89~96`)에 `autoComplete="one-time-code"` 누락 — 자동填充 도구 및 일부 스크린리더가 MFA 필드 식별 불가. **갭 3**: `data-testid` 전무 — E2E 테스트 안정성 보장 불가. |
+| i18n/지역화 |LoginPage.tsx에서 사용하는 모든 키 확인: `legacy.loginPage.title1`(:64), `label2`(:66), `label3`(:77), `label4`(:88), `t5`(:109), `t6`(:112), `t7`(:114), `t8`(:116), `legacy.loginPage.t9`(:46). 모두 catalog.ko.legacyB.ts(`catalog.ko.legacyB.ts:57~67`)와 catalog.en.legacyB.ts(`catalog.en.legacyB.ts:55~65`)에 쌍 존재 [확인]. ErrorMessage에서 사용하는 `legacy.errorMessage.t1`(traceId, `:60`), `t2`(카운트다운, `:64`), `t3`(재시도 버튼, `:67`)도 양쪽 카탈로그에 쌍 존재 [확인]. 카탈로그 누락 키: 없음 [확인]. | **갭 1**: MFA hint("설정한 경우만 입력", `LoginPage.tsx:88`)가 `t()`로 감싸지지 않은 하드코딩 한글 — 영문 환경에서 그대로 노출. 카탈로그에 새 키 추가하고 `hint={t("...")}`로 교체 필요. |
+| 성능 예산 | `useLogin`은 `useMutation` 기반(`useAuth.ts:35`) — refetchInterval/staleTime 같은 폴링 옵션 없음 [확인]. `useEffect` 카운트다운(`LoginPage.tsx:34~38`)은 `lockoutRemainingSec > 0`일 때만 1초 간격으로 실행, `lockoutRemainingSec === 0`이면 즉시 return [확인]. 렌더 트리거: 로그인 제출(`handleSubmit`), 카운트다운(`setLockoutRemainingSec`), 에러 상태 변경(`setError`) — 모두 사용자 액션 기반 [확인]. 외부 데이터 폴링 없음, 메모리 리크누수 가능성 없음(`clearTimeout`으로 cleanup `:37` [확인]). | **갭 없음** — 폴링 없음, 렌더 트리거 모두 이벤트 기반, 카운트다운 cleanup 완료. |
+| 텔레메트리 | `LoginPage.tsx`에서 `reportError`, `captureException`, `logError`, `telemetry`, `analytics`, `sentry`, `bugsnag`, `datadog` 호출 전무 [확인]. 로그인 실패(`attemptLogin` catch `:45~48`)는 UI 오류 표시(`setError`)만 하고 외부 보고 없음. 429(`RATE_LIMIT_EXCEEDED`) 응답도 `ErrorMessage` 재시도 버튼으로만 처리, telemetry 보고 없음. | **갭 1**: 로그인 실패 시(특히 `AUTH_MFA_INVALID`, `AUTH_INVALID_CREDENTIALS` 등 반복 실패) telemetry/error-reporting 호출 없음 — 보안 인시던트 탐지 불가. **갭 2**: 429(`RATE_LIMIT_EXCEEDED`) 응답 발생 시 telemetry 보고 없음 — DDoS/브포스 탐지 불가. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
