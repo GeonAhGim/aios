@@ -106,10 +106,10 @@
 <!-- BLOCK:J3-MandatePage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `data-testid`, `aria-*`, `role=`, tabindex 속성이 MandatePage.tsx 전체(201줄)에 단 하나도 사용되지 않음. 관련 하위 컴포넌트 MandateActionError.tsx, MandateRuleForm.tsx, MandatesPage.tsx도 동일. [MandatePage.tsx:1~201, mandates/MandateActionError.tsx, mandates/MandateRuleForm.tsx, mandates/MandatesPage.tsx] | WCAG 2.2 AA 준수를 위해 `aria-label`/`aria-live` 등 접근성 속성이 필요. 특히 LoadingState(로딩 상태), StatusBadge(상태 표시), Badge(경고 배지)가 스크린 리더에 의미 전달하지 않을 가능성. Button에 `aria-disabled` 필요 여부 확인. |
+| i18n/지역화 | `useTranslation` 훅 사용 확인(`MandatePage.tsx:24, 47`). 18개 키 사용: `legacy.mandatesPage.t1~t16`(t11, title12~14 미사용), `mandatePage.pageTitle/listTitle/listEmpty/activeLabel/pendingLabel/noneLabel/draftSubmitLabel/amendSubmitLabel`. 모든 키가 `catalog.ko.ts:438~`, `catalog.en.ts:485~`, `catalog.ko.legacyD.ts:191~`, `catalog.en.legacyD.ts:189~`에 ko/en 쌍으로 등록됨. 누락 키 없음. [MandatePage.tsx:32~39, 87, 98, 107~108, 113, 117~121, 133, 142, 153, 165, 170, 185] | 없음. 모든 사용 키가 카탈로그에 ko/en 쌍으로 존재. |
+| 성능 예산 | `useMandateStatus`는 1회 조회(`useQuery`)이며 폴링/자동 갱신 옵션 미설정. `refetch()` 수동 재조회만 가능. [useMandates.ts:11~14, MandatePage.tsx:48]. mutation 훅 5개(`createDraft`, `proposeAmendment`, `activate`, `pause`, `resume`)는 모두 `isPending` 상태로 로딩 표시. [MandatePage.tsx:169, 186]. 렌더 분기: `isLoading`, `isError`, `activeRevision`/`pendingRevision` 유무만 체크. | 폴링 미설정 → 데이터 신선도 자동 갱신 없음(의도적일 수 있음). 성능 측정 포인트(deferred paint, React profiler) 미정의. |
+| 텔레메트리 | reportError, captureException, logEvent, telemetry, analytics 호출이 MandatePage.tsx에 단 하나도 없음. [MandatePage.tsx:1~201] MandateActionError 컴포넌트도 traceId를 `legacy.errorMessage.t1`("지원코드: {{traceId}}")로 표시만 하고 외부 보고 없음. | 오류 발생 시(`isError`, `createError`, `activateError`, `lifecycleError`) 텔레메트리/에러 모니터링(Sentry 등)으로 전달하는 호출이 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
