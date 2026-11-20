@@ -87,7 +87,10 @@
 <!-- BLOCK:J3-MandatePage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 — 이 화면은 위임장(금전·위험 행동 규칙)의 초안/개정안 제출, 활성화, 일시정지/재개라는 4가지 변경 행동을 제공한다. 주문/실행 자체를 직접发起하지는 않지만, 위임장 규칙(노출 한도·단일 종목 한도·현금 버퍼·일일 손실 한도·금지 자산)을 변경하여 모든 후속 주문 필터링을 통제하므로 금전·위험 행동에 해당한다. [MandatePage.tsx:59~63: handleCreate(초안/개정안), MandatePage.tsx:65~78: handleActivate(활성화), MandatePage.tsx:141~146: pause(일시정지), MandatePage.tsx:152~157: resume(재개)] |
+| 확인 절차 | 1) `handleCreate`: `setCreateError(null)` 후 mutation 호출 → `onError: setCreateError`로 실패 상태 저장. [MandatePage.tsx:60~62] 2) `handleActivate`: `setActivateError(null)` 후 mutation 호출 → `onError`에서 `classifyStateConflict`로 409 경합 판단 시 `refetch()` 자동 재조회. [MandatePage.tsx:66~75] 3) `pause`/`resume`: `setLifecycleError(null)` 후 mutation 호출 → `onError: setLifecycleError`. [MandatePage.tsx:141, 152] |
+| 멱등성 | 코드상 명시적 idempotency-key 헤더 전송은未见. 서버 측 mutation 훅이 idempotency를 보장하는 것으로 보임(에러 메시지에 "중복 제출 감지: 이미 처리된 요청입니다." — `INTEGRITY_IDEMPOTENCY_CONFLICT`). [apiError.ts:42~58] |
+| 불확실 결과 표시 | 모든 mutation 실패는 `MandateActionError` 컴포넌트에 전달되어 `ErrorMessage` 배너로 노출됨. `createError`, `activateError`, `lifecycleError` 각각 상태가 `null`이 아니면 오류 메시지 표시. [MandatePage.tsx:88, 158, 177~179, 190~193] traceId는 `legacy.errorMessage.t1`("지원코드: {{traceId}}")로 표시. [ErrorMessage.tsx:19, 60] |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
