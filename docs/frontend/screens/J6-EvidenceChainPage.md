@@ -45,10 +45,11 @@
 <!-- BLOCK:J6-EvidenceChainPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `verify.mutate()`가 바디 없이 `tenantId`를 query 파라미터로만 보내므로 400 검증 실패가 발생하지 않음. timeline은 GET 쿼리뿐(`EvidenceChainPage.tsx:13-16` 주석 — chain:verify는 바디가 없다). | 없음(400 갈래가 설계상 존재하지 않음) | 없음 | 없음 |
+| 인증 필요/세션 만료(401) | `isSessionExpiredErrorCode`(`errorRouting.ts:128-129`)가 401 중 AUTH_*를 걸러 `auth_required`로 라우팅. `classifyForbidden`(`EvidenceChainPage.tsx:18`)은 403만 보므로 401은 403 분기를 타지 않음. `EvidenceActionError`(`EvidenceChainPage.tsx:17-29`)는 `auth_required` kind를 특별히 처리하지 않고 `ErrorMessage`(`EvidenceChainPage.tsx:21`)로 흘려보냄. `ErrorMessage`는 `errorCode`가 null이므로 `getApiErrorMessage`(`apiError.ts:106-118`)가 `DEFAULT_API_ERROR_MESSAGE`(정적 문자열) 반환. | `미확인` (공통 `routeApiError`(`errorRouting.ts:85-133`)가 401을 `auth_required`로 매핑하는지는 `errorRouting.ts:128-129`에서 확인했지만, `ErrorMessage`가 이를 표시하는 경로는 없음) | 없음 | 없음 |
+| 권한 없음/MFA 필요(403) | `verify.isError` 시 `EvidenceActionError` 렌더(`EvidenceChainPage.tsx:87-91`). `classifyForbidden(error)`(`EvidenceChainPage.tsx:18`, `forbidden.ts:31-41`)가 `mfa_required`/`policy`/`tenant_mismatch`/`forbidden` 중 하나면 `ForbiddenNotice`(`EvidenceChainPage.tsx:18`, `ForbiddenNotice.tsx:31-50`) 렌더. timeline 실패 시에도 동일 경로(`EvidenceChainPage.tsx:96-97`). | `mfa_required`: `getApiErrorMessage("AUTH_MFA_REQUIRED")` → `"추가 인증이 필요합니다."` (`apiError.ts:65`). `ForbiddenNotice`가 `onStepUp` 버튼 표시(`ForbiddenNotice.tsx:42-46`). 그 외 갈래: `getApiErrorMessage` 반환 문구. | `mfa_required`: `onStepUp` 버튼 클릭(현재 `EvidenceActionError`에 `onRetry` 미전달). | 구현됨 |
+| 충돌/상태 불일치(409) | `ChainIntegrityError`(409)는 페이지에서 재계산하지 않음(`EvidenceChainPage.tsx:36-38` 주석 — 서버 판정이 권위). 일반 경로 `EvidenceActionError`(`EvidenceChainPage.tsx:17-29`) → `ErrorMessage`(`EvidenceChainPage.tsx:21`)로 흐름. `routeApiError`(`errorRouting.ts:85-133`)에서 `INTEGRITY_IDEMPOTENCY_CONFLICT`는 `idempotency_*` 갈래, `INTEGRITY_WALLET_BALANCE_DRIFT`(`errorRouting.ts:107-109`)는 `wallet_balance_drift` 갈래로 가지만, `ChainIntegrityError`의 errorCode는 미정. 그 외 미지 409는 `classifyStateConflict`(`errorRouting.ts:111-113`)가 `invalid_transition`을 반환. | `미확인` (`ErrorMessage`(`ErrorMessage.tsx:27-72`)가 `invalid_transition` kind를 특별히 처리하지 않으므로, `getApiErrorMessage`(`apiError.ts:106-118`)가 errorCode를 받아서 매핑 — errorCode가 `INTEGRITY_WALLET_BALANCE_DRIFT`면 `"지갑 잔액 정합성을 확인하고 있습니다. 잠시 후 다시 시도해주세요."`(apiError.ts:77), 그 외 `DEFAULT_API_ERROR_MESSAGE`(apiError.ts:45-46) | 없음 | 없음 |
+| [모순 메모] 데이터 표(data, `:28`)의 "403 처리가 누락됨"은 사실과 다름. timeline 실패 시(`:97`)에도 `EvidenceActionError`가 쓰이므로 `classifyForbidden` → `ForbiddenNotice` 403 처리가 누락되지 않음. 이 메모는 st-b 블록 안에서만 참조할 것. `:28` 셀은 원문 그대로 둔다. | — | — | — | — |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
