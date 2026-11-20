@@ -55,10 +55,10 @@
 <!-- BLOCK:J6-MembersPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 423(ACCOUNT_LOCKED) 또는 429(RATE_LIMIT_EXCEEDED) 응답. `routeApiError`(`MembersPage.tsx:24,85`)가 423→잠김(kind:account_locked, retryAfterSec 포함), 429→속도제한(kind:backoff_retry, afterSec 포함)으로 분류. `ListErrorBanner`(`MembersPage.tsx:83-95`)에서 `routed.kind==="backoff_retry"`이면 `canRetry=true`, `retryAfterSec` 설정. 423은 잠김 kinds이므로 `canRetry=false`. | 429: `ErrorMessage`(`MembersPage.tsx:88-94`)가 속도 제한 문구(`getApiErrorMessage`로 `shared-types/apiError.ts` EXACT_MESSAGES 참조) + 초 단위 카운트다운(`ErrorMessage.tsx:49-53`) + 재시도 버튼(남은 시간 0 이하일 때 활성화). 423: `ErrorMessage`가 잠김 문구 + traceId 노출(있는 경우) — 재시도 버튼 없음. | 429: 재시도 버튼 클릭 시 `query.refetch()`(`MembersPage.tsx:234`) 호출로 목록 재조회. 423: 재시도 버튼 없음(계정 잠김 해제 전까지 같은 결과 반복). | 구현 |
+| 서버 오류(5xx) | 500/502/503 중 서버 분류기가 아는 코드. `routeApiError`(`MembersPage.tsx:24,85-86`)가 502/503 중 retryable 코드→`backoff_retry`, 500 등 non-retryable→서버치명(kind:server_fatal). `ListErrorBanner`(`MembersPage.tsx:86`)에서 `canRetry` 판정. | 5xx retryable(502/503): `ErrorMessage`가 서버 오류 문구 + `backoff_retry` 카운트다운 + 재시도 버튼. 5xx fatal(500 등): `ErrorMessage`가 서버 오류 문구 + traceId 노출(`ErrorMessage.tsx:60`) — 재시도 버튼 없음. | 5xx retryable: 재시도 버튼 클릭 시 `query.refetch()`. 5xx fatal: 재시도 버튼 없음(서버 복구 필요). | 구현 |
+| 네트워크 단절 | `fetch` 등 HTTP 호출 자체가 실패(DNS 실패, 연결 거부, 타임아웃). `ApiError`가 아님 — `isErrorCodeLike`(`errorRouting.ts:80-82`) false → `routeApiError`가 `{kind:"unknown"}` 반환. `ListErrorBanner`(`MembersPage.tsx:86`)에서 `canRetry=false`. | `ErrorMessage`(`MembersPage.tsx:88-94`)가 네트워크 오류 메시지(예: "Network Error") — errorCode/tracedId 없음(`ErrorMessage.tsx:60` traceId 조건 false). 재시도 버튼 없음(`canRetry=false`). | 없음. `ErrorMessage`는 retryable 분류 "none"이므로 재시도 버튼 안 봄. | 부분 |
+| 부분 실패(일부 데이터만 실패) | `fetchMembers`가 일부 유효·무효 혼합 데이터 배열 반환. `rows.map`(`MembersPage.tsx:172`)에서 `parseMembershipView(raw)`(`MembersPage.tsx:23`)가 null 반환하는 행 존재. `query.isError=false`이므로 목록 렌더링 계속. | 유효 행: `MemberRow`(`MembersPage.tsx:243-251`) 정상 렌더링. 무효 행: `<Alert tone="danger">{t("legacy.membersPage.t7")}</Alert>`(`MembersPage.tsx:254`) — "멤버십 정보를 해석할 수 없습니다." | 없음. 호출부가 파싱 실패 행을 필터링하거나 재요청하지 않음. | 부분 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
