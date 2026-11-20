@@ -35,10 +35,10 @@
 <!-- BLOCK:J6-AccountDeletionPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `whitelistLoading === true` (`useWhitelistEntries` 훅이 `isLoading: true` 반환) | `<LoadingState />` 컴포넌트 표시 (`AccountDeletionPage.tsx:96-97`) | 없음 — 폼도 렌더링되나 로딩 중 데이터 없음 | `구현됨` (`AccountDeletionPage.tsx:96-97`) |
+| 빈 상태 | `whitelistLoading === false`이고 `whitelist && whitelist.length > 0`이 `false` (`AccountDeletionPage.tsx:98`) | `EmptyState` 컴포넌트에 `legacy.accountDeletionPage.t4` ("등록된 목적지가 없습니다.") 표시 (`AccountDeletionPage.tsx:106-110`) | whitelist 등록 폼에 거래소/주소/비밀번호 입력 후 `legacy.accountDeletionPage.t9` ("목적지 등록") 버튼 클릭 | `구현됨` (`AccountDeletionPage.tsx:106-110`) |
+| 정상 | `whitelistLoading === false`이고 `whitelist.length > 0` (`AccountDeletionPage.tsx:98`) | 등록 목적지 목록 (`<ul>` — `AccountDeletionPage.tsx:99-105`), whitelist 등록 폼 (`:111-143`), 회원 탈퇴 카드 (`:146-179`) | 1) whitelist 등록 폼 제출 → `handleWhitelistSubmit` (`:56-72`) 2) 탈퇴 요청 폼에 비밀번호 입력 후 `legacy.accountDeletionPage.t14` ("탈퇴 요청") 클릭 → `handleDeleteSubmit` (`:74-85`) 3) 성공 시 `legacy.accountDeletionPage.t16` ("탈퇴가 예약됐습니다. {{val}}에 확정됩니다.") + `legacy.accountDeletionPage.t11` ("로그아웃") 버튼 (`:148-160`) | `구현됨` (`AccountDeletionPage.tsx:87-179`) |
+| 낡은 데이터(신선도 초과) | `useWhitelistEntries`의 `staleTime`이 기본값(무한)이라 자동 refetch 없음 — 마지막 마운트 시점 데이터 표시 | 명시적 "낡은 데이터" 경고 UI 없음 — 마지막 캐시 데이터 표시 | 페이지 재방문 시 마운트 재시작으로 refetch, 수동 새로고침 버튼 없음 | `없음` — `staleTime` 기본값으로 React Query 캐시가 유지되며 stale 표시 UI 없음 (`shared-hooks/src/useAccountSettings.ts:24`) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
