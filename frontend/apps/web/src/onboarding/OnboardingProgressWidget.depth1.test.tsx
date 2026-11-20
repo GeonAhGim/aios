@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { OnboardingProgressWidget } from "./OnboardingProgressWidget";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMsAsync, perfBudgetMs } from "../test/perfBudget";
 
 let credentials: { data: unknown; isLoading: boolean; isError: boolean };
 let strategies: { data: unknown; isLoading: boolean; isError: boolean };
@@ -134,19 +134,17 @@ describe("OnboardingProgressWidget depth1 (D2)", () => {
   // --- performance assertion ---
 
   // 성능 단언: 로컬 실측 ~2ms, 예산 60ms (실측의 30배 이상, CI 공유 호스트 여유 포함)
-  it("perf: 위젯 렌더 시간이 예산 내 — performance.now() best-of-5", () => {
+  it("perf: 위젯 렌더 시간이 예산 내 — bestOfMsAsync (BEST_OF_RUNS=5)", async () => {
     credentials = { data: [], isLoading: false, isError: false };
     strategies = { data: [], isLoading: false, isError: false };
     deployments = { data: { deployments: [] }, isLoading: false, isError: false };
 
-    let measuredMs = 0;
-    for (let i = 0; i < 5; i++) {
+    const measuredMs = await bestOfMsAsync(async () => {
       const t0 = performance.now();
       renderWidget();
       cleanup();
-      const elapsed = performance.now() - t0;
-      measuredMs = i === 0 ? elapsed : Math.min(measuredMs, elapsed);
-    }
+      return performance.now() - t0;
+    });
 
     // 로컬 실측: ~1-2ms. 예산 60ms (30x 여유)
     expect(measuredMs).toBeLessThan(perfBudgetMs(60));
