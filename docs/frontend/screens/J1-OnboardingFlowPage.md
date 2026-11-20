@@ -107,9 +107,9 @@
 <!-- BLOCK:J1-OnboardingFlowPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 세 조회(`useExchangeCredentials`, `useMyStrategies`, `usePaperDeployments`)가 모두 완료이면 완료 카드에 "대시보드로 이동" 링크가 `/dashboard`를 가리키고, 단계 목록(`<ol>`)은 나타나지 않는다. | `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.test.tsx:65-75` — 세 훅에 모두 mock data를 넣고 `screen.getByRole("link", {name: "대시보드로 이동"})`의 `href`가 `/dashboard`임을, `queryByRole("list")`가 없음을 확인 |
+| A2 | 로딩 중(`isLoading === true`)에는 `<LoadingState />`만 보이고, 완료 카드와 단계 CTA 버튼이 렌더되지 않는다. | `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.test.tsx:77-82` — `credentials.isLoading = true`로 목하고 `screen.queryByRole("link", {name: "거래소 연결하기"})`가 없음을 확인 |
+| A3 | 세 조회 중 한 개가 `isError`여도 화면이 완료로 판정되지 않으며(`progress.isComplete === false`), 실패한 단계는 "예정" 뱃지로 남는다. 현재 단계 CTA는 `step.to`를 가리킨다. | `frontend/apps/web/src/routes/onboarding/OnboardingFlowPage.test.tsx:84-90` — `strategies.isError = true`로 목하고 `screen.getByRole("link", {name: "전략 만들기"})`가 존재하며 `href="/strategy-builder"`임을 확인 (fail-closed: `onboardingProgress.ts:65`에서 `isError` 시 `false` 반환) |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
