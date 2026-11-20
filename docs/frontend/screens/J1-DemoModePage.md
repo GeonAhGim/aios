@@ -103,10 +103,10 @@
 <!-- BLOCK:J1-DemoModePage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `<h1>` 제목 사용(`frontend/packages/ui-web/src/Feedback.tsx:43`), `<main>` 랜드마크(`frontend/apps/web/src/components/layout/AppShell.tsx:149`), `data-testid` 속성(`DemoModePage.tsx:30`) — 스크린 리더 탐색 가능. `Link`→`Button` 중첩 구조(`DemoModePage.tsx:29~32`) — WCAG 4.1.2 Name, Role, Value: 링크 내부 버튼은 스크린 리더가 두 개의 상호작용 요소를 보고하여 이중 해석 가능(ChromeVox: "link, button"). 2026-11-20 시점에서는 개선 가능하나 리프의 핵심 기능(종목 선택 이동)에 영향을 주지 않음. 포커스 표시자 — `frontend/packages/ui-web/src/Button.tsx:40~45`에 명시적 `focus-visible` 클래스 없음, 브라우저 기본 아웃라인에만 의존 | 갭 1: `Link`→`Button` 중첩 구조를 `Button`에 `onClick` 핸들러로 `router.navigate()` 호출 방식으로 전환하여 중첩 제거하거나, `Link`를 유지하고 `Button`을 `variant="ghost"`의 일반 `<span>`으로 교체 — 후자가 외관 유지에 유리. WCAG 2.5.3(같은 목표) 기준 충족. 갭 2: `frontend/packages/ui-web/src/Button.tsx`에 `focus-visible:ring-2 focus-visible:ring-accent` 명시 추가 권장(전역 스타일에 의존 중) |
+| i18n/지역화 | `frontend/apps/web/src/i18n/catalog.en.ts:335~340`, `frontend/apps/web/src/i18n/catalog.ko.ts:350~355`에 5개 키 모두 존재: `pageTitle`, `description`, `instrumentListLabel`, `sampleTag`, `startCta`. 누락 키 없음. `useTranslation()`(`DemoModePage.tsx:10`)으로 호출. 언어 변경 시 i18n 인스턴스가 재호출하여 새 언어 표시 — 지연 로드 중에는 react-i18next 기본 동작(키 문자열 그대로 표시) | 갭 없음 — 모든 키가 양쪽 카탈로그에 정의됨 |
+| 성능 예산 | 폴링 없음, API 호출 없음, React Query 사용 없음. `DEMO_INSTRUMENTS`는 길이 3의 고정 배열(`demoDataset.ts:13~17`) — 매 렌더마다 동일 참조. `getDemoDailyCandles()`(`demoDataset.ts:59`)는 `dailyCandleCache`(Map)로 캐싱 — 첫 호출 이후 재계산 없음. 페이지 마운트 시 렌더 1회, 상태 변경 없음 → 리렌더 없음. 메모리 사용: 3개 종목 × 365일 × O(1) — 수백 바이트 수준 | 갭 없음 — 성능 예산(렌더 1회, 폴링 0회, API 0회) 충족 |
+| 텔레메트리 | 오류 보고 호출 없음. `DemoModePage.tsx:9~41`에 Sentry 호출 부재. 분석/트래킹 호출도 부재. 전역 Error Boundary 또는 라우트 레벨 오류 처리 여부는 이 파일에서 확인 불가 — 미확인 | 미확인 — 전역 오류 처리가 라우트 레벨에서 동작할 가능성 있음. 그러나 이 화면 자체에는 텔레메트리 호출 없음 — 데모 모드 특성상 사용자 행동 추적 불필요 |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
