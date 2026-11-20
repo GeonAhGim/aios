@@ -59,10 +59,10 @@
 <!-- BLOCK:J1-ExchangeManagementPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 등록/해지 API가 RATE_LIMIT_EXCEEDED(429) 반환 | ErrorMessage 배너에 `getApiErrorMessage(errorCode)` 한국어 문구 표시, `retryAfterSec` 초 단위 카운트다운( ErrorMessage.tsx:41-53) | 카운트다운 종료 후 "다시 시도" 버튼 활성화( ErrorMessage.tsx:66) | 구현됨: ErrorMessage.tsx:38-67 — backoff_retry 분류 시 retryAfterSec 카운트다운. 423 LOCKED는 classifyRetry에 없음 — 미처리 [갭] |
+| 서버 오류(5xx) | EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY(503): 재시도 가능 / EXCHANGE_FATAL/INTERNAL_ERROR(502/500): 재시도 불가 | retryable: ErrorMessage 배너 + "다시 시도" 버튼 / fatal: ErrorMessage 배너만(traceId 노출, ErrorMessage.tsx:60), 버튼 없음 | retryable: 버튼 클릭 시 onRetry 재시도 / fatal: 없음 | 구현됨: ExchangeCredentialErrors.tsx:40-47 — classifyServerError(kind==="retryable")일 때만 onRetry 전달. serverError.ts:42-48 — 503 retryable, 502/500 fatal [확인] |
+| 네트워크 단절 | API 호출 중 연결 끊김 → ApiError 또는 일반 Error | 등록: `t("legacy.exchangeManagementPage.t2")`("등록에 실패했습니다.") — ExchangeManagementPage.tsx:100 / 해지: "해지에 실패했습니다." — ExchangeManagementPage.tsx:56 | 등록: RegisterCredentialError → ErrorMessage → retry 가능 여부 분류(classifyRetry) / 해지: RevokeCredentialError → 동일 | 구현됨: ExchangeManagementPage.tsx:96-101(register catch), :53-57(revoke catch) — ApiError면 원문, 아니면 한국어 문구 [확인]. 단, credentials 목록 조회(useExchangeCredentials) 실패 시 error 표시 코드 없음 [갭] |
+| 부분 실패(일부 데이터만 실패) | credentials 목록은 성공했으나 selectedExchange의 balance 조회 실패 / balance는 성공했으나 positions 조회 실패 | balance 실패: useExchangeBalance의 `error` 미사용 — 화면에 표시 안 함 (ExchangeManagementPage.tsx:38) / positions 실패: ExchangePositionsCard 내부 구현에 의존 | 없음 (balance 실패 시 빈 영역만) | 부분 구현: shared-hooks/src/useExchanges.ts:28-33 — `error` 변수 미분해. CredentialListCard에 error 전달 안 함 [확인]. ExchangePositionsCard 구현 미확인 — `frontend/apps/web/src/routes/exchanges/ExchangePositionsCard.tsx` [미확인] |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
