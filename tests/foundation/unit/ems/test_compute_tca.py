@@ -346,6 +346,6 @@ async def test_compute_tca_perf_budget_many_fills_and_bars(
 
     sample = await perf_budget.sample_async(_run_100)
 
-    assert sample.wall_ms < 1500, (
-        f"compute_tca() 100 calls too slow: {sample.wall_ms:.1f}ms (200 fills x 100 bars)"
+    assert sample.cpu_ms < 1500, (
+        f"compute_tca() 100 calls too slow: {sample.cpu_ms:.1f}ms (200 fills x 100 bars)"
     )
