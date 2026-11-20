@@ -100,10 +100,10 @@
 <!-- BLOCK:J2-ChartPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `data-testid="chart-instrument-id"` 존재(`ChartPage.tsx:178`). `PageHeader`가 `<h1>` 렌더(`Feedback.tsx:43`). `ErrorMessage`가 traceId/재시도 버튼 표시(`ErrorMessage.tsx:59-67`). | `aria-*` 속성 전무(`ChartPage.tsx:172-287` 전체 스캔 결과 `role=`, `aria-`, 키보드 핸들러 없음). `EmptyState`가 `<div>`만 렌더(`Feedback.tsx:24`), `aria-live` 또는 `role="status"` 없음. `LoadingState`가 스피너만 렌더(`Feedback.tsx:34`), `aria-busy="true"` 및 `role="status"` 누락. `ChartPanes`/`CandlestickChart`에 포커스 관리·키보드 네비게이션 확인 안 함 — 미확인. |
+| i18n/지역화 | `useTranslation` import 및 1회 호출(`ChartPage.tsx:66`). `legacy.chartPage.title1`="차트"(`catalog.ko.legacyD.ts:119`), `legacy.chartPage.t2`="표시할 캔들이 없습니다."(`catalog.ko.legacyD.ts:120`) — 양쪽 카탈로그(ko/eng)에 모두 존재. `ErrorMessage`가 `legacy.errorMessage.t1/t2/t3` 사용(`ErrorMessage.tsx:60-67`) — `catalog.ko.legacyB.ts:9-13`, `catalog.en.legacyB.ts:7-11`에 정의. 카탈로그 누락 키: 없음. | `t()` 호출이 2곳(`ChartPage.tsx:175,231`)뿐 — 정적 텍스트(예: "차트", "표시할 캔들이 없습니다.")는 i18n화되었으나, UI 동적 텍스트(예: `instrumentId` 표시, `CoverageBadge` 라벨, `ChartToolbar` 버튼 텍스트, `CompareSymbols` 라벨, `DrawingsList` 텍스트)에 대한 i18n 키 사용 여부 확인 안 함 — 미확인. |
+| 성능 예산 | `useQuery` 2건(candles, coverage) — 모두 1회 조회(`ChartPage.tsx:135-148`). 자동 폴링 없음. `VISIBLE_CANDLE_COUNT=200`, `DEFAULT_TIMEFRAME="1h"`(`chartPageConfig.ts:13-15`). `useMemo`로 `layoutView` 계산(`ChartPage.tsx:93-101`). react-query 기본 재시도 3회. `useChartDrawings`가 `lastSyncedRef`로 변경 감지 시에만 네트워크 호출(`useChartDrawings.ts:139-148`). | `handleAddDrawing`이 매 렌더마다 재생성(`ChartPage.tsx:168-170`, `useCallback` 없음). `setVenue`, `setTimeframe`, `setDrawingTool`이 `ChartToolbar`에 prop으로 전달되나 `useCallback` 감싸지 않음(`ChartPage.tsx:189-194`). candles 데이터가 변경될 때마다 `ChartPanes`→`CandlestickChart` 전체 재렌더 — memoization 확인 안 함(`ChartPage.tsx:240-247`) — 미확인. |
+| 텔레메트리 | `routeApiError`로 오류 분류(`ChartPage.tsx:161`). `ErrorMessage`가 traceId 표시(`ErrorMessage.tsx:60`). | 외부 보고/로깅/애널리틱스 호출 전무(`ChartPage.tsx` 전체 스캔 결과). 오류 발생 시 `routeApiError`로 분류만 하고 외부 보고/로깅 연결 여부 확인 안 함 — 미확인. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
