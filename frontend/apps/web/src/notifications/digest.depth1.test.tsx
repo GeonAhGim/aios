@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NotificationHistoryEntry } from "@aios/shared-types";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, bestOfMsAsync, perfBudgetMs } from "../test/perfBudget";
 import { UNKNOWN_DATE_KEY, computeDailyDigest } from "./digest";
 import { NotificationCenterPage } from "../routes/notifications/NotificationCenterPage";
 
@@ -105,23 +105,27 @@ describe("computeDailyDigest: 성능 단언", () => {
   // 실측: n=10000 computeDailyDigest 약 2-5ms. 예산=30배 여유 100ms.
   it("n=10000 이력을 100ms 예산 안에서 다이제스트로 변환한다", () => {
     const budget = perfBudgetMs(100);
-    let bestMs = Infinity;
-    for (let i = 0; i < 5; i++) {
+    const bestMs = bestOfMs(() => {
       const start = performance.now();
       computeDailyDigest(bigHistory(10000));
-      bestMs = Math.min(bestMs, performance.now() - start);
-    }
+      return performance.now() - start;
+    });
     expect(bestMs).toBeLessThan(budget);
   });
 
   // 실측: 페이지 렌더 15-30ms. 예산=30배 여유 1000ms.
   it("500 건 이력이 있는 페이지가 1초 안에 렌더된다", async () => {
-    historyResult = { data: bigHistory(500), isError: false, error: null, refetch: () => {} };
-    const start = performance.now();
-    renderPage();
-    const elapsed = performance.now() - start;
-    expect(elapsed).toBeLessThan(perfBudgetMs(1000));
-    await waitFor(() => expect(screen.getByText("2026-09-15")).toBeInTheDocument());
+    const budget = perfBudgetMs(1000);
+    const bestMs = await bestOfMsAsync(async () => {
+      historyResult = { data: bigHistory(500), isError: false, error: null, refetch: () => {} };
+      const start = performance.now();
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getAllByText("2026-09-15").length).toBeGreaterThan(0),
+      );
+      return performance.now() - start;
+    });
+    expect(bestMs).toBeLessThan(budget);
   });
 });
 

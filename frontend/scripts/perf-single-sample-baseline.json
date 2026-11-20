@@ -1,5 +1,4 @@
 [
-  "apps/web/src/notifications/digest.depth1.test.tsx",
   "apps/web/src/notifications/digest.test.ts",
   "apps/web/src/onboarding/OnboardingProgressWidget.depth1.test.tsx",
   "apps/web/src/onboarding/onboardingProgress.test.ts",
