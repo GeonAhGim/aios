@@ -55,10 +55,10 @@
 <!-- BLOCK:J6-AuditLogPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | 서버가 423/429 반환 | `routeApiError`가 `"backoff_retry"` → `retryAfterSec` + retry 버튼 (`AuditLogPage.tsx:33`, `AuditLogPage.tsx:62`) | `retryAfterSec` 초 대기 후 retry | 구현됨 |
-| 서버 오류(5xx) | `isError` 참, `routeApiError.kind !== "backoff_retry"` | `<ErrorMessage>` (`AuditLogPage.tsx:29~35`) | `ErrorMessage`의 retry 또는 수동 재조회 | 구현됨 |
-| 네트워크 단절 | React Query: `networkStatus` 실패 | `routeApiError`가 `"other"` → `<ErrorMessage>` | 네트워크 복구 후 수동 `refetch()` | 부분 구현 (React Query 재시도 자동, but UI 안내 없음) |
-| 부분 실패(일부 데이터만 실패) | `data.items` 일부만 실패 | TODO | TODO | 해당 없음 — API 전체 페이지네이션 응답(`ApiResponsePageMeta`, `AuditLogPage.tsx:64~66`) 단위 실패 |
+| 잠김/속도 제한(423/429) | 서버가 423/429 반환 | 429(`RATE_LIMIT_EXCEEDED`): `classifyRetry`(shared-types/retryable.ts:45)→`backoff`→`routeApiError`(errorRouting.ts:127)→`backoff_retry` → `retryAfterSec` + retry 버튼(`AuditLogPage.tsx:33`, `AuditLogPage.tsx:62`). 423: `deriveLockout`(shared-types/accountLockout.ts:41)→`account_locked` kind → `ErrorMessage` 렌더링되나 `kind !== "backoff_retry"`로 `retryAfterSec` 미전달(`AuditLogPage.tsx:33`) | `retryAfterSec` 초 대기 후 retry | 구현됨(429만 backoff_retry 경로, 423은 account_locked로 별도 처리) |
+| 서버 오류(5xx) | `isError` 참, `routeApiError.kind !== "backoff_retry"` | `<ErrorMessage>`(`AuditLogPage.tsx:29~35`). `classifyServerError`(shared-types/serverError.ts:39): `RETRYABLE_SERVER_ERROR_CODES`(502/504 등)→`backoff_retry`, `FATAL_SERVER_ERROR_CODES`(500 등)→fatal(kind 값), 해당 외→fallthrough→`unknown`. fatal/`unknown` 모두 `ErrorMessage` 렌더링되나 `canRetry=false`(`AuditLogPage.tsx:62`)로 retry 버튼 없음 | `ErrorMessage`의 retry(backoff_retry인 경우) 또는 수동 재조회(fatal/unknown) | 구현됨 |
+| 네트워크 단절 | React Query: 네트워크 실패 → `error`는 `ApiError` 아님 | `classifyForbidden`→`null`. `routeApiError`→`isErrorCodeLike` false → fallthrough → `{ kind: "unknown" }`(errorRouting.ts:133). `canRetry=false` → `onRetry` 미전달 → `ErrorMessage` 렌더링되나 traceId/retry 버튼 없음. React Query 기본 `retry: 3`(0→100→200ms) 자동 재시도 후 `isError=true` | 네트워크 복구 후 조회 버튼 재클릭(`handleSearch`, `AuditLogPage.tsx:56~59`) | 부분 구현 (React Query 재시도 자동, but UI 안내 없음 — 네트워크 끊김을 명시적으로 알려주는 문구 없음) |
+| 부분 실패(일부 데이터만 실패) | `data.items` 일부만 실패 | 해당 없음 — API 전체 페이지네이션 응답(`ApiResponsePageMeta`, `AuditLogPage.tsx:64~66`) 단위 실패. `useAuditLog`(`useAdmin.ts:116~131`)의 `queryFn`은 `apiClient.listAuditLog` 단일 호출이며, 실패 시 `data` 전체가 null + `isError=true`. `data.items` 일부만 실패하는 시나리오는 존재하지 않음 | 해당 없음 — 전체 재조회(`handleSearch` 재실행)만 가능 | 해당 없음 — API 전체 페이지네이션 응답(`ApiResponsePageMeta`, `AuditLogPage.tsx:64~66`) 단위 실패 |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
