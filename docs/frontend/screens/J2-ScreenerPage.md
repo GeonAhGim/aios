@@ -69,9 +69,10 @@
 <!-- BLOCK:J2-ScreenerPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:257`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:271`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:303`) | TODO | TODO | TODO | TODO |
+| `<Button>` `:257` (「필터 제거」) | 필터 행이 렌더된 상태(`:199-268`) | 해당 행 제거 — `() => removeFilter(row.id)`(`:262`), `removeFilter` 정의 `:157-159`, `setFilters`로 `rows.filter((row) => row.id !== id)` | 없음(서버 호출 없음) | 같은 페이지 |
+| `<Button>` `:271` `addFilter` (「필터 추가」, `screener-add-filter`) | 항상 활성(disabled 조건 없음) | `emptyFilterRow()`(`:80-82`, kind=indicator, operator=gt, value="")를 끝에 추가 — `setFilters((rows) => [...rows, emptyFilterRow()])`(`:153-155`) | 없음 | 같은 페이지 |
+| `<Button>` `:303` `handleRun` (「실행」, `screener-run`) | 항상 활성 | `buildDefinition()`(`:161-169`) → `describeScreenDefinitionIssues`(`:173`) → 이슈 있으면 `setValidationIssues`(`:174`) 후 return(`:175`), 없으면 `setSubmitted`(`:176`) → `useQuery` 활성화(`:143-147`) → `client.runScreen`. 성공 시 결과 카드에 행 렌더(`:320-344`) | 클라이언트 검증 실패: `screener-validation-alert`(`:291-301`), 요청하지 않음. 서버/네트워크 실패: `ScreenerErrorBanner`(`:314-316`) | 같은 페이지 |
+| `<Link>` `:337` (결과 행의 「차트에서 보기」) | `rows.length > 0`(`:320`) | `/chart?instrument_id=<encodeURIComponent(instrumentId)>`로 이동 — 대상 라우트 `/chart`는 `router.tsx:120`에서 `<ChartPage />`로 매핑 | 없음 | 같은 페이지 |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
