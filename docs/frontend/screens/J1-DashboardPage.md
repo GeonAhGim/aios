@@ -103,10 +103,10 @@
 <!-- BLOCK:J1-DashboardPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | 모든 상호작용 요소가 네이트 HTML `<button>`/`<Link>` 사용 — 시맨틱 HTML 기본 접근성 활용(`DashboardPage.tsx:99-107`, `:118-126`, `:229-233`). 정지된 실행 목록이 `<ul>/<li>`로 구조화(`:88-112`). `StatusBadge`가 색만으로 상태(RUNNING/PAUSED)를 표시 — WCAG 1.4.1(색 시각장애) 및 1.4.3(대비) 미준수 가능. `data-testid`/`aria-label`/`role` 속성이 전무(facts 테이블 빈 칸). | `StatusBadge`에 `aria-label` 추가(예: `status="RUNNING"` → `"실행 중"`). 테스트용 `data-testid` 누락(8개 Button/EmptyState/LoadingState). 색 대신 아이콘/텍스트 레이블 병기. |
+| i18n/지역화 | 모든 고정 문자열이 t() 키로包裹: legacy.dashboardPage.* 16개 키(`:85`, `:106`, `:114`, `:117`, `:125`, `:154`, `:155`, `:168`, `:191-193`, `:209`, `:231`, `:236`, `:242`, `:251`) + onboarding.emptyStateCta(`:231`). 모두 catalog.ko.legacyB.ts:114-129 및 catalog.en.legacyB.ts:112-128에 ko/en 쌍 존재. t("legacy.dashboardPage.t2", { riskProfile: ... }) 파라미터 보간 사용(`:155`). 누락 키 없음. | 없음 |
+| 성능 예산 | useExecutions가 5초 폴링(`shared-hooks/src/usePortfolio.ts:42` `refetchInterval: 5000`). useRiskProfile/usePortfolio는 폴링 없음(staleTime 기본). 렌더 성능 테스트 존재(`DashboardPage.depth1.test.tsx:145-160`): 예산 400ms, 실측 9.2~12.6ms(3회 평균). bestOfMs로 worst-of-N 측정(`:149`). | 테스트에 @perf 마커 부재 — vitest 테스트이므로 Python check_perf_marker_guard.py 대상 아님. 폴링 간격 5초가 과도한지(사용자 활동 패턴에 따라 조정 필요) 미확인. |
+| 텔레메트리 | `DashboardPage.tsx`에 `reportError`/`captureException`/`telemetry`/`analytics`/`Sentry` 호출이 전무. `ErrorMessage` 컴포넌트(`:40-45`, `:244-247`)가 오류를 로컬 UI로만 표시하고 외부 보고 없음. `ForbiddenNotice`(`:37`)도 로컬 403 처리. | 오류 발생 시 외부 모니터링(Sentry 등)으로 보고하지 않음 — 서버 로그/traceId(`:43`)로만 디버깅 가능. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
