@@ -37,10 +37,10 @@
 <!-- BLOCK:J6-ConnectionsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading` (`useConnections`의 `useQuery` isLoading, `useConnections.ts:14`) | `<LoadingState />` 컴포넌트 표시 (`ConnectionsPage.tsx:183`) | 없음 (로딩 중 버튼 비활성화) | 구현됨 (`ConnectionsPage.tsx:182-183`) |
+| 빈 상태 | `!isLoading && !isError && data.connections.length === 0` (`ConnectionsPage.tsx:184,206-208`) | `<EmptyState>`에 `legacy.connectionsPage.t9` ("등록된 계정 연동이 없습니다.", `ConnectionsPage.tsx:207`) | "새로고침" 버튼 (`:210-211`, `refetch()`) / "새 연동 생성" 버튼 (`:213-216`, 폼으로 스크롤) | 구현됨 (`ConnectionsPage.tsx:206-217`) |
+| 정상 | `!isLoading && !isError && data.connections.length > 0` (`ConnectionsPage.tsx:184`) | 각 연결 행에 `<ConnectionRow>` 표시: 계정 레이블, `StatusBadge` (`:63-64`), 범위 검증 스패ан (`:65`), 제공자 정보 (`:68`), 스냅샷 섹션 (`:81-93`). 행별 Confirm/Sync/Revoke 버튼 (`:73-78`). 상단 "새로고침" 버튼 (`:210-211`) | 행별 Confirm (`:146-153`), Sync (`:155-163`), Revoke (`:165-172`) / 페이지 새로고침 (`:210-211`, `refetch()`) | 구현됨 (`ConnectionsPage.tsx:184-205`) |
+| 낡은 데이터(신선도 초과) | `useConnections`에 staleTime/refetchInterval 설정 없음 (`useConnections.ts:14-17`). 스냅샷 freshness (`snapshot.freshness`, `:84`)는 표시되지만 임계값 비교 로직 없음 | — | — | 없음 (`useConnections.ts:14-17`에 staleTime 없음, `ConnectionsPage.tsx:84`에서 freshness 표시만 하고 임계값 초과 감지 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
