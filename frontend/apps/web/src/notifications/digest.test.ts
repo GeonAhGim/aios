@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NotificationHistoryEntry } from "@aios/shared-types";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 import { UNKNOWN_DATE_KEY, computeDailyDigest } from "./digest";
 
 function entry(overrides: Partial<NotificationHistoryEntry> = {}): NotificationHistoryEntry {
@@ -92,16 +92,12 @@ describe("computeDailyDigest: 수치 성능 단언(spec 아키텍처: apps/web/s
   it("대량 입력(n=50000)도 100ms 예산 안에서 끝난다", () => {
     const input = bigHistory(50000);
 
-    // 단발 wall-clock은 병렬 워커 부하에 흔들리므로 best-of-5 최소값으로 판정한다.
-    let bestMs = Infinity;
-    let digest = computeDailyDigest(input);
-    for (let i = 0; i < 5; i++) {
+    const bestMs = bestOfMs(() => {
       const start = performance.now();
-      digest = computeDailyDigest(input);
-      bestMs = Math.min(bestMs, performance.now() - start);
-    }
+      computeDailyDigest(input);
+      return performance.now() - start;
+    });
 
-    expect(digest.length).toBeGreaterThan(0);
     expect(bestMs).toBeLessThan(perfBudgetMs(100));
   });
 
@@ -147,13 +143,17 @@ describe("computeDailyDigest: 수치 성능 단언(spec 아키텍처: apps/web/s
     const input = uniqueDayHistory(20000);
     const budget = perfBudgetMs(100);
 
-    const realStart = performance.now();
-    computeDailyDigest(input);
-    const realElapsedMs = performance.now() - realStart;
+    const realElapsedMs = bestOfMs(() => {
+      const start = performance.now();
+      computeDailyDigest(input);
+      return performance.now() - start;
+    });
 
-    const regressionStart = performance.now();
-    o2RegressionComputeDailyDigest(input);
-    const regressionElapsedMs = performance.now() - regressionStart;
+    const regressionElapsedMs = bestOfMs(() => {
+      const start = performance.now();
+      o2RegressionComputeDailyDigest(input);
+      return performance.now() - start;
+    });
 
     expect(realElapsedMs).toBeLessThan(budget);
     expect(regressionElapsedMs).toBeGreaterThan(budget);

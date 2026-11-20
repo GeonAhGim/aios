@@ -1,5 +1,4 @@
 [
-  "apps/web/src/notifications/digest.test.ts",
   "apps/web/src/onboarding/onboardingProgress.test.ts",
   "apps/web/src/pwa/push.depth1.test.ts",
   "apps/web/src/pwa/push.test.ts",
