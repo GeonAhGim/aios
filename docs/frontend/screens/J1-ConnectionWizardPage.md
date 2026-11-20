@@ -109,9 +109,9 @@
 <!-- BLOCK:J1-ConnectionWizardPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | provider 단계에서 `providerCode`, `opaqueAccountRef`가 모두 공백이 아니고 `capabilityProfile`가 1개 이상 선택되어야 `다음` 버튼이 활성화됨 (`ConnectionWizardPage.tsx:56` — `providerStepValid` 조건; `:131` — `disabled={!providerStepValid}`). | 입력 필드 2개에 텍스트 입력 + 체크박스 1개 선택 시 버튼 `disabled` 속성이 false로 전환되는지 확인 |
+| A2 | 계정 키는 화면에 원문이 노출되지 않는다. `maskKey` 함수(`ConnectionWizardPage.tsx:35-38`)가 입력 길이가 4 이하일 경우 전체를 `•`로 가리고, 5자 이상일 경우 고정 6개 `•` + 마지막 4자만 표시함. 검토 단계(`:179-180`)에서 `data-testid="wizard-masked-key"` 요소에 렌더됨. | `maskKey("abcdefghij")` → `"••••••hij"` 반환, `maskKey("ab")` → `"••"` 반환 단위 확인 |
+| A3 | 3단계 마법사 순서(`provider` → `permissions` → `review`)가 강제되며, 각 단계에서 `이전` 버튼으로 뒤로 갈 수 있고(`:159-162`, `:190-191`), `review` 단계에서 `연결하기` 버튼 클릭 시 `useBeginConnection.mutate`(`:60-70`)가 호출됨. 성공 시 `succeeded=true`로 전환되어 성공 알림(`:85-93`) 표시, 실패 시 `submitError` 설정으로 `WizardActionError`(`:188`) 표시. | 단계별 라우팅/네비게이션 + mutation 성공/실패 분기 확인 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
