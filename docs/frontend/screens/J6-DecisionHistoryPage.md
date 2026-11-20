@@ -44,10 +44,10 @@
 <!-- BLOCK:J6-DecisionHistoryPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `decisionId` 또는 `positionKey` 입력 후 조회 버튼 클릭 시, 값이 빈 문자열이거나 공백만 있는 경우 | `ComplianceDecisionLookupPanel`: `legacy.complianceDecisionLookupPanel.t4` (`frontend/apps/web/src/routes/compliance/ComplianceDecisionLookupPanel.tsx:36`) / `EventLineageLookupPanel`: `decisions.eventLineage.validationEmpty` (`frontend/apps/web/src/routes/decisions/EventLineageLookupPanel.tsx:35`) — 각 패널 내 `text-danger` 스타일 `<p>`로 표시 | 입력값 수정 후 재조회 | 구현됨 (입력 검증: `ComplianceDecisionLookupPanel.tsx:33-40`, `EventLineageLookupPanel.tsx:32-41`) |
+| 인증 필요/세션 만료(401) | API 요청 시 인증 토큰이 만료되거나 유효하지 않을 때 (`shared-types/src/apiError.ts:61-63`) | 없음 (페이지 수준 처리 없음. `protect()` 라우트 가드(`router.tsx:139`)가 인증을 담당하며, 401 응답은 `routeApiError` → `auth_required` 갈래(`shared-types/src/errorRouting.ts:128-129`)로 수렴하나 페이지가 직접 처리하지 않음) | 없음 (페이지 수준 처리 없음) | 없음 |
+| 권한 없음/MFA 필요(403) | API 요청 시 테넌트 불일치, 권한 부족, MFA 필요, 정책/리스크 거부 (`shared-types/src/apiError.ts:19-27`) | 없음 (페이지 수준 처리 없음. 하위 패널 `ComplianceActionError`가 `classifyForbidden`→`ForbiddenNotice`(`ComplianceDecisionLookupPanel.tsx:13`)로, `PositionsQueryError`가 동일 갈래(`PositionsQueryError.tsx:24`)로 처리하나 페이지가 직접 처리하지 않음) | 없음 (페이지 수준 처리 없음) | 없음 |
+| 충돌/상태 불일치(409) | API 요청 시 중복 요청, 지갑 잔액 정합성 오류, 데이터 수집 미완료, 상태 전환 오류 (`shared-types/src/apiError.ts:29-42`) | 없음 (페이지 수준 처리 없음. `routeApiError`가 409를 `classifyStateConflict`→`refetch_retry`/`invalid_transition`으로 분류(`shared-types/src/errorRouting.ts:111-113`)하나 페이지가 직접 처리하지 않음) | 없음 (페이지 수준 처리 없음) | 없음 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
