@@ -65,7 +65,10 @@
 <!-- BLOCK:J3-NotificationCenterPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| TODO | | | |
+| 행 A: 채널 `<Select>` | `CHANNEL_FILTERS`(:12)가 `"ALL","EMAIL","PUSH","IN_APP"` — 네트워크 호출 없이 즉시 렌더. Select는 조건부 분기(:70-107) 바깥(:52-68)에 있어 로딩·에러 상태에서도 항상 보인다. | `onChange`(:57)가 `setChannel`을 호출. `filtered`(:41-44)가 `channel` 값으로 재계산(`useMemo`), `digest`(:45)도 재계산되어 목록이 바뀐다. | 네트워크 호출이 없으므로 실패 경로 없음. 에러 상태(`:70`)에서는 `HistoryError`가 렌더되어 Select 아래에 에러 메시지가 보인다. | 없음(같은 페이지 안에서 필터링). |
+| 행 B: 재시도 버튼(`ErrorMessage` 내부) | `isError`(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:70`)이고 `routed.kind`가 `refetch_retry` 또는 `backoff_retry`(`shared-types/src/errorRouting.ts:1-50` 참조, `HistoryError`(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:18-31`). `ErrorMessage.tsx:61-66`에서 `canRetry && onRetry`가 true, `remainingSec`이 0일 때 버튼 활성. 429는 `retryAfterSec`이 0이 되면 활성. | `onRetry={() => refetch()}`(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:71`)가 `useNotificationHistory`(`shared-hooks/src/useAccountSettings.ts:45-50`)의 `refetch()`를 호출. 성공하면 `isError`가 false가 되어 정상(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:76-107`) 또는 빈 상태(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:74-75`)가 렌더된다. | 재조회가 실패하면 `isError`가 true로 남아 `HistoryError`가 다시 렌더된다(`frontend/apps/web/src/routes/notifications/NotificationCenterPage.tsx:70-71`). 버튼은 같은 조건으로 재평가된다. | 없음. |
+| 행 C: ForbiddenNotice의 'Step up' 버튼 | 403이어서 `classifyForbidden`이 non-null(:19). | 이 페이지는 `<ForbiddenNotice error={error} />`으로 `onStepUp`을 넘기지 않는다(:19). `ForbiddenNotice.tsx:42`의 `onStepUp &&` 조건이 false라 'Step up' 버튼이 렌더되지 않는다. 행동 없음. | — | 없음. st-b 행의 'Step up' 주장은 이 페이지 코드와 불일치 — `ForbiddenNotice`가 `onStepUp` prop을 받지만 호출부가 전달하지 않아 버튼이 표시되지 않는다. |
+| 행 D(간접): 창 포커스 복귀 자동 재조회 | `useNotificationHistory`(`shared-hooks/src/useAccountSettings.ts:45-50`)는 `useQuery` 기본 설정만 사용 — refetchOnWindowFocus 명시 없음. 전역 `QueryClient`는 `main.tsx:15`에서 옵션 없이 생성되어 기본값 true 적용. | 창 포커스 시 useQuery 기본 refetchOnWindowFocus: true로 자동 재조회. | — | 없음. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
