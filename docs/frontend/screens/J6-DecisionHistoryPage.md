@@ -24,7 +24,8 @@
 <!-- BLOCK:J6-DecisionHistoryPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| TODO | | |
+| `useComplianceDecisionLookup` (ComplianceDecisionLookupPanel) | `@aios/shared-hooks` → `apiClient.getComplianceDecision(decisionId)` → `GET /v1/foundation/compliance/decisions/{decisionId}` (CM-13 explain, `shared-hooks/src/useCompliance.ts:10`) | 1회 조회 — `useMutation`(폴링 없음). 사용자가 decisionId 입력 후 버튼 클릭 시 `mutate()` 호출(`ComplianceDecisionLookupPanel.tsx:44`). 마운트 시 자동 조회 없음(`useCompliance.ts:5-6`). | `ComplianceActionError` 컴포넌트(`ComplianceActionError.tsx:11-24`)가 `routeApiError()`로 분류: 400→`BadRequestNotice`, 403→`ForbiddenNotice`, 그 외→`ErrorMessage`(trace_id 노출, `retryAfterSec` 설정 시 재시도 버튼). 로컬 상태 `error: unknown`(`ComplianceDecisionLookupPanel.tsx:31`)에 저장 후 `error !== null` 조건으로 렌더(`ComplianceDecisionLookupPanel.tsx:61-65`). |
+| `usePositionJournal` (EventLineageLookupPanel → PositionJournalPanel) | `frontend/apps/web/src/hooks/usePositions.ts:66` → `client.getPositionJournal({positionKey, cursor, limit})` → `GET /v1/positions/{position_key}/journal` (FA-14/LB-19, `PositionJournalPanel.tsx:14`) | 1회 조회 + 커서 페이지네이션 — `useQuery` + `useCursorPage`(`PositionJournalPanel.tsx:60-61`). 사용자가 positionKey 입력 후 버튼 클릭 시 `setSubmitted()`로 키 전달(`EventLineageLookupPanel.tsx:40`). `enabled: open` — 패널 확장 시에만 조회(`PositionJournalPanel.tsx:61`). `key={submitted}`로 PositionJournalPanel 강제 재마운트(`EventLineageLookupPanel.tsx:59`). 폴링 없음. | `PositionsQueryError` 컴포넌트(`PositionsQueryError.tsx:19-37`)가 `routeApiError()`로 분류: 404→`NotFoundState`("저널이 없습니다.", 재시도 버튼 없음), 403→`ForbiddenNotice`, 그 외→`ErrorMessage`(trace_id 노출, `refetch_retry`/`backoff_retry`일 때만 `onRetry` 배선). `query.isError` 조건으로 렌더(`PositionJournalPanel.tsx:88`). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
