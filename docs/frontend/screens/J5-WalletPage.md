@@ -34,10 +34,12 @@
 <!-- BLOCK:J5-WalletPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | `isLoading`이 `true`일 때 (`WalletPage.tsx:13`, `:51`) | 잔액 자리에 `…` 표시 (`:51`). 이 문구는 사실 시트 키가 없는 하드코딩 리터럴. 제출 버튼은 `requestTopup.isPending`일 때 `loading` 속성으로 비활성화 (`:83`) | 없음 | 구현됨(`:51`), 문구 `…`은 시트 키 없음 |
-| 빈 상태 | 잔액이 `0`이거나 `balance`가 `undefined`일 때 (`:51`) | `0 크레딧` 표시 (`:51`). 별도 빈 상태 UI 없음. 신청 내역 목록 없음. | 충전 금액 입력 및 신청 | 구현됨(`:51`), 단 갭: `useWalletBalance`의 `error`를 구조분해하지 않아 (`:13`) 조회 실패 시에도 `0 크레딧`으로 오표시 |
-| 정상 | `balance?.balance`가 `undefined`가 아닌 값으로 조회 성공 | `${balance} 크레딧` (`:51`), 입금 안내 `legacy.walletPage.t4` (`:69`). 신청 성공 시 `legacy.walletPage.t5` 접수 알림 (`:80-81`) | 충전 금액 수정, 충전 신청 버튼 클릭 | 구현됨 |
-| 낡은 데이터(신선도 초과) | dataUpdatedAt이 staleTime(React Query 기본 5분)을 초과했으나 재페치 안 된 상태. useWalletBalance에 staleTime/refetchOnWindowFocus 명시 설정 없음 (`useWallet.ts:6-9`). 충전 성공 시 walletBalance 쿼리 무효화 (`useWallet.ts:17`) | 화면에 신선도 표시·경고 없음 (`:13`). dataUpdatedAt/isStale 사용 안 함 | 창 포커스 시 React Query 기본 refetchOnWindowFocus: true로 재조회 (기본값) | 없음 (신선도 표시·경고 UI 없음) |
+| 로딩(잔액 조회 중) | `useWalletBalance().isLoading`이 true (`WalletPage.tsx:13` 구조분해, `:51` 조건) | 라벨 `legacy.walletPage.label2` / "보유 크레딧"(`:50`), 값 `"…"`(`:51`). "…"은 사실 시트 키 목록에 없음(시트 밖 문자). | 신청 폼은 그대로 렌더됨(`:54-85`). 금액 입력·제출 가능. | 미확인(분기는 `:51`에 있으나 "…" 문구가 사실 시트에 없음). |
+| 로딩(제출 중) | `requestTopup.isPending`이 true (`WalletPage.tsx:83` loading prop) 또는 in-flight 가드(`useIdempotentSubmit.ts:36-38`) | 버튼 `legacy.walletPage.t6` / "충전 신청"(`:84`)이 spinner 표시(Button.tsx:47-49). disabled(`Button.tsx:39`). | 버튼 연타는 DuplicateSubmitError로 조용히 무시(`WalletPage.tsx:29`, `useIdempotentSubmit.ts:37`). | 구현됨(`:83`, `:29`, `useIdempotentSubmit.ts:36-39`). |
+| 빈 상태(잔액 0/null) | `balance?.balance`가 nullish(`WalletPage.tsx:51`, 폴백 `"0"`) | 라벨 "보유 크레딧"(`:50`), 값 `"0 크레딧"`. ` 크레딧` 접미사는 하드코딩(`:51`), 키 없음. | 폼 입력·제출 가능. | 구현됨(표시 자체는 `:51`). 빈 상태 안내 문구: 사실 시트에 없음 → 없음. 목록 없음 → 해당 없음. 주의: `useWalletBalance`의 `error`를 구조분해하지 않으므로(`:13`) 조회 실패도 "0 크레딧"으로 보인다. 빈 상태와 실패 구분 불가. |
+| 정상(잔액 로드 완료) | `isLoading === false`이고 `data` 존재 | 제목 `legacy.walletPage.title1` / "지갑"(`:48`). 라벨 `label2`(`:50`), 값 `"{balance} 크레딧"`(`:51`). 금액 필드 라벨 `label3`(`:58`), 기본값 `"30000"`(`:16`), 최소 1(`:62`). 안내 `t4`(`:69`). 버튼 `t6`(`:84`). | 금액 입력 → 제출(`:34-37`). | 구현됨(위 줄 인용). |
+| 정상 추가(제출 성공 직후) | `submit` 성공 후 `setSubmitted`(`WalletPage.tsx:27`) | 성공 알림 `legacy.walletPage.t5` / "충전 요청 #{{id}} 접수됨 ({{amount}} 크레딧) — 관리자 확인 대기 중"(`:79-82`). | 다시 신청 가능. 잔액 재조회: `useWallet.ts:17`의 `invalidateQueries`. | 구현됨(`:27`, `:79-82`, `useWallet.ts:17`). |
+| 낡은 데이터(신선도 초과) | 캐시된 값이 staleTime을 넘었으나 `refetchOnWindowFocus: true` 기본 동작으로 창 포커스 시 재조회(`useWallet.ts:6-9`) | 캐시된 값 그대로 표시(`:51`). 낡음 표시 문구: 사실 시트에 없음. | 창 포커스 시 자동 재조회(React Query 기본). 제출 성공 후 무효화 재조회(`useWallet.ts:17`). | 낡음 표시: 없음. staleTime: `useWallet.ts`에 설정 없음, `main.tsx:15`도 `new QueryClient()` 기본값. data 블록(27줄)의 "staleTime 기본값(5분)" 주장은 TanStack 기본값(0)과 다름 — data 블록 오류 의심. |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
@@ -45,10 +47,10 @@
 <!-- BLOCK:J5-WalletPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `<Input type="number" min="1" required>` — 브라우저 유효성 검사 (`WalletPage.tsx:59-66`). 서버 400 응답 시 `routeApiError`가 `{kind:"field_errors"}` 반환(`errorRouting.ts:87-88`) | 브라우저 기본 오류 툴팁 (예: "숫자를 입력하세요", "1 이상의 값을 입력하세요"). 서버 400 시 `ErrorMessage` 배너(`WalletPage.tsx:71-77`) — `fieldErrors` 추출 안 함(`ErrorMessage.tsx:55`에서 `hasMappedFieldErrors` 체크 없음). | 필드에 올바른 값 입력 후 재제출. 서버 400 시 재시도 버튼 없음 (`classifyRetry`에서 `kind:"none"`). | 구현됨 (브라우저 네이티브). 서버 400 응답 시 `ErrorMessage` 배너만 표시, 필드별 오류 안내 없음. |
+| 인증 필요/세션 만료(401) | 토큰 만료·부재 — `isSessionExpiredErrorCode`(`errorRouting.ts:128-129`)가 `auth_required` 반환 | — (`ProtectedRoute`가 `/login?next=...`로 리다이렉트) — WalletPage 렌더링 안 됨 | `/login`에서 재로그인 후 원 경로 복귀 | 없음 (`router.tsx:141`의 `protect(<WalletPage />)` → `ProtectedRoute.tsx:20-21`이 401을 가로챔). `WalletPage.tsx:11-31`에서 401을 처리하지 않음. |
+| 권한 없음/MFA 필요(403) | `routeApiError`가 `{kind:"mfa_required"|"tenant_mismatch"|"policy_denied"|"forbidden"}` 반환 (`errorRouting.ts:98-102`) | `ErrorMessage` 배너 (`WalletPage.tsx:71-77`) — `getApiErrorMessage`가 errorCode→메시지 매핑 (`ErrorMessage.tsx:36`) | 재시도 버튼 없음 (`canRetry=false`, 403은 `classifyRetry`에서 `kind:"none"`) | 구현됨. `ErrorMessage`가 에러 바너 표시. 403 하위 분류(mfa_required 등)에 따른 별도 UI(예: MFA 설정 페이지 링크)는 없음. |
+| 충돌/상태 불일치(409) | `INTEGRITY_IDEMPOTENCY_CONFLICT` — `classifyIdempotencyFailure`가 `"new_key"`(`idempotencyFailure.ts:35`). `useIdempotentSubmit`이 키 폐기 후 throw(`useIdempotentSubmit.ts:58-59`). `DATA_COVERAGE_MISSING` — `{kind:"data_coverage_missing"}`(`errorRouting.ts:104-105`) | `ErrorMessage` 배너(`WalletPage.tsx:71-77`). `routeApiError`가 `{kind:"idempotency_new_key"}` 또는 `{kind:"data_coverage_missing"}`(`errorRouting.ts:84,104-105`). 재시도 버튼 없음 (`canRetry=false`) | 새 Idempotency-Key 필요 — 사용자가 금액 수정 후 재제출. DATA_COVERAGE_MISSING은 재시도 없음(수집 후 재요청) | 구현됨 (키 폐기+에러 표시). "새 키 발급" 안내 문구 없음. DATA_COVERAGE_MISSING 안내는 `getApiErrorMessage`가 errorCode 매핑으로 제공(`ErrorMessage.tsx:36`). |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
