@@ -115,9 +115,15 @@
 <!-- BLOCK:J3-PortfolioPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 포트폴리오 조회 중(`isLoading`)에는 `LoadingState`만 보이고, 로드 성공 후 `allocations`가 비어 있으면 "배분된 실행이 없습니다."(`legacy.portfolioPage.t13`)가 보이며 재조정 표·버튼은 렌더되지 않는다 (`frontend/apps/web/src/routes/portfolio/PortfolioPage.tsx:108-109`, `:180-182`) | 컴포넌트 테스트(조회 모의: 지연/빈 배열). 현재 이 화면 전용 테스트 존재 여부는 미확인 |
+| A2 | 모든 입력 칸이 공백이면 재조정 버튼 클릭 시 요청이 나가지 않는다(`rebalance.mutateAsync` 미호출) (`PortfolioPage.tsx:67-73`) | 컴포넌트 테스트(부정): 입력 없이 클릭 후 재조정 API 호출 0회 단언 |
+| A3 | 입력 칸에 값을 넣고 재조정을 적용하면 `rebalance.mutateAsync`가 1회 호출되고, 성공 시 입력(`drafts`)이 비워지고 `["portfolio"]` 쿼리가 무효화되며 "적용됨 N건, 승인대기 M건"(`t12`)이 표시된다 (`PortfolioPage.tsx:75-78`, `:175-177`, `frontend/packages/shared-hooks/src/usePortfolio.ts:25`) | 컴포넌트 테스트(성공 응답 모의) + 쿼리 무효화 단언 |
+| A4 | 재조정 요청이 진행 중일 때 연타하면 두 번째 제출은 `DuplicateSubmitError`로 조용히 무시되어 추가 요청도 오류 표시도 없다 (`frontend/apps/web/src/hooks/useIdempotentSubmit.ts:36-38`, `PortfolioPage.tsx:79-80`) | 컴포넌트/훅 테스트(부정): 미해결 Promise로 2회 클릭 후 호출 1회·오류 없음 단언 |
+| A5 | 재조정 실패 시 입력값은 유지되고 `RebalanceError`가 표시된다: 400→`BadRequestNotice`, 403→`ForbiddenNotice`, 그 외→`ErrorMessage`, `ApiError`가 아니면 "재조정에 실패했습니다."(`t14`) (`PortfolioPage.tsx:30-42`, `:78-81`, `:172`) | 컴포넌트 테스트(부정, 상태코드별 400/403/500/비-ApiError 모의) |
+| A6 | 4xx 실패는 멱등 키를 폐기하고 5xx·네트워크 실패는 같은 키를 유지해 재시도에 재사용한다 (`useIdempotentSubmit.ts:17-19`, `:58-60`) | 훅 단위 테스트(`useIdempotentSubmit`): 상태코드별 재시도 시 키 동일/상이 단언 |
+| A7 | 조회 실패 시 `routeApiError` 분류가 `refetch_retry`/`backoff_retry`이면 재시도 버튼이 보이고 `refetch()`를 호출하며, 그 외 분류에는 버튼이 없다 (`PortfolioPage.tsx:53`, `:61-63`, `:106`) | 컴포넌트 테스트(부정 포함): 503(재시도 가능)/502(`EXCHANGE_FATAL`) 모의 비교 |
+| A8 | 현재 미충족(갭 후보): 재조정 입력 칸에는 `label`/`aria-label`이 없고 `placeholder`만 있다 — 접근 가능한 이름이 있어야 한다는 기준은 구현 전 (`PortfolioPage.tsx:157-165`, 사실 시트 Form fields: label 없음) | 접근성 테스트(레이블 질의(getByLabelText) 또는 axe). 현재 구현은 실패 예상 |
+| A9 | 현재 미충족(갭 후보): 숫자 형식·음수 등 금액 입력 클라이언트 검증이 없어 문자열이 그대로 서버로 전송된다 (`PortfolioPage.tsx:67-73`, `:158`). 서버 측 검증은 미확인 | 컴포넌트 테스트(부정): 잘못된 값 입력 시 요청 차단/오류 표시 단언. 현재 구현은 실패 예상 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
