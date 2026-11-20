@@ -91,8 +91,8 @@
 <!-- BLOCK:J2-ChartPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `routeApiError` (`frontend/apps/web/src/routes/chart/ChartPage.tsx:161`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/chart/ChartPage.tsx:221`) | TODO | TODO | TODO |
+| `routeApiError` (`frontend/apps/web/src/routes/chart/ChartPage.tsx:161`) | 없음 — 순수 분류 함수(`errorRouting.ts:88`). `query.error`를 `RoutedApiError`로 분류해 `kind`(refetch_retry/backoff_retry/server_fatal/not_found/forbidden/unknown 등) 반환. 화면에 직접 텍스트 렌더링 안 함. | 재시도 가능 여부(`kind === "refetch_retry" || kind === "backoff_retry"`)를 `canRetry`에 저장해 `ErrorMessage`의 `onRetry`/`retryAfterSec`에 전달(`ChartPage.tsx:162`). `server_fatal`이면 `traceId`를 downstream에 넘김. | 아니요 — `routeApiError` 자체는 UI 렌더링 안 함. 분류 결과의 `traceId`는 `server_fatal.kind`에 `serverError.traceId`로 담김(`errorRouting.ts:117`) |
+| `ErrorMessage` (`frontend/apps/web/src/routes/chart/ChartPage.tsx:221`) | `getApiErrorMessage(errorCode, message)` — `shared-types/apiError.ts:106`. 알려진 errorCode면 `EXACT_MESSAGES` 고정 한국어 메시지, 모르면 `DEFAULT_API_ERROR_MESSAGE`. 재시도 버튼: `legacy.errorMessage.t3`="다시 시도". 백오프 카운트다운: `legacy.errorMessage.t2`="{{remainingSec}}초 후 재시도 가능". trace_id 안내: `legacy.errorMessage.t1`="지원코드: {{traceId}}". (`catalog.ko.legacyB.ts:9-13`) | `classifyRetry(kind)`가 "none" 아닐 때만 재시도 버튼 표시(`ErrorMessage.tsx:39`). backoff이면 `retryAfterSec` 초 카운트다운(`ErrorMessage.tsx:49-53`). 버튼 클릭 시 `onRetry` → `query.refetch()`(`ChartPage.tsx:226`). fieldErrors가 있으면 배너 숨김(`ErrorMessage.tsx:55`). | 예 — `query.error instanceof ApiError`일 때 `query.error.traceId`를 props로 전달(`ChartPage.tsx:224`). `ErrorMessage.tsx:60`에서 `{traceId && <p>...{{traceId}}</p>}`로 화면에 표시 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
