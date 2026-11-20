@@ -88,8 +88,8 @@
 <!-- BLOCK:J2-ScriptEditorPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `Alert` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:116`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:249`) | TODO | TODO | TODO |
+| `Alert` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:116`) | 컴파일 성공 컨테이너(Alert tone="success", `:116`) 내부에 백테스트 오류 div(`:144-151`). 백테스트 실패 문구: `getApiErrorMessage`(`shared-types/src/apiError.ts:106-118`)가 `EXACT_MESSAGES`/`PREFIX_MESSAGES`/`DEFAULT_API_ERROR_MESSAGE`(`:45-100`)에서 고정 한국어 반환. fallback: `t("scriptEditorPage.backtestFailed")`(`:148`). | 재시도 버튼 없음. 백테스트는 컴파일 성공 후 별도 버튼(`:138`)으로 재요청. | 미노출 — `backtest.error`가 ApiError여도 `errorCode`만 `getApiErrorMessage`에 전달(`:147`), `traceId`는 읽지 않음(`:144-151`). |
+| `ErrorMessage` (`frontend/apps/web/src/routes/scripts/ScriptEditorPage.tsx:249`) | i18n 키 아님. `ErrorMessage.tsx:36`에서 `getApiErrorMessage(errorCode, message)`(`shared-types/src/apiError.ts:106-118`)가 `EXACT_MESSAGES`(`:55-84`), `PREFIX_MESSAGES`(`:89-99`), `DEFAULT_API_ERROR_MESSAGE`(`:45-46`)에서 고정 한국어 반환. 컴파일 일반 오류 경로(`showGenericError`, `:225`)로 401/403/409/429/5xx/네트워크 오류 모두 모임. | 재시도 버튼: `ErrorMessage.tsx:61-68`에서 `classifyRetry`(`shared-types/src/retryable.ts:40-53`) 결과에 따라 `onRetry` prop 전달 시 버튼 표시. 그러나 `ScriptEditorPage.tsx:249-253`에서는 `onRetry`를 전달하지 않음 → 재시도 버튼 미표시. 백테스트 경로와 달리 `ErrorMessage` 컴포넌트가 `tone="danger"`(`:58`). | 조건부 노출 — `ErrorMessage.tsx:60`에서 `traceId`가 truthy일 때만 `legacy.errorMessage.t1`(`frontend/apps/web/src/i18n/catalog.ko.legacyB.ts:10`, "지원코드: {{traceId}}")로 표시. `ScriptEditorPage.tsx:252`에서 `mutation.error.traceId`를 전달하므로 trace_id 노출됨. |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
