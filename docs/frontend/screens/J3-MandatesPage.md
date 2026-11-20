@@ -105,10 +105,10 @@
 <!-- BLOCK:J3-MandatesPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | facts "Test ids, flags, accessibility attributes" 표 0건(facts 기준). 헤딩 `h2` 사용(`MandatesPage.tsx:54,161`). 버튼 텍스트는 i18n 키(t9:t10)로 노출. `MandatesPage.depth1.test.tsx:135` — 에러 배너 `Alert`(div)에 `role="alert"` 없음(음성 테스트 확인). | testid/aria 속성 0건. 포커스 이동/키보드 네비게이션 관리 미확인(MandatesPage.depth1.test.tsx 내 tab/focus 호출 0건). 에러 배너 `role="alert"` 부재(`MandateActionError.tsx:18` → `ErrorMessage.tsx:58` div `Alert`). live region 미구현. |
+| i18n/지역화 | `legacy.mandatesPage.*` 키 16개(t1-t11, title12-14, t15-t16) — `catalog.ko.legacyD.ts:191-207`, `catalog.en.legacyD.ts:189-205` 양쪽 모두 정의됨. `legacy.mandateRuleForm.*` label1-label6 6개 — `catalog.ko.legacyC.ts:161-167`, `catalog.en.legacyC.ts:159-166`. `legacy.errorMessage.*` t1-t3 3개 — `catalog.ko.legacyB.ts:9-13`, `catalog.en.legacyB.ts:7-11`. 카탈로그 누락 키: 없음(사용자 제공). | 하드코딩 문자열 `"없음"`(`MandatesPage.tsx:28`), `"개정안 제안"`/`"초안 작성"`(`MandatesPage.tsx:183`), `MandateRuleForm.tsx:98` placeholder `"BTC, ETH"`. `MandateRuleForm.tsx:87-89` AUTONOMY_OPTIONS(`"OBSERVE"`, `"PAPER"`, `"LIMITED_LIVE"`) 미번역. |
+| 성능 예산 | `useMandateStatus`(`shared-hooks/src/useMandates.ts:10-14`) — refetchInterval·staleTime 없음(1회 조회). mutation 성공 시 `invalidateQueries`로 재조회(`useMandates.ts:21,29,38,46,54`). 폴링 0건. MandatesPage.tsx에 memo/useMemo/useCallback 0건(검색 결과 없음). RevisionRules 컴포넌트(:19-31) 메모이제이션 없음. | 성능 예산 수치(p95 렌더 시간 등) 미정의. 전역 QueryClient 기본값(staleTime, gcTime) 미확인. 렌더 최적화(memo) 미구현. |
+| 텔레메트리 | MandatesPage.tsx/`routes/mandates/` 내 analytics/track/telemetry 호출 0건(Grep 결과 없음). Sentry/captureException/logError 호출 0건. `traceId` 노출만 확인: `MandateActionError.tsx:21` → `ErrorMessage.tsx:60`에서 `legacy.errorMessage.t1`("지원코드: {{traceId}}"/"Support code: {{traceId}}")로 표시. | 오류 보고(Sentry 등) 호출 미확인(화면 파일 내 호출 0건). 성능/사용자 행동 텔레메트리 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
