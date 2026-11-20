@@ -80,7 +80,7 @@
 <!-- BLOCK:J2-ScriptEditorPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면은 DSL 스크립트 컴파일과 모의 백테스트만 수행한다. 주문 생성(`:179` orderTypes 전부 false), 실행 생성, LIVE 전환, 위임장 변경, 출금 경로가 전혀 없다. 백테스트(`:166` `backtestsClient.runQuickBacktest`)는 `chartPageConfig`의 POST 엔드포인트(`backtests.quick`)로 시뮬레이션만 돌린다. initialCash `:172`(10000), slippage/commission 0(`:175-176`), latency 0(`:177`) 모두 모의 설정. 컴파일(`:114` `apiClient.compileScript`)은 서버 측 DSL 파싱·해시 생성만 하고 주문/실행을 생성하지 않는다. 차트 이동(`:197-198`)은 `script_hash`만 query로 실어 navigate. 멱등성/불확실 결과 표시: 적용 대상 아님(실 주문 없음). 참고로 컴파일 버튼은 pending 중 `disabled`(`:244`), 백테스트 버튼도 pending 중 `disabled`(`:139`)로 중복 클릭 방지만 확인됨. 백테스트 서버 측 영속 여부(실행 기록 DB 남는지)는 미확인. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
