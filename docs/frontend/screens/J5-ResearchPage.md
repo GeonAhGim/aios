@@ -24,8 +24,8 @@
 <!-- BLOCK:J5-ResearchPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `searchQuery` (`useQuery`) | `client.search(submitted)` (`api-client/src/clients/researchData.ts:34`) | 사용자 검색 버튼 클릭 시 1회 조회. `enabled: submitted !== null` (`ResearchPage.tsx:154`)으로 submitted가 설정될 때만 실행. `refetchInterval`/`staleTime` 없음(매번 새로 조회). 재시도: `searchQuery.refetch()` (`ResearchPage.tsx:255`) | `ResearchErrorBanner` (`ResearchPage.tsx:254~256`) — `routeApiError`(`ResearchPage.tsx:9`)가 `refetch_retry`/`backoff_retry`/`notRetry`로 분류. `ResearchDataRouteNotImplementedError`이면 재시도 버튼 숨김(`ResearchPage.tsx:103`). traceId 노출(`ResearchPage.tsx:108`) |
-| `sourcesQuery` (`useQuery`) | `client.listSources()` (`api-client/src/clients/researchData.ts:41`) | 마운트 시 1회 조회. `refetchInterval`/`staleTime` 없음. 재시도: `sourcesQuery.refetch()` (`ResearchPage.tsx:300`, `:330`) | `ResearchErrorBanner` (`ResearchPage.tsx:299~300`, `:329~330`) — 동일 오류 분류. 소스 목록 실패 시 커버리지·신선도 패널도 함께 숨김(`ResearchPage.tsx:332`) |
+| `searchQuery` (`useQuery`) | `client.search(submitted)` (`api-client/src/clients/researchData.ts:34`) | 사용자 검색 버튼 클릭 시 1회 조회. `enabled: submitted !== null` (`ResearchPage.tsx:154`)으로 submitted가 설정될 때만 실행. refetchInterval/staleTime 없음(매번 새로 조회). 재시도: `searchQuery.refetch()` (`ResearchPage.tsx:255`) | `ResearchErrorBanner` (`ResearchPage.tsx:254~256`) — `routeApiError`(`ResearchPage.tsx:9`)가 refetch_retry/backoff_retry/notRetry로 분류. `ResearchDataRouteNotImplementedError`이면 재시도 버튼 숨김(`ResearchPage.tsx:103`). traceId 노출(`ResearchPage.tsx:108`) |
+| `sourcesQuery` (`useQuery`) | `client.listSources()` (`api-client/src/clients/researchData.ts:41`) | 마운트 시 1회 조회. refetchInterval/staleTime 없음. 재시도: `sourcesQuery.refetch()` (`ResearchPage.tsx:300`, `:330`) | `ResearchErrorBanner` (`ResearchPage.tsx:299~300`, `:329~330`) — 동일 오류 분류. 소스 목록 실패 시 커버리지·신선도 패널도 함께 숨김(`ResearchPage.tsx:332`) |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
@@ -36,7 +36,7 @@
 | 로딩 | `submitted !== null && searchQuery.isLoading` (`ResearchPage.tsx:253`) | `<LoadingState />` (`ResearchPage.tsx:253`) | 재검색 버튼으로 `searchQuery.refetch()` (`ResearchPage.tsx:255`) | 구현됨 |
 | 빈 상태 | `submitted !== null && !searchQuery.isError && !searchQuery.isLoading && items.length === 0` (`ResearchPage.tsx:257~258`) | `<EmptyState>` — "조건에 맞는 항목이 없습니다." (`ResearchPage.tsx:258`, i18n: `research.results.empty`) | 검색어/Kind/종목 변경 후 재검색 | 구현됨 |
 | 정상 | `submitted !== null && !searchQuery.isError && !searchQuery.isLoading && items.length > 0` (`ResearchPage.tsx:260~`) | 결과 목록(제목, URL, Kind 배지, 종목 연결 링크/미매핑 배지) (`ResearchPage.tsx:260~294`) | 결과 클릭 → URL为新창 열림(`ResearchPage.tsx:276`), 종목 링크 → `/chart?instrument_id=...`(`ResearchPage.tsx:122`) | 구현됨 |
-| 낡은 데이터(신선도 초과) | 미구현 — `sourcesQuery`에 `refetchInterval`/`staleTime` 없음(`ResearchPage.tsx:157~160`) | — | — | 미구현(의도적: 소스 상태는 매번 새로 보는 것이 맞으므로 폴링 없음) |
+| 낡은 데이터(신선도 초과) | 미구현 — sourcesQuery에 refetchInterval/staleTime 없음(`ResearchPage.tsx:157~160`) | — | — | 미구현(의도적: 소스 상태는 매번 새로 보는 것이 맞으므로 폴링 없음) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
@@ -46,7 +46,7 @@
 |---|---|---|---|---|
 | 입력 오류(400/검증) | `validationIssues.length > 0` (`ResearchPage.tsx:231~241`) | `<Alert tone="danger">` — 검증 이슈 목록(현재: `query_required` → "검색어를 입력하세요.", `ResearchPage.tsx:233~240`, i18n: `research.validation.queryRequired`) | 검색어 입력 후 재검색 | 구현됨(검증: `describeResearchSearchIssues`(`shared-types/src/researchData.ts:72~80`)) |
 | 인증 필요/세션 만료(401) | `routeApiError`(`ResearchPage.tsx:9`)가 `ApiError`에서 401을 감지 | `ErrorMessage`(`ResearchPage.tsx:105`) — `errorCode`(`ResearchPage.tsx:106`), `message`(`ResearchPage.tsx:107`), `traceId`(`ResearchPage.tsx:108`) 노출 | 재시도(백오프면 `retryAfterSec`(`ResearchPage.tsx:109`)) | 구현됨(`ErrorMessage` 컴포넌트 위임, `ResearchPage.tsx:105`) |
-| 권한 없음/MFA 필요(403) | `routeApiError`가 403을 `notRetry`로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — 재시도 버튼 없음(`onRetry` 미渡) | 로그인 재확인 또는 관리자 문의 | 구현됨(예외 처리 `ErrorMessage` 위임) |
+| 권한 없음/MFA 필요(403) | `routeApiError`가 403을 notRetry로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — 재시도 버튼 없음(onRetry 미渡) | 로그인 재확인 또는 관리자 문의 | 구현됨(예외 처리 `ErrorMessage` 위임) |
 | 충돌/상태 불일치(409) | `routeApiError`가 409를 `backoff_retry`로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — `retryAfterSec` 표시(`ResearchPage.tsx:109`) | 백오프 후 재시도 | 구현됨(`ErrorMessage` 위임) |
 <!-- /BLOCK -->
 
@@ -56,8 +56,8 @@
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
 | 잠김/속도 제한(423/429) | `routeApiError`가 429를 `backoff_retry`로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — `retryAfterSec` 표시(`ResearchPage.tsx:109`) | 백오프 후 재시도 | 구현됨(`ErrorMessage` 위임) |
-| 서버 오류(5xx) | `routeApiError`가 5xx를 `notRetry`로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — 재시도 버튼 없음 | 서버 복구 후 새로고침 | 구현됨(`ErrorMessage` 위임) |
-| 네트워크 단절 | `ApiClientBase`(`api-client/src/http.ts`)가 네트워크 오류를 `ApiError`로 래핑 | `ErrorMessage` — traceId 노출(`ResearchPage.tsx:108`) | 재시도(`backoff_retry`면 `retryAfterSec`) | 구현됨(`ApiClientBase`에서 `ApiError`로 래핑) |
+| 서버 오류(5xx) | `routeApiError`가 5xx를 notRetry로 분류(`ResearchPage.tsx:103`) | `ErrorMessage` — 재시도 버튼 없음 | 서버 복구 후 새로고침 | 구현됨(`ErrorMessage` 위임) |
+| 네트워크 단절 | ApiClientBase(`api-client/src/http.ts`)가 네트워크 오류를 `ApiError`로 래핑 | `ErrorMessage` — traceId 노출(`ResearchPage.tsx:108`) | 재시도(`backoff_retry`면 `retryAfterSec`) | 구현됨(ApiClientBase에서 `ApiError`로 래핑) |
 | 부분 실패(일부 데이터만 실패) | 검색 API는 단일 호출(`client.search`) — 부분 실패 없음. 소스 목록도 단일 호출(`client.listSources`) | — | — | 해당 없음(단일 호출 모델) |
 <!-- /BLOCK -->
 
@@ -84,7 +84,7 @@
 <!-- BLOCK:J5-ResearchPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `routeApiError` (`ResearchPage.tsx:9`) | `routeApiError`는 i18n 키 없음 — `ApiError`의 `errorCode`(`ResearchPage.tsx:106`)를 `ErrorMessage`로 전달 | `routeApiError`가 `refetch_retry`/`backoff_retry`/`notRetry` 분류(`ResearchPage.tsx:103`) — 재시도 가능하면 `onRetry`(`ResearchPage.tsx:110`), 백오프면 `retryAfterSec`(`ResearchPage.tsx:109`) | `ApiError.traceId`를 `ErrorMessage.traceId`로 전달(`ResearchPage.tsx:108`) |
+| `routeApiError` (`ResearchPage.tsx:9`) | `routeApiError`는 i18n 키 없음 — `ApiError`의 `errorCode`(`ResearchPage.tsx:106`)를 `ErrorMessage`로 전달 | `routeApiError`가 refetch_retry/backoff_retry/notRetry 분류(`ResearchPage.tsx:103`) — 재시도 가능하면 `onRetry`(`ResearchPage.tsx:110`), 백오프면 `retryAfterSec`(`ResearchPage.tsx:109`) | `ApiError.traceId`를 `ErrorMessage.traceId`로 전달(`ResearchPage.tsx:108`) |
 | `Alert` (`ResearchPage.tsx:18`) | 검증 오류: `research.validation.queryRequired` — "검색어를 입력하세요." (`ResearchPage.tsx:92`, `shared-types/src/researchData.ts:77`) | 검색어 입력 후 재검색 | 없음(클라이언트 검증 오류) |
 | `ErrorMessage` (`ResearchPage.tsx:105`) | `ErrorMessage` 컴포넌트 내부 i18n 키(컴포넌트 구현에 따름) — `errorCode`(`ResearchPage.tsx:106`)와 `message`(`ResearchPage.tsx:107`) 표시 | 재시도 가능하면 retry 버튼, 불가하면 새로고침 안내 | `ApiError.traceId` 전달(`ResearchPage.tsx:108`) — `ResearchDataRouteNotImplementedError`는 traceId 없음 |
 <!-- /BLOCK -->
@@ -115,7 +115,7 @@
 <!-- BLOCK:J5-ResearchPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | 소스 상태 데이터의 신선도 보장(폴링 또는 staleTime) | `sourcesQuery`에 `refetchInterval`/`staleTime` 없음(`ResearchPage.tsx:157~160`) — 마운트 시 1회만 조회 | 낮(소스 상태는 수동 새로고침으로 충분하다고 판단) | 미처리(의도적) |
+| G1 | 소스 상태 데이터의 신선도 보장(폴링 또는 staleTime) | sourcesQuery에 refetchInterval/staleTime 없음(`ResearchPage.tsx:157~160`) — 마운트 시 1회만 조회 | 낮(소스 상태는 수동 새로고침으로 충분하다고 판단) | 미처리(의도적) |
 | G2 | `ResearchDataRouteNotImplementedError` 메시지 i18n | `api-client/src/clients/researchData.ts:27`에서 한글 고정 메시지("리서치 데이터 API가 아직 제공되지 않습니다.") | 낮(Phase 0: 라우터 이전의 예외 상태이므로 i18n 우선순위 낮음) | 미처리(의도적) |
 | G3 | 검색 결과 페이지네이션 | `ResearchSearchResponse.total`/`truncated` 필드 있음(`shared-types/src/researchData.ts:36~40`)但 화면에서 `truncated` 경고만 표시(`ResearchPage.tsx:265`) — 페이지네이션 없음 | 낮(현재는 탐색용 검색이므로 전체 목록 대신 1회 조회로 충분) | 미처리(의도적) |
 <!-- /BLOCK -->
