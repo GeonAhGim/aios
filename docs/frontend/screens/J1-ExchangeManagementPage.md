@@ -105,10 +105,10 @@
 <!-- BLOCK:J1-ExchangeManagementPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `RegisterCredentialForm.tsx:84` — `role="status"` 배지 1건. 테이블 `<th>`에 `scope` 속성 없음(`ExchangePositionsCard.tsx:60`). `data-testid` 속성 0건. `aria-*` 속성 0건. 폼 필드(`Field`)가 `label` prop을 받지만 레이블 텍스트가 i18n 키가 아닌 리터럴인 경우 있음(`RegisterCredentialForm.tsx:57,65,74`) | `data-testid` 누락: CredentialListCard 행, RegisterCredentialForm 폼, ExchangePositionsCard 테이블. `aria-label` 누락: API Key/Secret/Passphrase 입력 필드(현재 `Field`의 `label` prop이 리터럴). 테이블 `<th>`에 `scope="col"` 추가 필요(`ExchangePositionsCard.tsx:60`). "활성"/"비활성" 배지에 `aria-label` 보충 필요(`CredentialListCard.tsx:44-46`) |
+| i18n/지역화 | 카탈로그 키 전부 확인: `legacy.exchangeManagementPage`(ko+en), `legacy.credentialListCard`(ko+en), `legacy.registerCredentialForm`(ko+en), `exchangePositions`(ko+en) — 모두 쌍 존재. 누락 키 없음([사실] 카탈로그 누락 키: 없음). `catalog.ko.ts:33-37`, `catalog.ko.legacyA.ts:132-135`, `catalog.ko.legacyB.ts:131-136`, `catalog.ko.legacyD.ts:160-168` / `catalog.en.ts:40-45`, `catalog.en.legacyA.ts:130-133`, `catalog.en.legacyB.ts:129-134`, `catalog.en.legacyD.ts:158-166` | hardcoded 리터럴 7건: "활성"/"비활성"(`CredentialListCard.tsx:45`), "심볼"/"수량"/"평단"/"미실현손익"(`ExchangePositionsCard.tsx:18-21`), "API Key"/"API Secret"/"API Passphrase"(`RegisterCredentialForm.tsx:57,65,74`). `check_i18n_literals.mjs` 게이트가 이 리터럴을 적발할 예정. 새 키 생성 필요: `exchangePositions.columns.*`(4개), `credentialListCard.badge.*`(2개), `registerCredentialForm.label.*`(3개) |
+| 성능 예산 | 폴링 없음: `useExchangeCredentials`(1회 조회, `useExchanges.ts:6`), `useExchangeBalance`(선택 시 1회, `useExchanges.ts:29`), `useExchangePositions`(선택 시 1회, `useExchanges.ts:37`). react-query 기본 옵션 명시 없음(이 파일들에서 staleTime/gcTime 설정 안 함). 컴포넌트 메모이제이션 미적용: `CredentialListCard`(정의: `CredentialListCard.tsx:12`), `ExchangePositionsCard`(정의: `ExchangePositionsCard.tsx:14`), `RegisterCredentialForm`(정의: `RegisterCredentialForm.tsx:13`). `credentials.map` 키: `c.id`(안정적). `COLUMNS` const 함수 외부 정의(매 렌더 재생성 안 함). `exchangeLabel()` 호출: 매 렌더마다 함수 호출(`CredentialListCard.tsx:43`, `ExchangePositionsCard.tsx:80`) | 명시적 react-query 옵션 설정 누락(권장 staleTime 5분, gcTime 30분). 컴포넌트 메모이제이션 누락으로 불필요한 리렌더 가능: `CredentialListCard`가 `balances` 참조 변경 시 전체 리스트 리렌더, `RegisterCredentialForm`이 8개 prop 중 하나만 바뀌어도 리렌더 |
+| 텔레메트리 | 오류 보고 호출 0건: 외부 모니터링 도구 관련 패턴 모두 미검출. `ApiError` 발생 시 화면에 오류 메시지 표시만 하고 외부 모니터링으로 전송하는 코드 없음(`ExchangeManagementPage.tsx:100`, `ExchangeManagementPage.tsx:56`). 다만 `ExchangeCredentialErrors.tsx:45,63`에서 `traceId`를 `ApiError`에서 추출해 에러 바드 컴포넌트에 전달하는 배선은 존재 | 미확인 가능 — 프로젝트 전체에 오류 보고 인프라가 배선되어 있는지 미확인. `ExchangeManagementPage.tsx:100`(등록 실패), `ExchangeManagementPage.tsx:56`(해지 실패)에서 `ApiError`를 `new Error()`로 감싸서 화면에 표시할 때 `traceId` 정보 손실(`ExchangeManagementPage.tsx:100`: `err instanceof ApiError ? err : new Error(...)`) |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
