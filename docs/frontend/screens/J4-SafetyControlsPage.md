@@ -24,13 +24,15 @@
 <!-- BLOCK:J4-SafetyControlsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useActivateSafetyControl` | `frontend/packages/shared-hooks/src/useRiskGate.ts:42` | TODO | TODO |
-| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50` | TODO | TODO |
-| `useApproveRuleBundle` | `frontend/packages/shared-hooks/src/useRiskGate.ts:56` | TODO | TODO |
-| `useActivateRuleBundle` | `frontend/packages/shared-hooks/src/useRiskGate.ts:63` | TODO | TODO |
-| `useSafetyControls` | `frontend/packages/shared-hooks/src/useRiskGate.ts:12` | TODO | TODO |
-| `useDeactivateSafetyControl` | `frontend/packages/shared-hooks/src/useRiskGate.ts:19` | TODO | TODO |
-| `useEvaluateRecovery` | `frontend/packages/shared-hooks/src/useRiskGate.ts:27` | TODO | TODO |
+| 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
+|---|---|---|---|
+| `useActivateSafetyControl` | `frontend/packages/shared-hooks/src/useRiskGate.ts:42` | Mutation(사용자 액션触发). 성공 시 `qc.invalidateQueries(["safetyControls"])`로 목록 갱신(`:46`). 폴링 없음(반복 폴링 없음). | 에러 콜백으로 에러 전달(`SafetyControlsPage.tsx:109`). `classifyForbidden`로 403 판정 후 `ForbiddenNotice`(`:35–36`), 그 외는 `ErrorMessage`(`:38`) |
+| `useEvaluateRiskGate` | `frontend/packages/shared-hooks/src/useRiskGate.ts:50` | Mutation(사용자 액션触发). 성공 시 `onSuccess`로 로컬 상태 `result`에 결과 저장(`SafetyControlsPage.tsx:157`). 캐시 무효화 없음(`:52–53`). 폴링 없음. | 에러 콜백으로 에러 전달(`:157`). 동일하게 `ForbiddenNotice`/`ErrorMessage`로 라우팅 |
+| `useApproveRuleBundle` | `frontend/packages/shared-hooks/src/useRiskGate.ts:56` | Mutation(사용자 액션触发). 성공 시 캐시 무효화 없음(`:57–60`). 폴링 없음. | 에러 콜백으로 에러 전달(`SafetyControlsPage.tsx:200`). 동일 라우팅 |
+| `useActivateRuleBundle` | `frontend/packages/shared-hooks/src/useRiskGate.ts:63` | Mutation(사용자 액션触发). 성공 시 `onSuccess`로 로컬 상태 `bundle`에 결과 저장(`:207`). 캐시 무효화 없음(`:64–66`). 폴링 없음. | 에러 콜백으로 에러 전달(`:208`). 동일 라우팅 |
+| `useSafetyControls` | `frontend/packages/shared-hooks/src/useRiskGate.ts:12` | useQuery(마운트 시 1회 조회, `:13–16`). `queryKey: ["safetyControls"]`, `queryFn: apiClient.listSafetyControls()`. 폴링 없음(반복 폴링 없음). 수동 갱신: `refetch()`(`SafetyControlsPage.tsx:244`, 360). 실패 시 재시도: React Query 기본(재시도 횟수 미설정 → 기본 0). | `isLoading`/`isError`/`data` 상태로 `SafetyControlsPage.tsx:359–366`에서 분기. 로딩 중: `LoadingState`(`:362`). 에러 시: `SafetyControlActionError` with retry 버튼(`:359–360`). 데이터 없음: `EmptyState`("No active safety controls.")(`:366`) |
+| `useDeactivateSafetyControl` | `frontend/packages/shared-hooks/src/useRiskGate.ts:19` | Mutation(사용자 액션触发). 성공 시 `qc.invalidateQueries(["safetyControls"])`로 목록 갱신(`:23`). 폴링 없음. | 에러 콜백으로 에러 전달(`SafetyControlsPage.tsx:265`). 동일 라우팅 |
+| `useEvaluateRecovery` | `frontend/packages/shared-hooks/src/useRiskGate.ts:27` | Mutation(사용자 액션触发). 성공 시 `qc.invalidateQueries(["safetyControls"])`(`:37`) + `onSuccess`로 로컬 상태에 결과 저장(`:279`). 폴링 없음. | 에러 콜백으로 에러 전달(`:280`). 동일 라우팅. validation 실패(approvalId 비숫자): `new Error("승인 요청 ID를 숫자로 입력하세요.")` 직접 발생(`:272`) |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
