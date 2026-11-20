@@ -24,8 +24,8 @@
 <!-- BLOCK:J6-ApprovalSettingsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useApprovalSettings` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:9` | TODO | TODO |
-| `useUpdateApprovalSettings` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:16` | TODO | TODO |
+| `useApprovalSettings` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:9` | 마운트 시 1회 조회(`useQuery`, `useAccountSettings.ts:10-13`). refetchInterval 없음(`useAccountSettings.ts:10-13` grep 결과 0건). 이후 재조회는 QueryClient 기본값(`staleTime: 0`, `refetchOnWindowFocus: false`)에 의존하므로 미확인. | 페이지는 `data`와 `isLoading`만 구조분해(`ApprovalSettingsPage.tsx:46`). 훅의 `error`는 화면에 렌더링되지 않음(`:97-98`에서 로딩만 처리). `settings`가 `undefined`이면 조건부 렌더링(`:128`)이 false가 되어 폼 기본값(SOLO)으로 그대로 보임. |
+| `useUpdateApprovalSettings` | `frontend/packages/shared-hooks/src/useAccountSettings.ts:16` | mutation(`useMutation`, `useAccountSettings.ts:18`). 성공 시 `onSuccess`에서 `["approvalSettings"]` 무효화(`useAccountSettings.ts:20`). HTTP 메서드는 `apiClient.updateApprovalSettings`를 열어 보기 전까지 미확인. | `attemptUpdate` catch(`ApprovalSettingsPage.tsx:62-86`) 처리. `ApiError` + 위험등급 문구(`t8`) 포함 시 `RiskWarningModal`(`:77-80`). 그 외 `ApiError`는 `setError(err)` → `UpdateSettingsError`(`:30-42`)가 400/403/그 외 분기(`:132`). `ApiError` 아님 → `t9` 메시지(`:83-85`). |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
