@@ -83,7 +83,7 @@
 <!-- BLOCK:J2-ChartPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. ChartPage는 캔들 차트 표시·지표 추가·도형 그리기·백테스트 시뮬레이션 전용 화면. 백테스트(`BacktestPanel.tsx:66-77`)는 `slippage.bps:0`, `commission.*:0`, `latencyMs:0`, 모든 `orderTypes:false`의 고정 프리셋으로 체결을 시뮬레이션할 뿐, 실제 주문/실행/LIVE 전환/위임장 변경/출금을 일으키는 경로를 호출하지 않음(`ChartPage.tsx:61` `runQuickBacktest=backtestsClient.runQuickBacktest` — POST `/v1/backtests/quick`는 백테스트 엔드포인트). `CoverageBadge`(ChartPage.tsx:181), `IndicatorParityPanel`(ChartPage.tsx:250), `StrategyMarkers`(ChartPage.tsx:257), `CompareSymbols`(ChartPage.tsx:269), `DrawingsList`(ChartPage.tsx:285) 모두 읽기 전용. 주문·실행·위임장·출금 관련 버튼·훅·API 호출 없음. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
