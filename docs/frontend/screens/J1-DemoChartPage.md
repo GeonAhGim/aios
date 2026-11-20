@@ -79,7 +79,11 @@
 <!-- BLOCK:J1-DemoChartPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. `DemoChartPage.tsx:1-7` import에 API 클라이언트·mutation 훅이 없고, `handleRunBacktest`(:28-35)는 로컬 `useState`와 `setTimeout` 안의 `runDemoBacktest(bars)` 호출뿐이다. 백테스트의 "거래 횟수"와 "최종 자산"은 가상 시뮬레이션 값이다. 주문·실행 생성·LIVE 전환·위임장 변경·출금 중 어느 것도 호출하지 않는다. |
+| 확인 절차 | N/A(로컬 순수 계산, 서버 호출·금전 이동 없음). `demoBacktest.ts:3-5` — "실제 BacktestPanel.tsx가 쓰는 서버 /v1/backtests/quick 엔진과는 별개" · `runDemoBacktest`는 순수 함수(:28). `DemoChartPage.tsx:31-34` — `setTimeout`으로 한 틱 미룬 후 동기 계산. |
+| 멱등성 | N/A(로컬 순수 계산, 서버 호출·금전 이동 없음). `runDemoBacktest(bars)`는 결정론적 순수 함수로 같은 `bars`에 항상 같은 `DemoBacktestResult` 반환(`demoBacktest.ts:28-83`). |
+| 불확실 결과 표시 | 미확인. `demoDataset.ts`의 상단 import 목록과 :52(`findDemoInstrument`), :59(`getDemoDailyCandles`)는 네트워크·I/O 호출이 없어 보이나, 파일 전체를 읽지 못해 완전히 확인하지는 못했다. |
+| 보는 법 | 실제 계좌·주문 모델과 무관(`demoBacktest.ts:3-5`). 초기 자산 10,000 가상 값(`demoBacktest.ts:10`). SMA(5/20) 교차 결정론적 시뮬레이션(:28-83). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
