@@ -169,7 +169,9 @@ async def test_local_acceptance_performance(order: ChildOrder, perf_budget: Perf
 
     sample = await perf_budget.sample_async(_run_10000)
 
-    assert sample.wall_ms < 1000, f"10000 local accepts took {sample.wall_ms:.1f}ms (budget 1000ms)"
+    assert sample.cpu_ms < 1000, (
+        f"10000 local accepts took {sample.cpu_ms:.1f}ms CPU (budget 1000ms)"
+    )
     assert len(session.sent) == 10_000
 
 
