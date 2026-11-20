@@ -24,7 +24,11 @@
 <!-- BLOCK:J5-PayoutsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | TODO | TODO |
+| `useCursorPage` | `frontend/apps/web/src/hooks/useCursorPage.ts:25` | 네트워크 없음 — 상태 훅. 이전/다음 클릭 시 `cursor` 변경(`useCursorPage.ts:32-42`), 그 커서로 `useQuery`가 재조회(`PayoutsPage.tsx:208-209`) | 해당 없음(상태 훅, 오류 경로 없음) |
+| `useQuery`(홀드/정산 배치 목록) | `PayoutsPage.tsx:207-210` (`CursorListSection` 내부) | 1회 조회. 커서별 키 `[testId, cursorPage.cursor]`(`PayoutsPage.tsx:208`). refetchInterval 없음. 기본 `QueryClient`는 `main.tsx:15`의 `new QueryClient()`(옵션 없음)이므로 전역 재시도/포커스 재조회는 라이브러리 기본값 | 기본 fetcher는 항상 reject(`PayoutsPage.tsx:37-41`)이므로 현재 빌드에서는 항상 오류 경로. 오류는 `query.isError`일 때 `ErrorMessage`(`PayoutsPage.tsx:227-234`)로 전달됨. 재시도는 `routeApiError`가 `refetch_retry`/`backoff_retry`일 때만 `query.refetch`(`PayoutsPage.tsx:216-233`) |
+| `useMutation`(정산 확정 `markPaid`) | `PayoutsPage.tsx:119-125` (`PayoutBatchCard` 내부) | 변경 요청 — 사용자 클릭 시 `markPayoutPaid` 1회 호출(`PayoutsPage.tsx:170`). 성공 시 `['payoutBatches']` 무효화(`PayoutsPage.tsx:124`) → 목록 재조회 | `MarkPaidActionError`(`PayoutsPage.tsx:96-109`): 403이면 `ForbiddenNotice`, 그 외는 `ErrorMessage`. 재시도 버튼은 `classifyServerError`가 `retryable`일 때만 표시(`PayoutsPage.tsx:106`) |
+| 기본 구현 `markPayoutPaidDefault` → `apiClient.markPayoutPaid` | `PayoutsPage.tsx:54-55` | 서버 라우트 `POST /admin/ledger/payouts/{batch_id}/paid`(`PayoutsPage.tsx:43-45` 주석 인용) | `MarkPaidActionError` 경로(`PayoutsPage.tsx:96-109`) |
+| `fetchHoldsPageDefault`, `fetchPayoutBatchesPageDefault` (목록 GET 두 개) | `PayoutsPage.tsx:37-41` | 서버 미구현. 두 함수 모두 `Promise.reject(new Error("...아직 제공되지 않습니다."))`(`PayoutsPage.tsx:38,41`). 주석: `PayoutsPage.tsx:21-24` | 항상 reject → `ErrorMessage`(`PayoutsPage.tsx:227-234`) |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
