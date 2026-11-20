@@ -33,10 +33,10 @@
 <!-- BLOCK:J6-DecisionHistoryPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | 페이지 자체는 데이터 훅을 호출하지 않는다(사용 훅은 `useTranslation`뿐, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:22`). 조회 로딩은 하위 패널 소관 | 페이지 수준 로딩 문구는 사실 시트에 없음. 하위 패널 내부 로딩 문구는 미확인 | 없음 | 없음 (페이지 수준). 하위 패널 `ComplianceDecisionLookupPanel`·`EventLineageLookupPanel` 내부는 미확인 (`frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:27`, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:28`) |
+| 빈 상태 | 페이지 수준 빈 상태 분기 없음(조건 분기 코드 없음, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:23-30`) | 페이지 수준 빈 상태 문구 없음. 하위 패널의 조회 전/결과 없음 문구는 미확인 | 없음 | 없음 (페이지 수준). 하위 패널은 미확인 |
+| 정상 | 페이지가 렌더링될 때 항상 | `decisions.pageTitle` "결정 이력 뷰어" 제목(`frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:26`) 아래에 판정 조회 패널과 이벤트 계보 조회 패널이 세로로 나란히 표시(`frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:27`, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:28`) | 각 패널 안의 조회. 페이지 자체의 버튼·폼 필드는 없음(사실 시트의 폼·버튼 목록 비어 있음) | 구현됨 (`frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:26`, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:27`, `frontend/apps/web/src/routes/decisions/DecisionHistoryPage.tsx:28`) |
+| 낡은 데이터(신선도 초과) | 신선도·갱신 시각 판단 코드가 페이지에 없음 | 낡은 데이터 안내 문구 없음(사실 시트의 문구 목록에 해당 키 없음) | 없음 | 없음 (페이지 수준). 하위 패널은 미확인 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
