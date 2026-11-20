@@ -125,9 +125,9 @@
 <!-- BLOCK:J3-ExecutionControlPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | PAPER 모드에서 폼 제출 시 `createExecution.mutateAsync`가 즉시 호출되고, LIVE 모드에서 첫 제출 시 실제 요청이 아닌 확인 다이얼로그(`LiveOrderConfirmDialog`)로 넘어간다(`ExecutionControlPage.tsx:219-222`). LIVE 확인 다이얼로그에서 "실거래 주문 확정" 버튼 클릭 시 `submitExecution()`이 호출되어 실제 제출이 진행된다(`:295`). | 컴포넌트 테스트: mode=PAPER일 때 form submit → `createExecution.mutateAsync` 1회 호출 단언. mode=LIVE일 때 form submit → `createExecution.mutateAsync` 0회, `step==="confirm"` 단언. 확인 다이얼로그 confirm → `createExecution.mutateAsync` 1회 호출 단언. |
+| A2 | 실행 생성 실패 시 에러 분류 경로가 정확히 적용된다: 400→`BadRequestNotice`, 403→`ForbiddenNotice`, 서버 오류(`classifyServerError.kind==="retryable"`)→`ErrorMessage`에 재시도 버튼(`ExecutionControlPage.tsx:43-55`). 404(`isResourceNotFound`)→`NotFoundState`(`:62-71`). `DuplicateSubmitError`는 조용히 무시(`:212`). | 컴포넌트 테스트(부정): 400/403/500/404/`DuplicateSubmitError` 각각 모의 후 올바른 컴포넌트 렌더링 단언. 재시도 가능 서버 오류(`retryable`)에만 `onRetry` 버튼 보임, 불가(`EXCHANGE_FATAL`/`INTERNAL_ERROR`)에는 버튼 없음 단언(`:54`). |
+| A3 | 실행 목록 상태 전이가 정확히 동작한다: `isLoading`→`LoadingState`, 빈 배열→`EmptyState`("실행 중인 전략이 없습니다." `t14`), 데이터 있음→`ExecutionCard` grid 렌더, 조회 실패→`ExecutionsListError`(`ExecutionControlPage.tsx:320-332`). | 컴포넌트 테스트: `isLoading=true` → `LoadingState` 렌더. `executions=[]` → `EmptyState` 렌더. `executions=[{...}]` → `ExecutionCard` 1개 렌더. `isError=true` → `ExecutionsListError` 렌더. 각 상태 전환 시 불필요 컴포넌트 렌더링 없음 단언. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
