@@ -32,10 +32,12 @@
 <!-- BLOCK:J5-ReportsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `isLoading` true (`usePortfolio.ts:30`의 `useQuery`가 데이터 요청 중) | `LoadingState` 컴포넌트 (`ReportsPage.tsx:60`) — 스피너 아이콘과 "불러오는 중..." 문구 (`Feedback.tsx:35`) | 시작일/종료일 입력 변경 (`ReportsPage.tsx:49`, `:53`) | 구현됨 (`ReportsPage.tsx:59-60`) |
+| 빈 상태 — 거래 기록 없음 | `report` 존재, `report.strategyContributions.length === 0` (`ReportsPage.tsx:91`) | `EmptyState` 컴포넌트 (`ReportsPage.tsx:115`) — `legacy.reportsPage.t13` ("해당 기간 거래 내역이 없습니다.") | 시작일/종료일 변경 후 재조회 | 구현됨 (`ReportsPage.tsx:91`, `:115`) |
+| 빈 상태 — 일별 손익 없음 | `report` 존재, `report.dailyPnl.length === 0` (`ReportsPage.tsx:76`) | 손익 추이 카드(`Card`+`PnlChart`, `ReportsPage.tsx:76-87`)가 통째로 숨겨짐. 문구 없음. | 시작일/종료일 변경 후 재조회 | 구현됨 (`ReportsPage.tsx:76`) |
+| 빈 상태 — 데이터도 로딩도 오류도 없음 | `periodStart` 또는 `periodEnd`가 빈 문자열 (`usePortfolio.ts:33` `enabled: !!periodStart && !!periodEnd` false) → `isLoading` false, `report` undefined | 119행 `null`로 빈 화면. 안내 문구 없음. | 시작일/종료일 입력 | 구현됨 (`ReportsPage.tsx:119`) |
+| 정상 | `report` 존재 (`ReportsPage.tsx:61`) | `common.performanceNotGuaranteed` 경고 Alert (`ReportsPage.tsx:63`); 총수익률(`legacy.reportsPage.label4`, `:67`), 승률(`legacy.reportsPage.label5`, `:71`), MDD(`legacy.reportsPage.label6`, `:72`), 거래 횟수(`legacy.reportsPage.label7`, `:73`) Stat 4개; 손익 추이 `PnlChart` (`:76-87`, `legacy.reportsPage.t8`, `:78`); 전략별 기여도 표 (`:89-110`, `legacy.reportsPage.t9`, `:90`) — 전략(`t10`, `:96`), 실현 손익(`t11`, `:97`), 거래수(`t12`, `:98`) | 시작일/종료일 입력 변경 (`ReportsPage.tsx:49`, `:53`) | 구현됨 (`ReportsPage.tsx:61-118`) |
+| 낡은 데이터(신선도 초과) | — | 없음 | 없음 | 없음 (`ReportsPage.tsx:1-9` import에 신선도 관리 클래스 없음; `usePortfolio.ts:30-34`에 refetchInterval 없음; generateReport 응답에 as_of 시각 필드 확인 못 함 — 미확인) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
