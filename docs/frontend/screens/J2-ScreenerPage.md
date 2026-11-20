@@ -88,9 +88,9 @@
 <!-- BLOCK:J2-ScreenerPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `routeApiError` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:9`) | TODO | TODO | TODO |
-| `Alert` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:18`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:109`) | TODO | TODO | TODO |
+| `routeApiError` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:9`) | 없음(라우팅 전용 함수, `@aios/shared-types` import) — 사용자直接向 문구 미제공 | `ScreenerErrorBanner:106`에서 호출해 오류를 `refetch_retry`/`backoff_retry`/`server_fatal`/`unknown` 등으로 분류(`errorRouting.ts:88-132`). 재시도 가능 여부(`canRetry:107`)가 ErrorMessage의 onRetry 배선 결정 | 미노출. `routeApiError`는 trace_id를 직접 전달하지 않음. trace_id는 `ApiError.traceId`가 ErrorMessage를 통해 별도 노출 (§3 아래) |
+| `Alert` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:18`) | 검증 오류: `screener.validation.universeRequired`(`:122`), `screener.validation.filtersRequired`(`:124`), `screener.validation.filterIncomplete`(`:126`), `screener.validation.filterResearchAsOfRequired`(`:128`). 결과_TRUNCATED 경고: `screener.results.truncated`(`:325`) | 검증 Alert(`:293-301`): 필터 구성 후 다시 실행(`handleRun:171-177`). truncated Alert(`:325`): 정보 표시, 별도 행동 없음 | 미노출(검증/정보성 경고를 위한 UI 컴포넌트) |
+| `ErrorMessage` (`frontend/apps/web/src/routes/screener/ScreenerPage.tsx:109`) | `getApiErrorMessage(errorCode, message)` — `@aios/shared-types`의 errorCode→한국어 매핑(`ErrorMessage.tsx:36`). i18n 키 아님(하드코딩 매핑 테이블 사용) | `ErrorMessage.tsx:61-68`: 재시도 가능하면 재시도 버튼 표시(`backoff_retry`는 countdown 후, `refetch_retry`는 즉시 활성화). `ScreenerErrorBanner:114`: `canRetry`가 false면 onRetry 없음(재시도 버튼 숨김). `ScreenerRouteNotImplementedError`는 재시도 불가(`:105-107`) | 노출(`:112`). `error instanceof ApiError`일 때 `error.traceId`를 ErrorMessage에 전달. ErrorMessage는 `legacy.errorMessage.t1` 키로 `{traceId}` 플레이스홀더 표시(`ErrorMessage.tsx:60`) |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
