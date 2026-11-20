@@ -24,7 +24,7 @@
 <!-- BLOCK:J5-ReportsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useReport` | `frontend/packages/shared-hooks/src/usePortfolio.ts:29` | TODO | TODO |
+| `useReport` | `frontend/packages/shared-hooks/src/usePortfolio.ts:29` | 1회 조회; `useQuery`(usePortfolio.ts:30); `refetchInterval` 없음(usePortfolio.ts:30-34); 폴링 없음; 자동 재조회는 queryKey(`["report", periodStart, periodEnd, executionId]`, usePortfolio.ts:31) 변경 시(기간 입력 바뀌면 키 변경), `enabled: !!periodStart && !!periodEnd`(usePortfolio.ts:33); 수동 재조회는 ReportsPage.tsx:58 `onRetry={() => refetch()}`; 변경 요청(mutation) 없음; react-query 전역 옵션(staleTime, retry 기본 횟수, refetchOnWindowFocus)은 미확인 | `isError`이면 ReportError, 로딩이면 LoadingState, 데이터 있으면 본문(ReportsPage.tsx:57-61); ReportError(ReportsPage.tsx:20-33): `classifyForbidden`(ReportsPage.tsx:21) 참이면 `ForbiddenNotice`(ReportsPage.tsx:21); 그 밖의 오류는 `routeApiError`(ReportsPage.tsx:22) 결과 분기; `refetch_retry` 또는 `backoff_retry`일 때만 재시도 버튼(onRetry, ReportsPage.tsx:23, 30); `backoff_retry`는 `retryAfterSec` 함께 전달(ReportsPage.tsx:29); 20-21줄 주석은 "err.message 직접 노출 안 함"이지만 27줄은 `error.message`를 ErrorMessage에 직접 전달 — 불일치 기록; ErrorMessage 렌더링 동작은 미확인 |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
