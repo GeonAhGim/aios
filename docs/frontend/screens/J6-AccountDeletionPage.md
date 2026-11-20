@@ -13,10 +13,10 @@
 <!-- BLOCK:J6-AccountDeletionPage:p1 -->
 | 항목 | 내용 |
 |---|---|
-| 주 페르소나(P1~P11) | TODO |
-| 목적(한 문장) | TODO |
-| 진입 조건 | TODO |
-| 사용자 준비물 | TODO |
+| 주 페르소나(P1~P11) | P1 — 개인 트레이더(투자자): `docs/frontend/PERSONAS_AND_JOURNEYS.md` §2. P1의 핵심 과업은 "전략을 만들거나 고르고, 검증하고, 모의->실운용하며 감독"이며, J6 설정·승인·감사 여정은 P1(+P2)이 담당한다. |
+| 목적(한 문장) | 인증된 사용자가 자신의 계정 탈퇴를 요청하고, 위기 상황에 대비해 비상 출금 목적지 화이트리스트를 사전 등록한다. |
+| 진입 조건 | `frontend/apps/web/src/router.tsx:150` — `/settings/account` 경로. `protect()` 함수(`router.tsx:70-72`)가 `<ProtectedRoute>`로 래핑하여 인증된 사용자만 접근 가능하게 한다. |
+| 사용자 준비물 | 계정 비밀번호 — 탈퇴 요청 시 `label13` 필드(비밀번호 확인, `AccountDeletionPage.tsx:165`)에 입력해야 하며, WRONG_PASSWORD 응답(400) 시 요청이 거부된다. |
 <!-- /BLOCK -->
 
 ### 2. 데이터와 계약
