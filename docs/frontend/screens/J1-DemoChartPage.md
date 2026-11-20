@@ -97,10 +97,10 @@
 <!-- BLOCK:J1-DemoChartPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | 차트 캔버스(`demo-chart-canvas`, `DemoChartPage.tsx:62`) — `data-testid`만 있고 `role="img"`/`aria-label` 없음. 백테스트 버튼(`demo-backtest-run`, `:66`) — `type="button"`은 있으나 `loading={isRunning}` 상태일 때 `aria-busy` 속성 미부여. 결과 섹션(`demo-backtest-summary`, `:72`) — `<section>` 태그 사용 중이나 `aria-labelledby` 없음. `PageHeader`(`:41`, `:61`) — 시맨틱 heading 계층(`<h1>`→`<h2>`) 미구현. 링크(`:85-87`) — "데모 종목 목록으로" 텍스트가 충분하므로 `aria-label` 불필요. | G1: 차트 캔버스에 `role="img"` + `aria-label` 추가 필요(WCAG 1.1.1, 4.1.2). `CandlestickChart` 내부에 `canvas` 요소가 있다면 `aria-label`은 CandlestickChart 컴포넌트에서 처리해야 함. G2: 버튼 `loading` 상태 시 `aria-busy="true"` 부여. G3: `PageHeader`가 `<h1>`을 렌더링하는지 확인 — 만약 `<h2>`라면 첫 heading이 아닌데 명세 위반. |
+| i18n/지역화 | 모든 `t()` 호출이 카탈로그 키를 정확히 사용: `demoMode.chart.pageTitle`(`:41`, `:61`), `demoMode.chart.backLink`(`:46`, `:86`), `demoMode.chart.unknownInstrument`(`:51`), `demoMode.chart.runBacktest`(`:67`), `demoMode.chart.summary.heading`(`:73`), `demoMode.chart.summary.finalEquity`(`:76`), `demoMode.chart.summary.trades`(`:80`), `demoMode.chart.summary.maxDrawdown`(`:81`). catalog.en.ts:341-352, catalog.ko.ts:356-367에 모두 존재. `instrument.label`(`:61`)은 데이터 값이므로 i18n 키 불필요. 누락 키 0건. | 갭 없음. 모든 i18n 키가 양국어 카탈로그에 등록됨. |
+| 성능 예산 | 차트 데이터: `getDemoDailyCandles`는 동기 PRNG 계산(365일 일봉). `useMemo`로 메모이제이션(`:23`). 백테스트: `runDemoBacktest`는 순수 동기 함수. `setTimeout(0)`으로 한 틱 미룸(`:31-34`). 폴링 없음. 리마운트 시에만 재계산. `Stat` 컴포넌트의 `toFixed(2)`(`:77`, `:81`) — 매 렌더마다 문자열 변환이지만 소규모(3개 값)이므로 문제 없음. 성능 예산: 차트 렌더 1회, 백테스트 계산 O(n)(n=365), 네트워크 호출 제로. | 갭 없음. 폴링/무한 스크롤/대용량 데이터 없음. |
+| 텔레메트리 | 오류 보고 호출 없음. `try/catch` 미구현(`:31-34`). `runDemoBacktest` 예외 시 `isRunning=true`로 고정되어 버튼이 로딩 상태로 정지(`:70` `LoadingState` 표시). `console.log`/`console.error` 호출 없음. 성능 측정(`performance.mark`/`performance.measure`) 없음. | G4: `runDemoBacktest` 호출을 `try/catch`로 감싸지 않음. 예외 발생 시 `isRunning`이 `true`로 고정됨. 최소한 `catch`에서 `setIsRunning(false)`로 복구해야 함. G5: 오류 리포팅(예: `reportError`) 호출이 전혀 없어 운영 시 원인을 파악할 수 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
