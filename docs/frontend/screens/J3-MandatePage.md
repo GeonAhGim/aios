@@ -95,7 +95,7 @@
 <!-- BLOCK:J3-MandatePage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyStateConflict` (`frontend/apps/web/src/routes/compliance/MandatePage.tsx:74`) | TODO | TODO | TODO |
+| `classifyStateConflict` (`frontend/apps/web/src/routes/compliance/MandatePage.tsx:74`) | `getApiErrorMessage(errorCode)` (shared-types/apiError.ts:106) — `EXACT_MESSAGES` 매핑: `STATE_CONCURRENCY_CONFLICT` → "동시 수정 경합: 최신 상태로 새로고침하세요.", `STATE_INVALID_TRANSITION` → "허용되지 않은 상태 전이입니다.", `INTEGRITY_IDEMPOTENCY_CONFLICT` → "중복 제출 감지: 이미 처리된 요청입니다." (apiError.ts:42~58 EXACT_MESSAGES). 미지 코드는 `DEFAULT_API_ERROR_MESSAGE` → "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요." (apiError.ts:94). | 1) `STATE_CONCURRENCY_CONFLICT` → `classifyStateConflict`가 `"refetch_retry"` 반환 → `refetch()` 자동 재조회 (`MandatePage.tsx:74`). 사용자가 별도 행동할 필요 없음. 2) `STATE_INVALID_TRANSITION` 또는 미지 409 → `"invalid_transition"` → `activateError` 설정 → `MandateActionError` → `ErrorMessage` 배너 노출. 재시도 버튼은 `classifyRetry`가 `"none"`이 아닐 때만 표시 (ErrorMessage.tsx:39~61). 3) `INTEGRITY_IDEMPOTENCY_CONFLICT` → `"idempotency"` → 동일하게 `ErrorMessage` 노출. | 노출함. `MandateActionError` → `ErrorMessage` (ErrorMessage.tsx:19, 60)가 `error instanceof ApiError ? error.traceId : undefined`로 traceId를 전달하고, `legacy.errorMessage.t1`("지원코드: {{traceId}}")로 표시한다. |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
