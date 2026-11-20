@@ -183,14 +183,16 @@ def test_wallclock_limit_exceeded_raises_timeout_error(perf_budget: PerfBudget) 
     limit = 1.0
     budget_ms = (limit + 2.0) * 1000  # 3000.0 ms -- child teardown headroom
 
-    # sandbox가 child를 킬 때까지의 wall-clock budget을 perf_budget로 측정한다.
-    # process_time 기반이지만 sandbox kill은 자식 프로세스 종료 대기이므로
-    # parent CPU 소비가 거의 없고 wall_ms가 실제 종료 지연을 보존한다.
+    # wallclock timeout은 parent CPU 소비가 거의 없으므로 wall_ms 축으로
+    # 측정해야 실제 종료 지연을 잡는다 (process_time은 대기 시간을 기록하지 않음).
     def _run() -> None:
         with pytest.raises(ScriptSandboxTimeoutError):
             run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=limit, rss_mb=512))
 
-    perf_budget.assert_within(_run, budget_ms=budget_ms, label="wallclock_timeout")
+    sample = perf_budget.sample(_run)
+    assert sample.wall_ms < budget_ms, (
+        f"wallclock timeout took too long: wall={sample.wall_ms:.1f}ms budget={budget_ms:.1f}ms"
+    )
 
 
 @pytest.mark.perf
@@ -241,21 +243,19 @@ def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
 
 @pytest.mark.perf
 def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
-    # Bound is generous (well under the wallclock_sec limit) -- this only
-    # asserts the parent does not hang on an unrelated crash, it does not
-    # pin down exact process-teardown timing. The spawned child still
-    # re-imports the whole test module (DSL runtime included) before
-    # `_crash_immediately` runs, so a cold Windows CI checkout's
-    # bytecode-compile-from-source cost applies here too even though the
-    # fixture itself does nothing (observed 22.3s > a previous 20.0s bound
-    # on a cold run -- task-8732); both bounds now carry headroom for that.
-    budget_ms = 90_000.0  # 90s wall-clock budget
+    # wallclock_sec=120 대비 wall_ms 축 측정 — crash teardown는 parent CPU
+    # 소비가 거의 없으므로 assert_within(cpu)로는 행 회귀를 잡지 못함.
+    # 90s budget gives 30s headroom under the 120s wallclock limit.
+    budget_ms = 90_000.0
 
     def _run() -> None:
         with pytest.raises(ScriptSandboxCrashError):
             run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
 
-    perf_budget.assert_within(_run, budget_ms=budget_ms, label="crash_no_hang")
+    sample = perf_budget.sample(_run)
+    assert sample.wall_ms < budget_ms, (
+        f"crash teardown took too long: wall={sample.wall_ms:.1f}ms budget={budget_ms:.1f}ms"
+    )
 
 
 def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> None:
