@@ -2,7 +2,6 @@
   "apps/web/src/notifications/digest.test.ts",
   "apps/web/src/onboarding/onboardingProgress.test.ts",
   "apps/web/src/pwa/push.depth1.test.ts",
-  "apps/web/src/pwa/push.test.ts",
   "apps/web/src/routes/admin/AuditLogPage.depth1.test.tsx",
   "apps/web/src/routes/admin/AuditLogPage.test.tsx",
   "apps/web/src/routes/admin/EvidenceChainPage.depth1.test.tsx",
