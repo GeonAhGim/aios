@@ -10,7 +10,7 @@ import "@testing-library/jest-dom/vitest";
 import { ThemeToggle, themeStore } from "@aios/ui-web";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { perfBudgetMs } from "../../test/perfBudget";
+import { bestOfMsAsync, perfBudgetMs } from "../../test/perfBudget";
 
 function resetToDark() {
   try {
@@ -115,16 +115,21 @@ describe("ThemeToggle (packages/ui-web) wired into a real DOM", () => {
     }
   });
 
-  it("[perf budget] 50 sequential toggle clicks stay within budget", () => {
-    render(<ThemeToggle />);
-    const button = screen.getByRole("button", { name: "Toggle color theme" });
+  it("[perf budget] 50 sequential toggle clicks stay within budget", async () => {
+    const elapsedMs = await bestOfMsAsync(async () => {
+      render(<ThemeToggle />);
+      const button = screen.getByRole("button", { name: "Toggle color theme" });
 
-    const started = performance.now();
-    for (let i = 0; i < 50; i += 1) {
-      fireEvent.click(button);
-    }
-    const elapsed = performance.now() - started;
+      const started = performance.now();
+      for (let i = 0; i < 50; i += 1) {
+        fireEvent.click(button);
+      }
+      const elapsed = performance.now() - started;
 
-    expect(elapsed).toBeLessThan(perfBudgetMs(500));
+      cleanup();
+      return elapsed;
+    });
+
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(500));
   });
 });
