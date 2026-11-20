@@ -67,7 +67,9 @@
 <!-- BLOCK:J5-ReportsPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| TODO | | | |
+| `<Input type="date">` (`ReportsPage.tsx:49`) — 시작일 변경 | 항상 활성(비활성화 조건 없음, `:47~50`), `value={periodStart}`(`:49`) | `onChange={(e) => setPeriodStart(e.target.value)}`(`:49`) → `periodStart` 상태 갱신. `useReport`(`usePortfolio.ts:29`)의 `queryKey`가 `["report", periodStart, periodEnd, executionId]`(`usePortfolio.ts:31`)이 변경되어 react-query가 자동으로 `generateReport` 재호출. `enabled: !!periodStart && !!periodEnd`(`usePortfolio.ts:33`) 참일 때만 요청 | `periodEnd`가 빈 문자열이면 `enabled` false → 요청 안 함. 그 밖의 네트워크 오류는 `isError` → `ReportError`(`:57-58`) 표시 | — (동일 화면, 데이터 갱신) |
+| `<Input type="date">` (`ReportsPage.tsx:53`) — 종료일 변경 | 항상 활성(비활성화 조건 없음, `:51~54`), `value={periodEnd}`(`:53`) | `onChange={(e) => setPeriodEnd(e.target.value)}`(`:53`) → `periodEnd` 상태 갱신. `queryKey` 변경으로 `useReport` 자동 재호출. `enabled: !!periodStart && !!periodEnd`(`usePortfolio.ts:33`) 참일 때만 요청 | `periodStart`가 빈 문자열이면 `enabled` false → 요청 안 함. 그 밖의 오류는 `ReportError`(`:57-58`) | — (동일 화면, 데이터 갱신) |
+| `ErrorMessage` `onRetry` (`ReportsPage.tsx:58`) — 재조회 | `isError` true (`usePortfolio.ts:30` useQuery가 오류 상태), `error` 존재 | `ReportError`(`:57-58`)의 `onRetry={() => refetch()}` 전달. `ErrorMessage` 재시도 버튼 클릭 시 `refetch()`(`usePortfolio.ts:29`) 호출 → 같은 기간으로 재조회. 성공 시 `report` 데이터 렌더링(`:61-118`) | `refetch()` 자체가 네트워크 오류를 반환하면 `isError` true 유지 → 같은 `ReportError` 다시 표시 | — (동일 화면) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
