@@ -111,9 +111,11 @@
 <!-- BLOCK:J1-MfaSetupPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | MFA 설정 요청 시 QR 코드와 수동 입력용 secret이 동시에 표시되고, 6자리 코드 입력 후 제출하면 `/onboarding/risk-assessment`로 리다이렉트된다. | `MfaSetupPage.tsx:54-57`(setupMfa.mutate onSuccess에서 setSecret/setQrDataUrl), `:71-72`(verifyMfa.mutateAsync 성공 시 navigate), `:88-95`(QR 이미지+secret 표시) |
-| A2 | setupMfa 또는 verifyMfa 실패 시 MfaError 컴포넌트가 오류 유형에 맞는 배너(BadRequestNotice/ForbiddenNotice/ErrorMessage)를 표시한다. | `MfaSetupPage.tsx:20-32`(MfaError 함수: classifyBadRequest→BadRequestNotice, classifyForbidden→ForbiddenNotice, 그 외 ErrorMessage), `:86`(setupError 조건부 렌더링), `:108`(verifyError 조건부 렌더링) |
-| A3 | 로딩 상태(`qrDataUrl === null`)에서는 제출 버튼이 비활성화되고 "QR코드 생성 중..." 문구가 표시된다. | `MfaSetupPage.tsx:40`(useState 초기값 null), `:87-92`(qrDataUrl 분기: 회색 영역에 t3 문구), `:109`(Button disabled={!qrDataUrl}) |
+| A1 | MFA 설정 요청 시 QR 코드와 수동 입력용 secret이 동시에 표시되고, 6자리 코드 입력 후 제출하면 `/onboarding/risk-assessment`로 리다이렉트된다. | `MfaSetupPage.test.tsx:80-82`(setupMutate onSuccess로 secret+provisioningUri 모킹), `:87`(placeholder "6자리 코드"로 입력 대기), `:89`(제출 버튼 클릭), `:108-115` — `verifyMutateAsync.mockResolvedValue({ mfaEnabled: true })` 후 `screen.getByText("적합성평가 페이지")`로 리다이렉트 검출 |
+| A2 | setupMfa 또는 verifyMfa 실패 시 원본 API 메시지(raw error)를 노출하지 않고 매핑 문구로 대체한다(403→"추가 인증이 필요합니다.", 400→"인증 코드가 올바르지 않습니다.", 그 외→"설정 발급에 실패했습니다."/"인증에 실패했습니다."). | `MfaSetupPage.test.tsx:57-65` — 403 AUTH_MFA_REQUIRED 모킹 시 `ForbiddenNotice` 매핑 문구("추가 인증이 필요합니다.") 검출, raw message("raw server detail") 미검출. `:94-106` — 400 AUTH_MFA_INVALID 모킹 시 `BadRequestNotice` 매핑 문구("인증 코드가 올바르지 않습니다.") 검출. `:67-75` — 비-ApiError 실패 시 "설정 발급에 실패했습니다." 표시. `:117-125` — 비-ApiError 검증 실패 시 "인증에 실패했습니다." 표시. |
+| A3 | 로딩 상태(`qrDataUrl === null`)에서는 제출 버튼이 비활성화되고 "QR코드 생성 중..." 문구가 표시된다. | `MfaSetupPage.test.tsx:58-60` — setupMutate가 onSuccess를 호출하지 않으면 `qrDataUrl`이 null로 남아 버튼이 disabled. `MfaSetupPage.tsx:87-92` — `qrDataUrl` null 시 회색 영역에 `t("legacy.mfaSetupPage.t3")`("QR코드 생성 중...") 표시. `MfaSetupPage.tsx:109` — `disabled={!qrDataUrl}`으로 버튼 비활성화. |
+| A4 | 이전 단계(/signup)로 돌아가는 링크가 항상 표시된다(F-2). | `MfaSetupPage.test.tsx:44-50` — `screen.getByRole("link", { name: "← 이전 단계(가입)로 돌아가기" })`로 링크 존재 및 `href="/signup"` 검출 |
+| A5 | 6자리 코드 입력 필드는 numeric inputMode와 tracking-[0.3em] 스타일로 Renders되며, 제출 시 코드 길이에 대한 검증이 Input 컴포넌트의 required 속성으로 enforced된다. | `MfaSetupPage.tsx:99-107` — `<Input>`에 `type="text" inputMode="numeric" required` 속성, `className="text-center text-lg tracking-[0.3em]"`. `MfaSetupPage.test.tsx:87` — `screen.getByPlaceholderText("6자리 코드")`로 필드 검출 가능. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -123,7 +125,7 @@
 |---|---|---|---|---|
 | G1 | subtitle("Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요")가 `t()`로 국제화되어야 함. | `MfaSetupPage.tsx:81` — `subtitle="Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요"` 하드코딩 영문/한문混杂. `t()` 호출 없음. [확인] | 낮음(영문 locale에서도 작동하지만 한글이 그대로 표시됨) | `수정 필요` — `subtitle={t("legacy.mfaSetupPage.subtitle")}`로 변경하고 i18n 리소스에 ko/en 키 추가. |
 | G2 | `setupMfa.mutate`의 `onSuccess` 콜백(`:55-58`)에서 `QRCode.toDataURL`이 실패할 때 try/catch가 없어 `qrDataUrl`이 null로 영구 남음. | `MfaSetupPage.tsx:57` — `await QRCode.toDataURL(result.provisioningUri)`가 try/catch 없음. 예외 시 `onError` 콜백(`:59-61`)으로 안 가고 React unhandled error. | 중(사용자가 QR 생성 실패 시 재시도 방법 모름) | `수정 필요` — `onSuccess` 내부 또는 `useEffect`에서 try/catch로 감싸 `setSetupError`로 오류 전달. |
-| G3 | 401 세션 만료 응답이 `MfaSetupPage`에서 명시적으로 처리되지 않음. | `MfaSetupPage.tsx:74` catch에서 `routeApiError`를 호출하지 않고 `err instanceof ApiError ? err : new Error(...)`만 함. `ErrorMessage`에 `routed.kind`가 전달되지 않음. `ProtectedRoute`가 세션 만료를 감지하고 로그인으로 리다이렉트할 가능성 있으나 MfaSetupPage 내부 검증 없음. [확인] | 낮음(ProtectedRoute가 401을 가로챌 것으로 예상되나 명시적 가드 없음) | `미확인` — ProtectedRoute.tsx에서 401을 처리하는지 확인 후 필요시 `MfaError`에 `routeApiError` 결과 전달. |
+| G3 | 401 세션 만료 응답이 `MfaSetupPage`에서 명시적으로 처리되지 않음. | `MfaSetupPage.tsx:74` catch에서 `routeApiError`를 호출하지 않고 `err instanceof ApiError ? err : new Error(...)`만 함. `ErrorMessage`에 `routed.kind`가 전달되지 않음. `ProtectedRoute`(frontend/apps/web/src/components/ProtectedRoute.tsx)가 세션 만료를 감지하고 로그인으로 리다이렉트할 가능성 있으나 MfaSetupPage 내부 검증 없음. [확인] | 낮음(ProtectedRoute가 401을 가로챌 것으로 예상되나 명시적 가드 없음) | `미확인` — ProtectedRoute 컴포넌트에서 401을 처리하는지 확인 후 필요시 `MfaError`에 `routeApiError` 결과 전달. |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
