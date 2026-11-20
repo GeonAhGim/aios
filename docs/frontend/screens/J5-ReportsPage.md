@@ -45,10 +45,10 @@
 <!-- BLOCK:J5-ReportsPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `classifyForbidden` false, `routeApiError`가 `field_errors` 또는 그 외 400 반환 (`errorRouting.ts:119-123` 분류기 전 `classifyBadRequest`가 400을 잡음 — 우선순위 규칙 주석 참조) | `ErrorMessage` (`ReportsPage.tsx:25`); `errorCode`/`message`/`traceId` 전달; 재시도 버튼 없음(`routed.kind`가 `refetch_retry`/`backoff_retry` 아님, `ReportsPage.tsx:23`) | 시작일/종료일 형식 교정 후 재조회 | 구현됨 (`ReportsPage.tsx:20-33`, `ErrorMessage.tsx:27-72`) |
+| 인증 필요/세션 만료(401) | `classifyForbidden` false, `routeApiError`가 `{ kind: "auth_required" }` 반환 (`errorRouting.ts:128-129` — `isSessionExpiredErrorCode`) | `ErrorMessage` (`ReportsPage.tsx:25`); 세션 만료 문구(`ErrorMessage.tsx:36` — `getApiErrorMessage`); 재시도 버튼 없음(`auth_required`는 retryable 아님) | 재로그인 | 구현됨 (`ReportsPage.tsx:20-33`, `errorRouting.ts:128-129`) |
+| 권한 없음/MFA 필요(403) | `classifyForbidden` 참 (`ReportsPage.tsx:21` — statusCode === 403) | `ForbiddenNotice` (`ReportsPage.tsx:21`); `classifyForbidden` 결과에 따라 4갈래(mfa_required/tenant_mismatch/policy/forbidden) 각각 문구(`forbidden.ts:31-41`); MFA일 때 onStepUp 버튼(ReportsPage는 onStepUp 미전달) | MFA 재인증, 관리자 문의 | 구현됨 (`ReportsPage.tsx:21`, `ForbiddenNotice.tsx:31-50`, `forbidden.ts:31-41`) |
+| 충돌/상태 불일치(409) | `classifyForbidden` false, `routeApiError`가 `data_coverage_missing`/`wallet_balance_drift`/`invalid_transition` 반환 (`errorRouting.ts:104-113`) | `ErrorMessage` (`ReportsPage.tsx:25`); 재시도 버튼 없음(409 갈래가 retryable 아님) | 페이지 새로고침, 데이터 수집 후 재요청 | 구현됨 (`ReportsPage.tsx:20-33`, `errorRouting.ts:104-113`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
