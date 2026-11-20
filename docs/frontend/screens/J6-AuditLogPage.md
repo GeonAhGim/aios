@@ -32,11 +32,11 @@
 <!-- BLOCK:J6-AuditLogPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | `submittedGrantId` 있음 + `isLoading === true` (`AuditLogPage.tsx:118~119`) | `<LoadingState />` (`AuditLogPage.tsx:119`) | 대기 | 구현됨 |
-| 빈 상태(그랜트 미입력) | `!submittedGrantId` (`AuditLogPage.tsx:114~115`) | `<EmptyState>` + `"그랜트 ID를 입력하고 조회하세요."` (`AuditLogPage.tsx:115`, `t7`) | 그랜트 ID 입력 후 조회 | 구현됨 |
-| 빈 상태(데이터 없음) | `submittedGrantId` 있음 + `isError=false` + `data.items.length === 0` (`AuditLogPage.tsx:142~143`) | `<EmptyState>` + `"감사 로그가 없습니다."` (`AuditLogPage.tsx:143`, `t10`) | 필터 변경 후 재조회 | 구현됨 |
-| 정상 | `data` 있고 `data.items.length > 0` (`AuditLogPage.tsx:120~141`) | 로그 항목 목록(`<ul>`, `AuditLogPage.tsx:121`), 각 항목: actionType, createdAt, actorAgent+userId, targetType+targetId | 페이지네이션(`<Pagination>`, `AuditLogPage.tsx:146~148`) | 구현됨 |
-| 낡은 데이터(신선도 초과) | React Query 기본: staleTime=0 (undefined) → 즉시 stale | TODO | `refetch()`로 갱신 가능(`AuditLogPage.tsx:117`) | staleTime 미설정 — 즉시 낡음으로 간주 |
+| 로딩 | `submittedGrantId` 있음 + `isLoading === true` (`AuditLogPage.tsx:118~119`). 에러 분기(116~117)가 먼저 평가됨. | `<LoadingState />` (`AuditLogPage.tsx:119`). LoadingState 내부 문구는 미확인. | 대기 | 구현됨 (`AuditLogPage.tsx:118~119`) |
+| 빈 상태(그랜트 미입력) | `!submittedGrantId` (`AuditLogPage.tsx:114~115`) | `<EmptyState>` + `t7` "그랜트 ID를 입력하고 조회하세요." (`AuditLogPage.tsx:115`, `AuditLogPage.facts.md:22`) | 그랜트 ID 입력 후 조회. 조회 버튼은 `grantIdInput.trim()`이 비어 있으면 비활성 (`AuditLogPage.tsx:107`) | 구현됨 |
+| 빈 상태(데이터 없음) | `submittedGrantId` 있음 + `!isError` + `!isLoading` + `data.items.length === 0` (`AuditLogPage.tsx:142~143`) | `<EmptyState>` + `t10` "감사 로그가 없습니다." (`AuditLogPage.tsx:143`, `AuditLogPage.facts.md:25`). 같은 조건에서 `<Pagination>` 렌더 (`AuditLogPage.tsx:146~148`). total=0일 때 Pagination 동작은 미확인. | 필터 변경 시 `useAuditLog` queryKey에 `filters` 포함(`useAdmin.ts:127`) → queryKey 변경으로 재요청. 필터 입력 변경 시 `handleSearch` 없이 바로 hooks 인자로 들어감(`AuditLogPage.tsx:48~54, 85~101`) | 구현됨 |
+| 정상 | `data` 있고 `data.items.length > 0` (`AuditLogPage.tsx:120~141`) | `<ul>` 목록 (`AuditLogPage.tsx:121`, testid=`audit-log-list`). 각 항목: actionType (`AuditLogPage.tsx:125`), `toLocaleString()` 날짜 (`AuditLogPage.tsx:126`, locale 의존), `t8` "{{actorAgent}} · 사용자 {{userId}}" (userId 없으면 "-") (`AuditLogPage.tsx:129`, `AuditLogPage.facts.md:23`), `t9` "대상 {{targetType}} #{{targetId}}" (targetType 있을 때만, `AuditLogPage.tsx:131~137`, `AuditLogPage.facts.md:24`) | 페이지네이션(`<Pagination>`, `AuditLogPage.tsx:146~148`) | 구현됨 |
+| 낡은 데이터(신선도 초과) | React Query: staleTime 기본값 0(코드에 해당 옵션 명시 없음) → 즉시 stale | 낡음 표시 문구는 facts 시트 목록에 없음 → 없음. 수동 새로고침 버튼은 에러 상태(`canRetry`)에서만 `refetch`가 `onRetry`로 전달됨(`AuditLogPage.tsx:62, 117`). 정상 상태에서는 새로고침 버튼 없음. | 조회 버튼 재클릭 시 `submittedGrantId`가 같으면 `queryKey`(`useAdmin.ts:127`)가 바뀌지 않아 재요청 안 될 수 있음 — 미확인. 필터 변경 시 queryKey가 바뀌므로 재조회됨. | 없음(낡음 표시 UI·새로고침 버튼 없음). G3: staleTime 미설정 |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
