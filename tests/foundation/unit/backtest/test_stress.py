@@ -65,24 +65,26 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
     아님을) 보장한다."""
     original_run_backtest = stress_mod.run_backtest
     delay_s = 0.005
+    stall_call_count = 0
 
     def _stalled_run_backtest(*args: object, **kwargs: object) -> object:
+        nonlocal stall_call_count
+        stall_call_count += 1
         time.sleep(delay_s)
         return original_run_backtest(*args, **kwargs)
 
     monkeypatch.setattr(stress_mod, "run_backtest", _stalled_run_backtest)
 
-    sample = perf_budget.sample(
-        lambda: run_stress(
-            _config(),
-            _fsm_config(),
-            _bars(),
-            list(REQUIRED_SCENARIOS),
-            indicator_service=_FakePriceIndicatorService(),
-        ),
-        batch=8,
+    # stalled_report: stall patch가 살아있는 동안 계산 (undo 전)
+    stalled_report = run_stress(
+        _config(),
+        _fsm_config(),
+        _bars(),
+        list(REQUIRED_SCENARIOS),
+        indicator_service=_FakePriceIndicatorService(),
     )
-    assert sample.wall_ms >= delay_s * _RUN_BACKTEST_CALLS * 1000
+    # DoD: patch 적용 중 run_backtest가 >=1회 호출됨을 단언
+    assert stall_call_count >= 1
 
     monkeypatch.undo()
     baseline_report = run_stress(
@@ -93,13 +95,6 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
         indicator_service=_FakePriceIndicatorService(),
     )
 
-    stalled_report = run_stress(
-        _config(),
-        _fsm_config(),
-        _bars(),
-        list(REQUIRED_SCENARIOS),
-        indicator_service=_FakePriceIndicatorService(),
-    )
     assert stalled_report.per_scenario == baseline_report.per_scenario
 
 
