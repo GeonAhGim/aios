@@ -48,10 +48,10 @@
 <!-- BLOCK:J6-ConnectionsPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `beginConnection.mutate`의 `onError` (`ConnectionsPage.tsx:138-141`) — 서버가 400을 반환하고 `errorCode`가 `VALIDATION_*` 형식 | 필드별 오류 문구가 `fieldErrors` 맵으로 `text-danger` 클래스 표시 (`:219`: provider_code, `:230`: opaque_account_ref, `:260`: requested_capability_profile). `setFromError`(`:140`)가 `useFieldErrors`에 매핑. | 필드 수정 후 폼 재제출 (`:125-144 handleCreate`) | 구현됨 (`:138-141`, `:219`, `:230`, `:260`, `:224`, `:235`, `:253`) |
+| 인증 필요/세션 만료(401) | `classifyForbidden`(`:26`) null → `routeApiError`(`:27`)에서 `isSessionExpiredErrorCode`(`errorRouting.ts:128-129`)가 true → `auth_required` kind | `ErrorMessage`(`:29-34`)가 `getApiErrorMessage`로 오류 문구 표시. trace_id(`:32`) 노출. 401 전용 리다이렉트/로그아웃 없음. | 새로고침 (`ErrorMessage`의 `canRetry` 로직, `ErrorMessage.tsx:61-62`) — but `onRetry` prop이 `ConnectionActionError`(`ConnectionsPage.tsx:25`)에서 전달되지 않음 → 재시도 버튼 없음. 미확인: `getApiErrorMessage`가 `AUTH_*` 코드의 문구를 어떻게 매핑하는지 | 부분 구현 (`:26-34`, `ErrorMessage.tsx:27-34`로 표시되나 401 전용 처리 없음, `onRetry` 미배선) |
+| 권한 없음/MFA 필요(403) | `classifyForbidden`(`:26`)이 403에서 true → `ForbiddenKind` 반환 (`forbidden.ts:31-41`) | `<ForbiddenNotice>`(`:27`) 표시. kind별: `policy`→`DenialReasons`, `mfa_required`→`onStepUp` 버튼(`ForbiddenNotice.tsx:42-47`), 그 외→일반 문구(`:40`) | MFA required 시 `onStepUp`으로 단계 상승 — but `ConnectionActionError`(`ConnectionsPage.tsx:25`)가 `onStepUp` prop을 전달하지 않음 → 미배선 | 구현됨 (`:26-27`, `ForbiddenNotice.tsx:31-50`), onStepUp 미배선 (`ConnectionsPage.tsx:25`에 prop 누락) |
+| 충돌/상태 불일치(409) | `classifyForbidden`(`:26`) null → `routeApiError`(`:27`)에서 `classifyStateConflict`(`errorRouting.ts:111-113`) — `statusCode === 409` | `ErrorMessage`(`:29-34`) 표시. `refetch_retry`일 때 `retryAfterSec`(`:33`) 전달. 409 전용 문구 없음. | `refetch_retry`일 때 `ErrorMessage` retry 로직 (`ErrorMessage.tsx:38-40`, `:61-62`). but `onRetry` 미배선. `invalid_transition`일 때 재시도 불가. | 부분 구현 (`:26-34`, `ErrorMessage`로 표시되나 409 전용 처리 없음, `onRetry` 미배선) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
