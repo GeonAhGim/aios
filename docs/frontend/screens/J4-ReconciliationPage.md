@@ -44,10 +44,10 @@
 <!-- BLOCK:J4-ReconciliationPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | 해소 사유 입력 없이 `<Button>` 클릭 (`ReconciliationPage.tsx:53-54`): `reason.trim()`이 빈 문자열 → `setActionError({ targetRef, error: new Error("해소 사유를 입력하세요.") })` (`ReconciliationPage.tsx:55`) | `ReconciliationActionError` 컴포넌트 표시 (`ReconciliationPage.tsx:101-103`). 3-way 분류: `classifyBadRequest(plain Error)` → false (statusCode 없음), `classifyForbidden(plain Error)` → false, `routeApiError(plain Error)` → `{kind: "unknown"}`. 최종 `<ErrorMessage message="해소 사유를 입력하세요." traceId={undefined} retryAfterSec={undefined} />` (`ReconciliationActionError:28-36`) | 사유 입력 후 재시도 | `구현됨` — 조건: `ReconciliationPage.tsx:54-56`, 표시: `ReconciliationPage.tsx:101-103`, ErrorMessage: `frontend/apps/web/src/components/ErrorMessage.tsx:27-72` |
+| 인증 필요/세션 만료(401) | API 응답 statusCode=401. `classifyBadRequest` → false (400 전용), `classifyForbidden` → false (403 전용). `routeApiError`: `isSessionExpiredErrorCode(errorCode)` → `{kind: "auth_required"}` (`errorRouting.ts:128-130`). `classifyRetry` → "none" → retryAfterSec undefined | `<ErrorMessage message={err.message} traceId={undefined} retryAfterSec={undefined} />` (`ReconciliationActionError:28-36`). retry 버튼 없음 (errorMessage.t2, errorMessage.t3 키 사용 안함) | 로그인 재인증 후 재접속 | `구현됨` — 3-way 패턴의 폴스루 경로: `ReconciliationPage.tsx:28-36`, 라우팅: `errorRouting.ts:128-130` |
+| 권한 없음/MFA 필요(403) | API 응답 statusCode=403. `classifyForbidden(error)` → `ForbiddenKind` (`mfa_required`·`tenant_mismatch`·`policy`·`forbidden`) (`forbidden.ts:31-41`) | `<ForbiddenNotice error={error} />` (`ReconciliationActionError:27`). `getApiErrorMessage(errorCode, message)`로 문구 표시 (`ForbiddenNotice.tsx:36`). policy 갈래 → `<DenialReasons>` 추가 (`ForbiddenNotice.tsx:41`). mfa_required → onStepUp 버튼 (`ForbiddenNotice.tsx:42-46`) | 갈래에 따른 별도 행동 (MFA 재인증, 정책 사유 확인) | `구현됨` — `ReconciliationActionError:27`, `ForbiddenNotice.tsx:31-49` |
+| 충돌/상태 불일치(409) | API 응답 statusCode=409. `classifyBadRequest` → false, `classifyForbidden` → false. `routeApiError`: `DATA_COVERAGE_MISSING`/`WALLET_BALANCE_DRIFT`/`classifyStateConflict` → `refetch_retry`/`invalid_transition` (`errorRouting.ts:104-113`). `classifyRetry` → "none" (409는 retryable 아님) | `<ErrorMessage message={err.message} traceId={undefined} retryAfterSec={routed.afterSec} />` (`ReconciliationActionError:28-36`). `data_coverage_missing`/`wallet_balance_drift`/`invalid_transition` 모두 `afterSec` undefined → 재시도 버튼 없음 | 사유 확인 후 재시도 (수동) | `구현됨` — 폴스루: `ReconciliationPage.tsx:28-36`, 409 분류: `errorRouting.ts:104-113`. 주석 참조: `ReconciliationPage.tsx:21-24` ("409 재구현 안 함, ErrorMessage 표시") |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
