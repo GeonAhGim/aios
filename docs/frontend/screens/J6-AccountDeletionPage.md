@@ -46,10 +46,10 @@
 <!-- BLOCK:J6-AccountDeletionPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | API가 400 응답 — classifyBadRequest가 field/idempotency_key_required/disclosure_retired/mfa_invalid/unknown 반환 | BadRequestNotice 컴포넌트 (`AccountDeletionPage.tsx:26`) — getApiErrorMessage로 문구 생성. Alert tone="danger" 래핑. 갈래별: field → 필드 오류 없으면 배너 표시, 있으면 인라인만. disclosure_retired → "최신 revision 재조회" 버튼. mfa_invalid → "코드 재입력" 버튼. 나머지 → 문구만 | field: 입력값 수정 재시도. disclosure_retired: 재조회 버튼 클릭. mfa_invalid: MFA 코드 재입력. 나머지: 재시도 무의미 | 구현됨 — AccountSecurityError (:25-37) → classifyBadRequest (:26) → BadRequestNotice (:26). whitelist 탈퇴 양쪽 모두 동일 경로 (`AccountDeletionPage.tsx:70`, `:83`) |
+| 인증 필요/세션 만료(401) | API가 401 응답 — classifyBadRequest(400만)·classifyForbidden(403만) 모두 null. routeApiError가 세션 만료 코드로 auth_required 분류 | ErrorMessage 컴포넌트 (`AccountDeletionPage.tsx:30`) — getApiErrorMessage로 문구, Alert tone="danger". traceId 있으면 legacy.errorMessage.t1 노출 (:33). 재시도 버튼 없거나 비활성화 | 세션 만료 → 로그인 페이지로 리다이렉트 (`ProtectedRoute.tsx:20-21`). API 호출 부에서 ProtectedRoute가 토큰 없음 감지 시 /login?next=...로 이동 | 구현됨 — AccountSecurityError → routeApiError (:28) → ErrorMessage (:30). ErrorMessage에 onRetry 콜백 미전달 (:30-35), 재시도 버튼 동작 안 함 |
+| 권한 없음/MFA 필요(403) | API가 403 응답 — classifyForbidden가 mfa_required/tenant_mismatch/policy/forbidden 반환 | ForbiddenNotice 컴포넌트 (`AccountDeletionPage.tsx:27`) — getApiErrorMessage로 문구. Alert tone="danger". 갈래별: mfa_required → "step-up" 버튼 (but onStepUp 미전달). policy → DenialReasons 컴포넌트 (:41). 나머지 → 문구만 | mfa_required: MFA 단계상승 (but handler 없음). policy: 거부 사유 확인. tenant_mismatch/forbidden: 관리자에게 문의 | 구현됨 — AccountSecurityError → classifyForbidden (:27) → ForbiddenNotice (:27). whitelist 탈퇴 양쪽 모두 동일 경로 (`AccountDeletionPage.tsx:70`, `:83`) |
+| 충돌/상태 불일치(409) | API가 409 응답 — routeApiError가 특수 409 코드 먼저 검사, 그 외 classifyStateConflict로 refetch_retry/invalid_transition 분류 | ErrorMessage 컴포넌트 (`AccountDeletionPage.tsx:30`) — getApiErrorMessage로 문구. refetch_retry일 때 재시도 버튼 활성화. invalid_transition → 버튼 없음 | refetch_retry: 즉시 재시도 버튼. 특수 409 코드 → 안내, 재시도 없음. invalid_transition: 상태 전이 불가, 재시도 무의미 | 구현됨 — AccountSecurityError → routeApiError (:28) → ErrorMessage (:30). ErrorMessage에 onRetry 콜백 미전달 (:30-35), 재시도 버튼 비활성화됨 |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
