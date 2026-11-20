@@ -114,10 +114,10 @@
 <!-- BLOCK:J3-ExecutionControlPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `LiveOrderConfirmDialog`에 `role="dialog"`(`ExecutionControlPage.tsx:113`), `aria-modal="true"`(`:114`), `aria-labelledby={LIVE_CONFIRM_TITLE_ID}`(`:115`) 적용. 제목 h2에 `id={LIVE_CONFIRM_TITLE_ID}`(`:120`). 경고 이모지 `aria-hidden="true"`(`:119`). `useDialogFocusTrap`으로 포커스 트랩 동작(`:107`). form Field 컴포넌트에 `label` prop으로 라벨 제공(`:245,248,255,263,268`). mode Select 변경 시 `handleModeChange`에서 `setStep("form")`으로 confirm 상태 초기화(`:174`). | `PageHeader`(`:234`)에 `aria-label` 명시 부재. `OperationStatusBar`(`:236-240`)에 role="status" 또는 aria-live 명시 부재. |
+| i18n/지역화 | 모든 사용자 문구 `t("legacy.executionControlPage.*")` 키 사용(`ExecutionControlPage.tsx:67,121,125,127,129,132,135,142,213,234,243,248,268,273,274,280,286,307,319,331`, 총 20개 호출). facts 시트 카탈로그 누락 키 없음. `approvalRequestId`는 `{{approvalRequestId}}`로 interpolation(`:307`). | `NotFoundState.description`이 하드코딩 "삭제되었거나 존재하지 않는 데이터입니다."(`ExecutionControlPage.tsx:68`) — i18n 키 누락. |
+| 성능 예산 | `useExecutions`는 5초 폴링(`refetchInterval: 5000`, `usePortfolio.ts:42`). `useCreateExecution`/`useEvaluateRiskGate`는 mutation(요청 시만 호출). `useConflictRetry`는 409 발생 시 refetch + 1회 재시도(무한 재시도 금지). `useIdempotentSubmit`은 in-flight 중복 차단. `FF_J3_RISK_PANEL` flag가 꺼져 있으면 risk gate 네트워크 호출 자체를 건너뜀(`ExecutionControlPage.tsx:205-207`). 목록 렌더링은 executions 배열 map으로 단순 반복, 각 ExecutionCard는 독립 컴포넌트. | useExecutions에 staleTime 미설정(기본 0 → 즉시 stale). 5초 폴링 중 매번 stale 재검사로 불필요 리페치 가능. |
+| 텔레메트리 | `ExecutionControlPage.tsx` 전체에 명시적 telemetry/애널리틱스 호출 없음. 에러는 `ErrorMessage`/`BadRequestNotice`/`ForbiddenNotice` 컴포넌트로 사용자에게 표시(`:44-54,62-83`). `routeApiError`로 에러 분류(task-483). | 확인한 텔레메트리(로깅·애널리틱스·RUM) 없음. 실행 생성 성공/실패, LIVE 모드 전환, RiskGate 평가 등 핵심 사용자 액션 추적 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
