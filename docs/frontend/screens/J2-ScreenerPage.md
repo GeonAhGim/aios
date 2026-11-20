@@ -101,10 +101,10 @@
 <!-- BLOCK:J2-ScreenerPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `data-testid` 13개 적용(`:191`, `:202`, `:207`, `:220`, `:227`, `:240`, `:248`, `:261`, `:271`, `:278`, `:292`, `:303`, `:330`) — Facts 시트와 일치. 모든 `Input`/`Select`에 `onChange` 연결(`:193`, `:210`, `:223`, `:233`, `:243`, `:280`, `:284`). `Button`에 `type="button"` 명시(`:271`, `:303`). `Field` 컴포넌트의 `label` prop이 내부에서 `aria-labelledby`로 연결되는지 확인 안 됨 — 미확인. `role`/`aria-label`/`aria-describedby` 등 WCAG 2.2 AA 명시 속성이 ScreenerPage.tsx 전체에 **전혀 없음**. `Alert`(검증/오류/경고)이 `role="alert"`로 자동 제공되는지 `Alert` 컴포넌트 정의를 읽지 않아 미확인. `ScreenerErrorBanner`(`:104-117`)가 `traceId`를 표시(`:112`)하지만 스크린 리더 노출 여부는 에러 메시지 컴포넌트 구현을 읽지 않아 미확인. **갭: `Alert`에 `role="alert"` 또는 `aria-live="assertive"` 명시 필요(자동 제공 여부 미확인)**. **갭: `Field` 레이블-입력 연결(`aria-labelledby`/`id`) 확인 또는 명시 필요**. **갭: `screener-filter-row-${index}` 행에 `role="row"` 또는 테이블 구조 검토 필요** |
+| i18n/지역화 | 사용 키 전부 확인: `screener.pageTitle`(`:184`), `screener.filterBuilder.*`(`:187`, `:189`, `:193`, `:205`, `:218`, `:225`, `:238`, `:246`, `:264`, `:272`, `:276`, `:283`, `:285`, `:304`), `screener.validation.*`(`:122`, `:124`, `:126`, `:128`), `screener.results.*`(`:312`, `:318`, `:323`, `:325`, `:338`). 필터 종류 라벨(`:87-98`)은 switch+리터럴 키 패턴으로 동적 키 방지. **누락 키: 없음**. `catalog.ko.ts:98-137`과 `catalog.en.ts:101-141`에 모든 키 존재. 에러 메시지 컴포넌트(`:109-115`)가 `legacy.errorMessage.t1`의 `{traceId}` 플레이스홀더 사용 — 카탈로그 확인 필요. **갭: `legacy.errorMessage.t1`의 traceId 포맷 "(traceId: ...)"이 i18n 카탈로그에 있는지 확인 필요** |
+| 성능 예산 | 폴링 없음: `useQuery`(`:143-147`)에 `refetchInterval` 옵션 없음, `enabled: submitted !== null`로 수동 실행 시 1회 조회. `useMemo`로 `screenerClient` 생성(`:134`) — prop 변경 시에만 재생성. `filterRowSeq` 전역 카운터(`:74`) — 리마운트 시 리셋 안 되나 동작 문제 없음. `filters` 상태가 배열 전체 교체 패턴(`:149-158`)이지만 각 행이 고유 `id` 키로 매핑되어 부분 렌더링 가능. 결과 행 렌더링: `key={row.instrumentId}`(`:330`) — 안정적인 키. `query.data?.truncated` 체크(`:325`) — 1,000행 상한 후 경고 표시. **갭: `query.data?.total`과 `rows.length` 동시 사용(`:323`) — `query.data`가 undefined일 때 fallback `rows.length`로 렌더링 불일치 가능성. 갭: 1,000행 상한(`:325`) 이후 추가 스크롤/페이징 없음 — 대량 결과 시 렌더 성능 저하 가능(백엔드 1,000행 상한이 클라이언트 렌더 부하로 이어짐)**. **성능 예산: 폴링 없음(수동 실행만), 1회 쿼리+최대 1,000행 렌더. 폴링/리렌더 사이클 없음으로 예산 초과 위험 낮음** |
+| 텔레메트리 | **텔레메트리 호출: 없음**. `reportError`, `trackEvent`, `analytics`, `logEvent`, `Sentry`, `captureException` 등 모든 모니터링/분석 호출이 ScreenerPage.tsx에 존재하지 않음. 에러 메시지 컴포넌트(`:109-115`)가 errorCode/message/traceId를 UI에 표시하지만(`:110-112`), 외부 모니터링 서비스로 전송하는 코드가 없음. `routeApiError`(`:106`)는 오류 라우팅(재시도 버튼 결정)만 수행. **갭: API 오류 발생 시 traceId 포함 오류 보고(에러 트래킹 서비스 등)가 없음 — 운영 중 문제 디버깅 불가**. **갭: "실행" 버튼 클릭(`:303`) 이벤트 로깅 없음 — 필터 구성 패턴 분석 불가** |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
