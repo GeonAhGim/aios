@@ -47,10 +47,10 @@
 <!-- BLOCK:J5-PayoutsPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `markPaid.isError`且에러가 400(VALIDATION_*) (`PayoutsPage.tsx:175`) | `MarkPaidActionError`(`PayoutsPage.tsx:96-109`) → `classifyForbidden`(`:97`) null → `routeApiError`(`:98`) `{kind:"field_errors"}` 또는 `{kind:"idempotency_missing_header"}` → `ErrorMessage`(`:101-107`)에 errorCode/message/traceId 전달. apiError.ts(`shared-types/src/apiError.ts:106`)의 에러 문구 매핑 함수로 사용자 문구 생성 | 재시도 버튼 없음(서버 오류 분류기가 해당 코드 범위에 없음) (`PayoutsPage.tsx:106`) | 구현됨 (`PayoutsPage.tsx:96-109, 175`) |
+| 인증 필요/세션 만료(401) | `markPaid.isError`且에러가 401 (`PayoutsPage.tsx:175`) | `MarkPaidActionError` → `classifyForbidden` null → `routeApiError`(`:98`)에서 세션 만료 코드 검사(`errorRouting.ts:128-129`) → `{kind:"auth_required"}` → `ErrorMessage`(`:101-107`)에 errorCode/message/traceId 전달. 세션 만료 문구 | 재시도 버튼 없음(`auth_required`는 서버 오류 분류기 대상 아님) (`PayoutsPage.tsx:106`) | 구현됨 (`PayoutsPage.tsx:96-109, 175`) |
+| 권한 없음/MFA 필요(403) | `markPaid.isError`且에러의 `statusCode === 403` (`PayoutsPage.tsx:175`) | `MarkPaidActionError` → `classifyForbidden`(`:97`)(`forbidden.ts:31-41`)가 `mfa_required`/`tenant_mismatch`/`policy`/`forbidden` 중 하나 반환 → `ForbiddenNotice`(`:97`)(`ForbiddenNotice.tsx:31-50`)가 apiError.ts(`shared-types/src/apiError.ts:106`)의 매핑 함수로 문구 표시. `mfa_required`일 때 `onStepUp` 버튼(`ForbiddenNotice.tsx:42-46`), `policy`일 때 `DenialReasons`(`ForbiddenNotice.tsx:41`) | `mfa_required`일 때 `onStepUp` 버튼(현재 `PayoutsPage.tsx:175`에서 `onStepUp` 전달 안 함 → 버튼 숨김) | 구현됨 (`PayoutsPage.tsx:96-109, 175`, `ForbiddenNotice.tsx:31-50`) |
+| 충돌/상태 불일치(409) | `markPaid.isError`且에러의 `statusCode === 409` (`PayoutsPage.tsx:175`) | `MarkPaidActionError` → `classifyForbidden` null → `routeApiError`(`:98`)에서 상태 충돌 분류기(`stateConflict.ts:33`) → `{kind:"invalid_transition"}` 또는 `{kind:"refetch_retry"}`(STATE_CONCURRENCY_CONFLICT) → `ErrorMessage`(`:101-107`)에 errorCode/message/traceId 전달 | `routeApiError`가 `backoff_retry`일 때 `retryAfterSec` 설정(`:105`). 그러나 서버 오류 분류기(`:99`)가 409를 대상 밖(5xx만)으로 판단하므로 `onRetry` 미설정(`:106`) — 재시도 버튼 없음 | 구현됨 (`PayoutsPage.tsx:96-109, 175`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
