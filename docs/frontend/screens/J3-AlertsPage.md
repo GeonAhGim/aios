@@ -109,9 +109,9 @@
 <!-- BLOCK:J3-AlertsPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 알림 생성 폼에서 거래소·종목·지표·기간·타임프레임·조건·임계값을 입력하고 등록 버튼 클릭 시 `useCreateAlert.mutateAsync`(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:118`)가 호출되며, 성공 시 `useMyAlerts`가 자동 재조회된다(`frontend/packages/shared-hooks/src/useAlerts.ts:16`). 실패 시 `classifyBadRequest`(`:35`) → `BadRequestNotice`, `classifyForbidden`(`:36`) → `ForbiddenNotice`, 그 외 `routeApiError`(`:37`) → `ErrorMessage` 경로로 에러가 분류되어 표시된다(`:39-44`). | `handleSubmit` 함수(`:114-130`)가 `mutateAsync` 호출 후 catch에서 `ApiError`이면 원본 `err`를 `setError`에 전달하고, 그 외는 `t("legacy.alertsPage.t18")`로 `Error`를 만든 후 `setError`(`:128`). `CreateAlertError` 컴포넌트(`:34-46`)가 taxonomy 라우팅을 수행. |
+| A2 | `ACTIVE` 상태 알림 행에 "취소" 버튼(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:263-271`)이 표시되고, 클릭 시 `cancelAlert.mutate(a.id)`(`:268`)가 호출된다. 취소 요청 중(`cancelAlert.isPending`) 버튼에 `loading` 상태가 적용되어(`:267`) 추가 클릭을 막는다. `useCancelAlert` 훅의 성공 콜백에서 `myAlerts` 쿼리가 무효화되어(`frontend/packages/shared-hooks/src/useAlerts.ts:24`) 목록이 자동 갱신된다. | `AlertsPage.tsx:262-271` — `{a.status === "ACTIVE" && (<Button ... loading={cancelAlert.isPending} onClick={() => cancelAlert.mutate(a.id)}>{t("legacy.alertsPage.t16")}</Button>)}`. 갭: `cancelAlert.isPending`이 모든 행에 공유되어 한 건 취소 중 다른 행 버튼도 로딩 표시(`:267`). |
+| A3 | 알림 목록이 `ALERTS_PAGE_SIZE`(10) 단위로 클라이언트 페이지네이션된다(`frontend/apps/web/src/routes/alerts/AlertsPage.tsx:61`). 서버는 전체 배열을 반환하고(`:58-60` 주석), `derivePageState`(`:92`)로 페이지 메타를 계산한 뒤 `alerts.slice(rangeStart-1, rangeEnd)`(`:95`)로 잘라 `pageAlerts`를 만든다. URL `?page=N` 파라미터(`:83`)가 현재 페이지를 추적하고, `Pagination` 컴포넌트(`:275`) 클릭 시 `goToPage`(`:98-102`)가 `searchParams`를 `replace`로 업데이트한다(`:101`). | `AlertsPage.tsx:61-96`, `:275`. 페이지네이션은 URLSearchParams 기반 클라이언트 측 슬라이싱. 서버 페이지네이션 아님(`:58-60`). |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
