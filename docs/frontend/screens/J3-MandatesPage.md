@@ -116,9 +116,11 @@
 <!-- BLOCK:J3-MandatesPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 활성 위임장과 대기 중 개정안이 모두 없을 때("빈 상태"), 경고 배지 `legacy.mandatesPage.t8`("위임장 미설정(주문 차단)")와 설명 문구 `legacy.mandatesPage.t11`("활성 위임장이 없습니다 — 규칙이 없다는 뜻이 아니라 모든 주문이 차단된다는 뜻입니다.")를 표시한다. | `MandatesPage.tsx:57-58` 배지, `:80-82` 문구 — `activeRevision`과 `pendingRevision`이 모두 null일 때 `ActiveRevisionCard`가 이 경로를 탄다. |
+| A2 | 활성 리비전의 상태가 ACTIVE이면 `legacy.mandatesPage.t9`("일시정지") 버튼을, PAUSED이면 `legacy.mandatesPage.t10`("재개") 버튼을 단 하나만 표시하고, 버튼 클릭 시 해당 mutation(`usePauseMandate`/`useResumeMandate`)을 호출한다. 실패 시 `MandateActionError` 배너에 오류를 노출한다. | `MandatesPage.tsx:65-72` 조건부 버튼 렌더링, `:153-154` mutation 호출, `:74-78` 에러 배너 — `lifecycleError` 상태가 채워지면 `MandateActionError`가 배너로 표시됨. |
+| A3 | 활성 리비전이 존재하고 상태가 ACTIVE일 때만 "일시정지" 버튼이, PAUSED일 때만 "재개" 버튼이 렌더되며(동일 상태에 두 버튼이 공존하지 않음), 버튼은 mutation의 `isPending` 상태에 따라 `loading` 모드로 전환된다. | `MandatesPage.tsx:65-72` — `activeRevision.state === "ACTIVE"`/`"PAUSED"` 분기, `:155-156`의 `pausePending`/`resumePending` prop 전달. |
+| A4 | `useMandateStatus` 조회가 실패하면(`isError`), `PageHeader`와 함께 `MandateActionError(error, onRetry=refetch)` 배너를 표시하고, 재시도 버튼 클릭 시 `refetch()`로 최신 상태를 재조회한다. | `MandatesPage.tsx:122-131` — `isError` 조건이 먼저 체크되어 에러 상태일 때 다른 UI(로딩/본문)를 렌더하지 않음. |
+| A5 | `/mandates` 라우트는 `ProtectedRoute` 래퍼(`router.tsx:136`) 안에 있어 미인증 사용자를 로그인 페이지로 리다이렉트한다. | `router.tsx:136` — `protect(<MandatesPage />)` 호출로 인증 검사. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
