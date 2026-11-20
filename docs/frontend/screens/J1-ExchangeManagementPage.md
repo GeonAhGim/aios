@@ -84,7 +84,7 @@
 <!-- BLOCK:J1-ExchangeManagementPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면은 거래소 API 자격증명(키/시크릿/패스프레이즈)의 등록·해지·조회만 처리한다(`ExchangeManagementPage.tsx:21-23`: `useExchangeCredentials`/`useRegisterExchangeCredential`/`useRevokeExchangeCredential`). MONEY_ACTIONS.md A1~A12에 명시된 행동(주문 제출, 전략 시작/종료/일시정지, 모의→실전 전환, 출금/충전, 킬스위치, 승인 설정 변경, 리밸런싱) 중 어느 것도 이 화면에서 직접 수행하지 않는다. 자격증명 등록은 거래 가능 경로를 확보하는 선행 단계이지만, 그 자체가 주문/실행/출금을 유발하지 않으며, 해지도 기존 포지션이나 잔고에 영향을 주지 않는 읽기 전용 작업이다(`exchange_credentials.py:67-76`: DELETE는 활성 플래그만 false로 설정). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
