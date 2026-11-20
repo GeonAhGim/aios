@@ -24,9 +24,9 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:data -->
 | 데이터(훅) | 출처 | 갱신 방식 | 실패 시 |
 |---|---|---|---|
-| `useApproveMyRequest` | `frontend/packages/shared-hooks/src/useApprovals.ts:12` | TODO | TODO |
-| `useRejectMyRequest` | `frontend/packages/shared-hooks/src/useApprovals.ts:20` | TODO | TODO |
-| `useMyApprovalRequests` | `frontend/packages/shared-hooks/src/useApprovals.ts:5` | TODO | TODO |
+| `useApproveMyRequest` | `frontend/packages/shared-hooks/src/useApprovals.ts:12` | `useMutation` 기반 trigger(OnClick). `onSuccess`에서 `qc.invalidateQueries({ queryKey: ["myApprovalRequests"] })`로 목록 자동 갱신(MyApprovalRequestsPage.tsx:46, 60). `mutateAsync` 사용으로 동기 처리(MyApprovalRequestsPage.tsx:60). | `handle` 함수(MyApprovalRequestsPage.tsx:57-65)에서 `try/catch` 후 `error` state에 저장. `RequestActionError` 컴포넌트(MyApprovalRequestsPage.tsx:79)가 `classifyForbidden`/`routeApiError`로 분류해 `ForbiddenNotice`(403) 또는 `ErrorMessage`(기타) 표시. 409(STATE_INVALID_TRANSITION)는 재시도 버튼 없음. |
+| `useRejectMyRequest` | `frontend/packages/shared-hooks/src/useApprovals.ts:20` | `useMutation` 기반 trigger(OnClick). `onSuccess`에서 `qc.invalidateQueries({ queryKey: ["myApprovalRequests"] })`로 목록 자동 갱신(MyApprovalRequestsPage.tsx:47, 61). `mutateAsync` 사용으로 동기 처리(MyApprovalRequestsPage.tsx:61). | approve와 동일 처리(MyApprovalRequestsPage.tsx:62). `error` state 저장 → `RequestActionError` 렌더링. |
+| `useMyApprovalRequests` | `frontend/packages/shared-hooks/src/useApprovals.ts:5` | `useQuery` 기반 1회 조회(on mount). `queryKey: ["myApprovalRequests"]`, `queryFn: apiClient.listMyApprovalRequests()`(useApprovals.ts:6-9). 폴링/자동 재조회 옵션 미설정 → mount 시 1회만 조회. 수동 `refetch` 함수 expose(MyApprovalRequestsPage.tsx:104). | `isError`일 때(MyApprovalRequestsPage.tsx:112-113): `RequestActionError`에 `error`와 `onRetry={() => refetch()}` 전달. `refetch`는 목록 재조회. 403이면 `ForbiddenNotice`, 그 외는 `ErrorMessage` 표시. |
 <!-- /BLOCK -->
 
 ### 3-a. 상태 매트릭스: 로딩·빈·정상·낡은 데이터
