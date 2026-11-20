@@ -104,10 +104,10 @@
 <!-- BLOCK:J3-PortfolioPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `<table>`의 `<thead>`에 `<th>` 사용(표준 HTML 테이블 헤더, `PortfolioPage.tsx:144-147`). 재조정 입력 `<Input>`(`:157-165`)은 `label` 요소/`aria-label` 없이 `placeholder`만 표시 — 스크린 리더가 "숫자" 열의 맥락을 인지하지 못함. `<Button type="button">`(`:173`)에 `aria-disabled`/로딩 상태 접근성 속성 없음(`loading` prop은 UI-web 컴포넌트 내부 구현에 의존). `data-testid`/`aria-*`/`role` 속성이 한 곳도 없음. `Stat` 컴포넌트(`:115-120`)의 label/value 렌더링 방식은 미확인(컴포넌트 정의 읽지 않음). `AllocationBarChart`(`:126-132`)의 차트 접근성(alt 텍스트, ARIA 차트 역할)은 미확인. `EmptyState`(`:181`)의 시맨틱 태그는 미확인 | 재조정 입력 필드에 `aria-label` 또는 `<label>` 누락(`PortfolioPage.tsx:157`). `Button`에 로딩 상태 접근성 속성 누락(`:173`). 전역 `data-testid` 없음(테스트 자동화 불가). 차트/Stat 컴포넌트의 a11y 구현은 미확인(컴포넌트 정의 읽지 않음) |
+| i18n/지역화 | react-i18next의 useTranslation 훅(`PortfolioPage.tsx:52`)으로 모든 사용자 가시 텍스트를 t()로 감쌈. 사용 키: legacy.portfolioPage.title1(타이틀), common.performanceNotGuaranteed(경고, `PortfolioPage.tsx:112`), legacy.portfolioPage.label2~4(통계), legacy.portfolioPage.t5~14(테이블/버튼/메시지), legacy.errorMessage.*(에러 메시지 — ErrorMessage 컴포넌트 내부). 모두 `docs/frontend/facts/PortfolioPage.facts.md`의 Visible texts 테이블에 기록됨. 카탈로그: `catalog.ko.legacyD.ts:218-233`에 legacy.portfolioPage.t1~t14 전체 ko 번역 존재. `catalog.en.legacyD.ts:216-231`에 en 번역 모두 존재. 누락 키 없음. t("legacy.portfolioPage.t12", { adjusted, pendingApproval })는 중첩 보간 지원(`:177`). t("legacy.portfolioPage.t14")는 에러 경로(`:81`)에서 fallback 메시지 | 없음 — 모든 가시 텍스트가 t()로 감싸져 있고, ko/en 카탈로그 모두 누락 키 없음 |
+| 성능 예산 | `usePortfolio`(`shared-hooks/src/usePortfolio.ts:12`)는 `useQuery` 1회 호출 — `refetchInterval` 없음(마운트 시 1회만 GET). 폴링 없음. `useRebalancePortfolio`(`:15`)는 `useMutation` — `onSuccess`에서 `qc.invalidateQueries(["portfolio"])`로 수동 갱신((`PortfolioPage.tsx:54`의 훅 정의 참조). `useIdempotentSubmit`(`:55`)은 상태 관리 오버헤드 없음(키 수명 주기만 관리). `drafts`(`useState<Record<number, string>>`, `:56`)는 변경 시 재렌더 — 행 수에 비례한 리렌더 발생 가능. `error`(`:57`)도 `useState`로 변경 시 재렌더. `handleRebalance`(`:65`)는 `adjustments.length === 0`이면 즉시 return(빈 제출 방지). react-query 기본 설정 사용(전역 `QueryClient` 기본값, `main.tsx:15`). 렌더 트리거: 데이터 변경, `drafts`/`error` 변경, `rebalance.isPending` 변경 | 폴링 없음(예산에 유리). 다만 `drafts` 상태가 행 수에 비례해 변경되면 전체 `<table>` 재렌더 — 행이 100개 이상이면 성능 저하 가능(현재는 전략 수에 비례하므로 실전에서는 수십 개 수준). `AllocationBarChart`의 렌더 비용은 미확인 |
+| 텔레메트리 | `reportError`, `captureException`, `logEvent`, `analytics`, `telemetry`, `trackEvent` 등 오류 보고/분석 호출이 한 곳도 없음(`PortfolioPage.tsx` 전역 AST 검색 결과 0건). `routeApiError`(`:33`)로 에러를 분류하지만, 분류 결과를 외부에 보고하지 않음. `console.warn` 호출도 없음(`useIdempotentSubmit` 내부의 `missing_header` 처리(`:51-57`)는 이 파일 범위가 아님 | 구현되지 않음 — 에러 발생 시 화면에만 표시하고 외부 모니터링/분석 도구로 보고하지 않음. `RebalanceError`의 `error` 상태(`:172`)와 `routedPortfolioError`(`:61`)가 모두 화면 전용 |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
