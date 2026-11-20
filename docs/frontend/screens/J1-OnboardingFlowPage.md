@@ -117,9 +117,9 @@
 <!-- BLOCK:J1-OnboardingFlowPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 전략 생성(`useCreateStrategy`/`useGenerateWizardStrategy`/`useGenerateFromPrompt`) 후 전략 목록(`useMyStrategies`)이 자동 갱신되어야 함 | mutation 성공 시 `["myStrategies"]` 키 무효화 콜백이 없음. 생성 후 페이지 이동하거나 윈도우 포커스 시에만 재조회됨 (`shared-hooks/src/useStrategyBuilder.ts:31,51,57` — mutation 성공 콜백에 목록 무효화 없음. 참고: `onSuccess` 패턴은 `ConnectionWizardPage.tsx:67`에서 사용 중) | 중 | 후순위 — 매번 새로 고침 가능하나 UX 저하. mutation 내 성공 콜백에 `queryClient.invalidateQueries({ queryKey: ["myStrategies"] })` 추가 필요 |
+| G2 | 조회 실패(`isError`) 시 사용자에게 에러 메시지·토스트·재시도 버튼 표시 | `OnboardingFlowPage.tsx:52-54`에서 `isError`가 `deriveOnboardingProgress`로만 전달됨. fail-closed(`false`)로 진행도 계산될 뿐, 화면에 에러 UI 미표시 (`OnboardingFlowPage.tsx:50-54` — `isLoading`/`isComplete` 분기 외 별도 에러 핸들링 없음) | 중 | `credentials.isError` 등 각 훅의 `isError`를 분기하여 에러 메시지 카드 또는 토스트 표시, 재시도 버튼 추가 필요 |
+| G3 | i18n 키는 타입 안전해야 함 (`as any` 금지) | `t(step.titleKey as any)`가 3곳에서 사용됨 (`OnboardingFlowPage.tsx:87,88,95`). `OnboardingStepDef.titleKey`/`descriptionKey`/`ctaKey`가 `string` 타입이라 `i18next`의 strict 키 체크와 호환 안 됨 | 경 | `OnboardingStepDef`의 키 타입을 `keyof ReturnType<typeof t>`로 제한하거나, `as const as Parameters<typeof t>[0]` 등으로 타입 단언 보정 필요 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
