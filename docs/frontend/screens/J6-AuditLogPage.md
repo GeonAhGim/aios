@@ -96,7 +96,7 @@
 | 접근성(WCAG 2.2 AA) | 그랜트 ID Input에 `aria-label`(`AuditLogPage.tsx:76`). 나머지 3 Input(label3~5)에 aria-label 존재(`AuditLogPage.tsx:83,90,97`). Button에 label은 i18n(`t6`="조회", `AuditLogPage.tsx:110`). | `data-testid="audit-log-list"`(`AuditLogPage.tsx:121`)는 있으나 `LoadingState`/`EmptyState`에 testid 없음. |
 | i18n/지역화 | 모든 사용자 문구 `t("legacy.auditLogPage.*")` 키 사용(`AuditLogPage.tsx:72~143`, 총 13개 키). `new Date().toLocaleString()`(`AuditLogPage.tsx:126`)은 브라우저 locale 의존. | 날짜 포맷이 locale 의존적(`AuditLogPage.tsx:126`). `toLocaleString()` 대신 i18n 또는 ISO 문자열 권장. |
 | 성능 예산 | `DEFAULT_PAGE_SIZE = 20`(`AuditLogPage.tsx:14`). 페이지당 20항목 렌더링. React Query 기본 `staleTime=0` → 즉시 stale. | staleTime 미설정 — 매 렌더 시마다 stale 재검사로 불필요 리페치 가능성. |
-| 텔레메트리 | TODO | TODO | 확인한 텔레메트리(로깅·애널리틱스·RUM) 없음. `AuditLogPage.tsx` 전체에 telemetry 호출 없음. |
+| 텔레메트리 | 소스 AuditLogPage.tsx(전체 1~152줄) 스캔 결과 telemetry/애널리틱스/RUM 호출 없음. ErrorMessage 컴포넌트(`AuditLogPage.tsx:29`)가 traceId(`AuditLogPage.tsx:32`)를 표시하지만 외부 보고 호출은 미확인. | 확인한 텔레메트리(로깅·애널리틱스·RUM) 없음. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
