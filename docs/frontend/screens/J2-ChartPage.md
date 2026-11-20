@@ -83,7 +83,7 @@
 <!-- BLOCK:J2-ChartPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. ChartPage는 차트 표시·지표 오버레이·도형 그리기·리플레이·비교 심볼·즉시 백테스트만 수행하는 조회 전용 화면. 주문(order)/실행 생성(execution)/LIVE 전환/위임장 변경/출금/결제 등 금전·위험 행동이 전혀 없음. `BacktestPanel.tsx:109`의 `runQuickBacktest`는 `backtestsClient.runQuickBacktest`(POST `/v1/backtests/quick`)로 시뮬레이션 전용 API이며 실제 주문/체결을 생성하지 않음. `BacktestPanel.tsx:72`의 `orderTypes`는 백테스트 체결 시뮬레이션 파라미터일 뿐 실제 주문 생성이 아님. `ChartPage.tsx:61`의 `runQuickBacktest` prop 타입(`RunQuickBacktest`)도 `QuickBacktestResultView`만 반환(주문/실행 관련 필드 없음). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
