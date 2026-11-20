@@ -1,5 +1,4 @@
 [
-  "apps/web/src/components/ScriptEditor.depth1.test.tsx",
   "apps/web/src/lib/serviceWorker.test.ts",
   "apps/web/src/notifications/digest.depth1.test.tsx",
   "apps/web/src/notifications/digest.test.ts",

@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScriptEditor } from "./ScriptEditor";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 
 afterEach(cleanup);
 
@@ -95,13 +95,20 @@ describe("ScriptEditor depth1 — D2 하한 보강", () => {
       message: `ERR_${i}`,
     }));
 
-    const start = performance.now();
-    render(<ScriptEditor value={value} onChange={vi.fn()} markers={markers} rows={15} />);
-    const elapsed = performance.now() - start;
+    const renderOnce = () => {
+      const start = performance.now();
+      render(<ScriptEditor value={value} onChange={vi.fn()} markers={markers} rows={15} />);
+      const elapsed = performance.now() - start;
+      cleanup();
+      return elapsed;
+    };
+
+    // real-OS 호스트 부하를 bestOfMs(5)로 상쇄 — 단일 표본은 공유 CPU에 흔들림(task-26099)
+    const best = bestOfMs(renderOnce);
 
     // 실측: 약 8-15ms (M2 MacBook Pro, vitest run)
     // 예산: 30배 여유 = 15ms × 30 = 450ms → 안전 마진 추가해 1000ms
-    expect(elapsed).toBeLessThan(perfBudgetMs(1000));
+    expect(best).toBeLessThan(perfBudgetMs(1000));
   });
 
   // ── 게이트 적색 재현 ────────────────────────────────────────────────
