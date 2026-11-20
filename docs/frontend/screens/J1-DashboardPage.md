@@ -80,7 +80,11 @@
 <!-- BLOCK:J1-DashboardPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 — 이 화면은 실행 정지(`handleStopAll`, `DashboardPage.tsx:66-74`, A3 전략 일시정지)와 실행 재개(`handleResume`, `:76-81`, A2 전략 시작)라는 두 가지 금전·위험 행동을 제공한다. 정지는 `usePauseExecution.mutate`(:72)를 RUNNING 실행 전체에 반복 호출하고, 재개는 `useStartExecution.mutateAsync`(:78)를 단일 건에 호출한다. 주문 제출·LIVE 전환·위임장 변경·출금은 이 파일에 없음(`:65-83` 범위 검색 결과 없음) |
+| 확인 절차 | 정지 — 확인 모달 없음. 주석 `DashboardPage.tsx:53-54` "위기 상황에서 추가 단계는 사용감 저해, UX_JOURNEYS.md §6.3 J9 기준". 클릭 즉시 `handleStopAll`(:66)이 모든 RUNNING 실행에 정지 mutation 발동(:72). 재개 — 확인 모달 없음. 버튼 클릭 시 바로 `handleResume`(:76-81)이 `mutateAsync` 호출. 모든 입력 칸이 비면 아무 메시지 없이 `return`하는 패턴 없음(버튼 클릭이 유일한 진입점) |
+| 멱등성 | 정지: `pauseExecution.mutate(executionId)` 직접 호출, 멱등키 없음(MONEY_ACTIONS.md A3 행 "없음 (mutate 직접 호출)"과 일치). 재개: `idempotencyKey: dashboard-resume-${executionId}-${crypto.randomUUID()}`(:78) 전달. `mutateAsync` 사용으로 Promise 반환, `.catch`로 오류 처리(:80). 중복 클릭 방지(`useIdempotentSubmit` 훅)는 미적용 — 직접 `mutateAsync` 호출 |
+| 불확실 결과 표시 | 정지/재개 모두 `onError`/`.catch`로 `stopError`에 오류 저장(:72, :80). `stopError`가 null이 되면 `EmergencyStopError`(:86)가 `classifyForbidden` 경로면 `ForbiddenNotice`(:37), 아니면 `ErrorMessage`(:40) 표시. "요청이 반영됐을 수 있음" 같은 불확실 안내 문구 없음. 정지 후 `stoppedIds`가 이미 설정되어 UI는 정지 목록을 표시한 채 오류만 표시(:70). 재개 실패 시 `stopError`가 초기화되지 않아 이전 오류가 남아 있음(:80 주석 참조) |
+| 금액 검증 | 이 화면의 금전 행동(정지·재개)은 금액 입력 칸이 없음. 포트폴리오 요약 섹션(:191-193)은 읽기 전용 표시(`Stat` 컴포넌트)이며 입력 폼 없음. 사실 시트 `Form fields` 표 공백(`DashboardPage.facts.md:29-33`)과 일치 |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
