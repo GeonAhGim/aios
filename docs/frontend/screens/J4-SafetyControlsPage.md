@@ -40,10 +40,10 @@
 <!-- BLOCK:J4-SafetyControlsPage:st-a -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 로딩 | TODO | TODO | TODO | TODO |
-| 빈 상태 | TODO | TODO | TODO | TODO |
-| 정상 | TODO | TODO | TODO | TODO |
-| 낡은 데이터(신선도 초과) | TODO | TODO | TODO | TODO |
+| 로딩 | `useSafetyControls()`의 `isLoading === true` (`shared-hooks/src/useRiskGate.ts:13`) | `SafetyControlsPage.tsx:362`에서 `<LoadingState />` 표시 | 없음(로딩 중 동작 불가) | `구현됨` — `SafetyControlsPage.tsx:361-362` (`isLoading` 분기, `<LoadingState />` 컴포넌트 사용) |
+| 빈 상태 | `data.controls.length === 0` (`shared-hooks/src/useRiskGate.ts:15` 조회 결과 빈 배열) | `SafetyControlsPage.tsx:366`에서 `<EmptyState>{t("legacy.safetyControlsPage.t9")}</EmptyState>` — 문구: "활성 안전 통제가 없습니다." | 없음(활성 통제 없음) | `구현됨` — `SafetyControlsPage.tsx:366` (`data.controls.length > 0`이 거짓일 때), 문구 키 `legacy.safetyControlsPage.t9` (`:366`) |
+| 정상 | `data.controls.length > 0` (`shared-hooks/src/useRiskGate.ts:15` 조회 결과 비어 있지 않음) | `SafetyControlsPage.tsx:363-364`에서 `<ul>`로 각 통제 항목 렌더링 — `renderControl()`(`:285-349`)이 scope, scopeRef, StateBadge, reason, fenceToken, createdAt/deactivatedAt 표시. 활성 통제: 해제 버튼(`:304-313`), 복구 평가 입력+버튼(`:315-340`) | 1) 개통(`ActivateSafetyControlPanel`, `:113-143`), 2) 평가(`EvaluateRiskGatePanel`, `:161-185`), 3) 룰번들 승인/활성화(`RuleBundlePanel`, `:212-238`), 4) 해제(`:304-313`), 5) 복구 평가(`:315-340`) | `구현됨` — `SafetyControlsPage.tsx:363-364`, 각 패널 및 개별 통제 렌더링(`:285-349`) |
+| 낡은 데이터(신선도 초과) | `useSafetyControls()`에 스테일스태스 설정 없음(`shared-hooks/src/useRiskGate.ts:13-16`) — 기본값으로 매번 새로 조회 | 정상과 동일하게 표시되지만 매 마운트/리페치 시 서버에서 최신 데이터 가져옴 | 재조회 시 자동으로 최신화 | `구현됨` — 스테일스태스 미설정(기본 0, 매번 fetch), 폴링 없음(`shared-hooks/src/useRiskGate.ts:13-16`) |
 <!-- /BLOCK -->
 
 ### 3-b. 상태 매트릭스: 입력 오류·401·403·409
