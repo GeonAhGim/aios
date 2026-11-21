@@ -57,10 +57,10 @@
 <!-- BLOCK:J6-AccountDeletionPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 서버가 423 Locked 또는 429 Too Many Response 반환 | `AccountSecurityError` → `routeApiError`(`AccountDeletionPage.tsx:28`)가 `RoutedApiError`로 분류. `ErrorMessage`(`AccountDeletionPage.tsx:30`) 표시. 429일 때 `classifyRetry`(`shared-types/src/retryable.ts:40`)가 backoff_retry 판별 → `retryAfterSec` 카운트다운. 423 Locked는 일반 오류로 처리(구분 없음). | 429: 재시도 버튼(`legacy.errorMessage.t3`) 표시. 423: 재시도 버튼 없음(잠금 해제 대기). | `구현됨(429 부분만)` — 429는 backoff_retry 경로로 카운트다운과 재시도 버튼이 동작(`shared-types/src/retryable.ts:40`, `AccountDeletionPage.tsx:34`). 423 Locked는 별도 분류 없이 일반 ErrorMessage로 떨어짐. |
+| 서버 오류(5xx) | POST `account.whitelist` 또는 POST `account.deletion`이 5xx 반환 | `AccountSecurityError`(`AccountDeletionPage.tsx:25`) → `classifyBadRequest` false, `classifyForbidden` false → `routeApiError`(`AccountDeletionPage.tsx:28`) → `ErrorMessage`(`AccountDeletionPage.tsx:30`). `Alert tone="danger"`(`AccountDeletionPage.tsx:35`). | 재시도 버튼 — `classifyRetry`가 5xx를 refetch 가능 시 `legacy.errorMessage.t3` 버튼 표시(`shared-types/src/retryable.ts:40`). | `구현됨` — 5xx는 `ErrorMessage` + `Alert tone="danger"`로 표시, 재시도 가능 시 버튼 노출. |
+| 네트워크 단절 | API 호출 중 연결 끊김 — HTTP 응답 없음 | `mutateAsync` catch(`AccountDeletionPage.tsx:69`, `AccountDeletionPage.tsx:82`)에서 `err instanceof ApiError` false → `new Error(t("legacy.accountDeletionPage.t15"))` 또는 `new Error(t("legacy.accountDeletionPage.t17"))`. `AccountSecurityError` → `classifyBadRequest` false, `classifyForbidden` false, `routeApiError` — `error instanceof ApiError` false → `errorCode`/`traceId` undefined. `ErrorMessage`에 generic message만 전달(`AccountDeletionPage.tsx:30-34`). | 재시도 버튼 — `classifyRetry`가 Error를 backoff_retry로 분류하면 재시도 버튼 표시. | `구현됨(약한 형태)` — 네트워크 오류는 generic 메시지("등록에 실패했습니다." / "탈퇴 요청에 실패했습니다.")로 표시. traceId/errorCode 없음. 재시도 여부는 `classifyRetry` 판단에 의존. |
+| 부분 실패(일부 데이터만 실패) | 화이트리스트 등록은 성공했으나 탈퇴 요청이 실패하거나 그 반대 | Whitelist 등록 성공 시 `whitelistEntries` 쿼리 캐시가 무효화되고(`useAccountSettings.ts:35`) 새 데이터로 리페치됨. 탈퇴 요청 실패 시 `deleteError` 설정, 폼 유지. 두 요청은 독립적 — 트랜잭션 없음. | whitelist 등록 실패: `wlError` 설정, 폼 유지, 재시도 가능. 탈퇴 실패: `deleteError` 설정, 폼 유지, 재시도 가능. | `구현됨` — 두 mutation이 독립적으로 처리됨(`AccountDeletionPage.tsx:56-85`). 한쪽 실패가 다른 쪽 데이터에 영향 없음. |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
