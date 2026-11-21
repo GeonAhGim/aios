@@ -77,7 +77,7 @@
 <!-- BLOCK:J5-WalletPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 — 충전 신청 금액(`WalletPage.tsx:58-66`)이 금전 입력 필드. 1크레딧 = 1원(`WalletPage.tsx:58`). 최소 금액 1(`WalletPage.tsx:62`, `min="1"`). 기본값 30000원(`WalletPage.tsx:16`). `useRequestTopup`(`WalletPage.tsx:14`)이 `mutateAsync`로 POST 요청(`useWallet.ts:14-18`). `useIdempotentSubmit`(`WalletPage.tsx:15`)이 idempotency 키 관리로 중복 제출 방지(`useIdempotentSubmit.ts:30`). 성공 시 `onSuccess`로 잔액 쿼리 무효화(`useWallet.ts:17`). 429(RATE_LIMIT_EXCEEDED) 시 `ErrorMessage`가 백오프 카운트다운(`WalletPage.tsx:75`). 409(INTEGRITY_IDEMPOTENCY_CONFLICT) 시 `classifyIdempotencyFailure`가 "new_key" 판정 → 키 폐기 + 재제출 금지(`useIdempotentSubmit.ts:58`). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
@@ -85,9 +85,9 @@
 <!-- BLOCK:J5-WalletPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `routeApiError` (`frontend/apps/web/src/routes/wallet/WalletPage.tsx:42`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/wallet/WalletPage.tsx:71`) | TODO | TODO | TODO |
-| `Alert` (`frontend/apps/web/src/routes/wallet/WalletPage.tsx:80`) | TODO | TODO | TODO |
+| `routeApiError` (`WalletPage.tsx:42`) | `routeApiError`는 i18n 키 없음 — 판정 결과(`kind`)로 재시도 가능 여부만 결정(`WalletPage.tsx:43`). `backoff_retry`일 때 `canRetry=true`가 `ErrorMessage.onRetry`로 전달(`WalletPage.tsx:76`). | `backoff_retry`(예: RATE_LIMIT_EXCEEDED 429) — `ErrorMessage`가 백오프 카운트다운 + 재시도 버튼 표시(`WalletPage.tsx:75-76). `wallet_balance_drift`(409) — `error` 상태로 전달되지만 현재 화면에서는 재시도 없음(`errorRouting.ts:107`). 그 외 분류(`not_found`, `auth_required` 등) — `ProtectedRoute`(`router.tsx:141`)가 처리. | `ApiError.traceId`는 `ErrorMessage`로 전달되지 않음(`WalletPage.tsx:74`). `ErrorMessage` 컴포넌트가 `traceId` prop 받지만(`ErrorMessage.tsx:18`), `WalletPage.tsx:74`에서 `error instanceof ApiError ? error.traceId : null`로 전달 — ApiError일 때만 traceId 표시(`ErrorMessage.tsx:60`). |
+| `ErrorMessage` (`WalletPage.tsx:71`) | `ErrorMessage` 내부: `getApiErrorMessage(errorCode, message)`(`ErrorMessage.tsx:36`) — errorCode 매핑 또는 message 직출력. 재시도 안내: `legacy.errorMessage.t2`("{{remainingSec}}초 후 재시도 가능", `ErrorMessage.tsx:64`), `legacy.errorMessage.t3`("재시도", `ErrorMessage.tsx:67`). | `classifyRetry`가 "none"이 아닐 때 재시도 버튼 표시(`ErrorMessage.tsx:39`). `backoff`일 때 `remainingSec` 카운트다운(`ErrorMessage.tsx:50-52`). 0이 되면 버튼 활성화(`ErrorMessage.tsx:66). 버튼 클릭 시 `onRetry`(`WalletPage.tsx:76`)가 `attemptTopup()` 호출. | `ErrorMessage.traceId` 표시(`ErrorMessage.tsx:60`) — `legacy.errorMessage.t1`("Trace ID: {{traceId}}"). `DuplicateSubmitError`는 silently ignore(`WalletPage.tsx:29`). |
+| `Alert` (`WalletPage.tsx:80`) | `legacy.walletPage.t5`("충전 요청 #{{id}} 접수됨 ({{amount}} 크레딧) — 관리자 확인 대기 중", `WalletPage.tsx:81`). tone="success"(`WalletPage.tsx:80`). | 관리자 확인 대기 중 — 추가 행동 없음. 같은 화면 유지. 확인 후 별도 알림(텔레메트리/알림 센터) 배선 불명. | 없음(성공 메시지) |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
@@ -95,10 +95,10 @@
 <!-- BLOCK:J5-WalletPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `<Field>` 컴포넌트가 label prop 사용(`WalletPage.tsx:58`), `<Input type="number">`가 폼 내부에 있어 자동 라벨 연결(`WalletPage.tsx:59-66`). `<Button type="submit">`(`WalletPage.tsx:83`)이 폼 제출 트리거. `data-testid` 등 테스트용 식별자 확인 불가(컴포넌트 구현체 미확인). | `<Input type="number">`에 `aria-label` 또는 `label` 연결이 `<Field>` 컴포넌트 내부에 위임 — `<Field>` 구현체 확인 필요(미확인). `ErrorMessage`가 `Alert tone="danger"`로 렌더링(`ErrorMessage.tsx:58`) — 색상 대비 AA 준수 여부 미확인. |
+| i18n/지역화 | 모든 사용자 텍스트가 `t()`로 감싸짐(`WalletPage.tsx:48,50,58,69,81,84`). Facts 시트에 ko/en 매핑 7건 기록(`WalletPage.facts.md:10-18`). `ErrorMessage` 컴포넌트 내부 문구(`t1~t3`)도 i18n 키(`ErrorMessage.tsx:60,64,67`). | — |
+| 성능 예산 | `useWalletBalance`(`useWallet.ts:5-9`)는 React Query `useQuery`로 마운트 시 1회 조회, staleTime 기본값(5분). `useRequestTopup`(`useWallet.ts:12-18`)은 `useMutation`으로 변경 요청 전용. 로컬 상태 3건(`WalletPage.tsx:16-18`). 외부 데이터 2건(잔액 조회 1회, 충전 신청 1회). 폴링/사이드 이펙트 없음. | — |
+| 텔레메트리 | `ErrorMessage` 컴포넌트가 `traceId` prop 받음(`ErrorMessage.tsx:18`) — traceId를 외부로 전송하는 코드는 이 파일에서 보이지 않음. `Alert` 컴포넌트도 텔레메트리 발송 여부 미확인. `useIdempotentSubmit`이 idempotency 키 생성/폐기 로직 포함(`useIdempotentSubmit.ts:31-43,58-61`) — 키 생성 시 텔레메트리 기록 여부 미확인. | traceId 수집/전송, idempotency 키 생성 이벤트 등 텔레메트리 배선 여부 미확인(하위 컴포넌트 구현체 확인 필요) |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
@@ -106,9 +106,9 @@
 <!-- BLOCK:J5-WalletPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 마운트 시 `useWalletBalance`(`useWallet.ts:5-9`)가 API를 1회 호출하고, 로딩 중에는 `Stat` 컴포넌트가 "…"(`WalletPage.tsx:51`)을, 완료 시 `${balance?.balance ?? "0"} 크레딧`(`WalletPage.tsx:51`)을 표시한다 | `WalletPage.tsx:13,51` — `isLoading` 분기 확인. 컴포넌트 단위 테스트에서 `useQuery` 모킹 후 렌더링 확인. |
+| A2 | 폼 제출 시 `attemptTopup()`이 호출되고, `useIdempotentSubmit`이 idempotency 키를 헤더에 붙여 `requestTopup.mutateAsync`(`WalletPage.tsx:25`)를 1회 호출한다. 버튼은 `loading={requestTopup.isPending}`(`WalletPage.tsx:83`)으로 로딩 상태 표시 | `WalletPage.tsx:34-37,20-31,83` — `handleSubmit` → `attemptTopup` → `submit` 호출 체인 확인. `useIdempotentSubmit`의 `Idempotency-Key` 헤더 추가(`useIdempotentSubmit.ts:30`). |
+| A3 | 충전 신청 성공 시 `Alert tone="success"`(`WalletPage.tsx:80`)가 요청 ID와 금액을 표시하고, 실패 시 `ErrorMessage`(`WalletPage.tsx:71`)가 오류 메시지를 표시한다. 429(RATE_LIMIT_EXCEEDED) 시 재시도 버튼이 나타난다 | `WalletPage.tsx:27-31,42-43,71-77` — `submitted` 상태 시 `Alert` 렌더링, `error` 상태 시 `ErrorMessage` 렌더링. `canRetry`(`WalletPage.tsx:43`)가 `true`일 때 `onRetry` 전달. `ErrorMessage.tsx:61-68`에서 재시도 버튼 조건부 렌더링 확인. |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -116,9 +116,9 @@
 <!-- BLOCK:J5-WalletPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 충전 신청 금액의 최대값 제한(예: 100만 원) | `<Input type="number">`에 `max` prop 없음(`WalletPage.tsx:62`). 클라이언트 측 최대값 검증 없음. 서버 측 검증 여부 미확인. | 낮(서버에서 최대값 검증하면 됨) | 서버 검증 확인 또는 클라이언트 `max` prop 추가 |
+| G2 | 성공 후 폼 리셋(입력값 초기화) | `attemptTopup` 성공 시 `setSubmitted`만 호출하고 `setAmount`를 초기화하지 않음(`WalletPage.tsx:27`). 동일 화면에서 두 번째 충전 시 이전 금액이 유지됨. | 낮(사용자 경험 개선) | 성공 시 `setAmount("30000")` 호출 추가 |
+| G3 | `ErrorMessage` 컴포넌트의 `traceId` 표시가 `WalletPage.tsx:74`에서 전달되는지 검증 | `WalletPage.tsx:74`에서 `error instanceof ApiError ? error.traceId : null`로 traceId 전달 — ApiError가 아닐 때 `null`. `ErrorMessage.tsx:60`에서 `traceId &&` 조건부 표시. 구현은 올바르나 traceId가 실제 채워지는지 백엔드 배선 확인 필요. | 낮(배선 확인) | 백엔드 ApiError.traceId 배선 확인 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
