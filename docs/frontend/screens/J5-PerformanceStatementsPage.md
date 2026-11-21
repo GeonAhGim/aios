@@ -79,7 +79,11 @@
 <!-- BLOCK:J5-PerformanceStatementsPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음 — 이 화면은 실적 명세서 조회·정정 전용이며, 금전·위험 행동(A1~A12: 주문, 전략 시작/정지/종료, LIVE 전환, 출금/충전, 위임장 변경, 킬스위치, 승인 설정 변경, 리밸런싱 등)이 없다. 있는 mutation은 두 개뿐: `computeStatement` (`PerformanceStatementsPage.tsx:208-217`, `apiClient.computePerformanceStatement`) — 명세서 계산 요청으로 데이터 재계산이며 자금 이동/주문/실행 상태 변경이 아님. `correctStatement` (`PerformanceStatementsPage.tsx:103-109`, `apiClient.correctPerformanceStatement`) — 명세서 정정 사유 제출로 데이터 정정 요청이며 금전 동작을 수반하지 않음. `routes/portfolio/PerformanceStatementsPage.tsx:52-57` 범위 내 API 호출 모두 GET 또는 명세서 데이터 조작에 국한됨. |
+| 확인 절차 | 해당 없음 — 금전 행동 자체가 없음 | 해당 없음 |
+| 멱등성 | 해당 없음 — 상태 변경 API 호출이 없음(`PerformanceStatementsPage.tsx:52-57` 범위 내 mutation은 compute/correct 둘 다 금전 행동 아님) | 해당 없음 |
+| 불확실 결과 표시 | 해당 없음 — 비동기 서버 호출이 compute/correct 두 개뿐이며 둘 다 금전 행동이 아님. `correct.isError` 시 `ErrorMessage` 렌더링(`:189-194`), `compute.isError` 시 동일(`:266-271`) — 이는 일반적인 API 오류 표시일 뿐 금전 행동 불확실 결과 처리가 아님 | 해당 없음 |
+| 다음 단계 화면의 금전 행동 | 미확인 — 이 리프의 범위는 현재 화면(`PerformanceStatementsPage.tsx`)뿐. 정정/계산 성공 시 `refreshAfterMutation`로 쿼리 무효화(`:313-314, 415, 216`)하여 목록/상세 갱신만 수행하고 다른 화면으로 네비게이트하지 않음 | 미확인 |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
