@@ -46,10 +46,10 @@
 <!-- BLOCK:J6-AccountDeletionPage:st-b -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 입력 오류(400/검증) | TODO | TODO | TODO | TODO |
-| 인증 필요/세션 만료(401) | TODO | TODO | TODO | TODO |
-| 권한 없음/MFA 필요(403) | TODO | TODO | TODO | TODO |
-| 충돌/상태 불일치(409) | TODO | TODO | TODO | TODO |
+| 입력 오류(400/검증) | `classifyBadRequest`(`AccountDeletionPage.tsx:26`)가 true — `statusCode===400` (`shared-types/badRequest.ts:34-42`) | `BadRequestNotice`(`AccountDeletionPage.tsx:26`) — `getApiErrorMessage`(`apiError.ts:106`) | kind별 안내: field→인라인 필드 오류, disclosure_retired→재조회 버튼, mfa_invalid→코드 재입력 | `구현됨` (`AccountDeletionPage.tsx:26`, `shared-types/badRequest.ts:34`) |
+| 인증 필요/세션 만료(401) | `classifyBadRequest`→null, `classifyForbidden`→null, `routeApiError`(`errorRouting.ts:88`)→`isSessionExpiredErrorCode`(`apiError.ts:124`)→`{kind:"auth_required"}` | `ErrorMessage`(`AccountDeletionPage.tsx:30`) — `legacy.errorMessage.t1({traceId})`. 전용 401 컴포넌트 없음 | 로그인 페이지 리다이렉트 UI 없음 — `ErrorMessage`만 표시 | `구현됨` (fallthrough, `AccountDeletionPage.tsx:28-36`, `errorRouting.ts:128-129`) |
+| 권한 없음/MFA 필요(403) | `classifyForbidden`(`AccountDeletionPage.tsx:27`)가 true — `statusCode===403` (`shared-types/forbidden.ts:31-41`) | `ForbiddenNotice`(`AccountDeletionPage.tsx:27`) — `getApiErrorMessage`(`apiError.ts:106`) | `policy`: DenialReasons 표시, `mfa_required`: onStepUp 버튼(현재 미전달), 나머지: 재시도 버튼 없음 | `구현됨` (`AccountDeletionPage.tsx:27`, `shared-types/forbidden.ts:31`) |
+| 충돌/상태 불일치(409) | `classifyBadRequest`→null, `classifyForbidden`→null, `routeApiError`(`errorRouting.ts:88`)→`classifyStateConflict` 또는 `INTEGRITY_WALLET_BALANCE_DRIFT`/`DATA_COVERAGE_MISSING` 체크 | `ErrorMessage`(`AccountDeletionPage.tsx:30`) — traceId 노출(`AccountDeletionPage.tsx:33`). 전용 409 컴포넌트 없음 | 재시도 없음(수집 후 재요청) — `ErrorMessage`만 표시 | `구현됨` (fallthrough, `AccountDeletionPage.tsx:28-36`, `errorRouting.ts:111-113`) |
 <!-- /BLOCK -->
 
 ### 3-c. 상태 매트릭스: 잠김/속도 제한·서버 오류·네트워크·부분 실패
