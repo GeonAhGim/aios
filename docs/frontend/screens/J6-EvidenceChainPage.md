@@ -68,9 +68,9 @@
 <!-- BLOCK:J6-EvidenceChainPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:79`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:123`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:131`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:79`) [handleVerify] | `verify.isPending === false`. `tenantId` 상태의 현재 값. [확인: `EvidenceChainPage.tsx:56-58`] | `verify.mutate(tenantId.trim() || undefined)` 호출. [확인: `EvidenceChainPage.tsx:57`] mutation 시작 → `isPending=true` → 버튼에 `loading` 표시(`EvidenceChainPage.tsx:79`). 서버 응답 후 `isSuccess` 또는 `isError`로 분기. | `verify.isError` 시 `EvidenceActionError(verify.error)` 렌더(`EvidenceChainPage.tsx:87-91`). 403 → `ForbiddenNotice`, 그 외 → `ErrorMessage` (traceId+retryAfterSec). [확인: `EvidenceActionError` 정의 `:17-29`] | 화면 이동 없음. 같은 페이지에 `verify.isSuccess && verify.data` 조건으로 `검증 결과: <StatusBadge status={verify.data.verified ? "SUCCESS" : "ERROR"} />` 표시(`EvidenceChainPage.tsx:82-85`). |
+| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:123`) [pager.prev] | `pager.hasPrev === true` AND `timeline.isFetching === false`. [확인: `EvidenceChainPage.tsx:128 disabled={!pager.hasPrev \|\| timeline.isFetching}`] | `pager.prev()` 호출. [확인: `EvidenceChainPage.tsx:127`] `useCursorPage.prev()`가 이전 커서로 상태 변경(`hooks/useCursorPage.ts:25`). `useAuditTimeline`이 새 cursor로 재조회(`useEvidence.ts:16-18`). [확인: `EvidenceChainPage.tsx:44`] | `timeline.isFetching` 동안 버튼 비활성화 — 재요청 불가. [확인: `EvidenceChainPage.tsx:128`] | 화면 이동 없음. 같은 페이지에서 타임라인 목록이 이전 페이지 데이터로 교체. `committed` 상태가 `timeline.data.nextCursor`로 동기화(`EvidenceChainPage.tsx:46-51`). |
+| `<Button>` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:131`) [pager.next] | `pager.hasNext === true` AND `timeline.isFetching === false`. [확인: `EvidenceChainPage.tsx:136 disabled={!pager.hasNext \|\| timeline.isFetching}`] | `pager.next()` 호출. [확인: `EvidenceChainPage.tsx:135`] `useCursorPage.next()`가 다음 커서로 상태 변경(`hooks/useCursorPage.ts:25`). `useAuditTimeline`이 새 cursor로 재조회(`useEvidence.ts:16-18`). [확인: `EvidenceChainPage.tsx:44`] | `timeline.isFetching` 동안 버튼 비활성화 — 재요청 불가. [확인: `EvidenceChainPage.tsx:136`] | 화면 이동 없음. 같은 페이지에서 타임라인 목록이 다음 페이지 데이터로 교체. `committed` 상태 동기화(`EvidenceChainPage.tsx:46-51`). |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
@@ -78,7 +78,7 @@
 <!-- BLOCK:J6-EvidenceChainPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. 이 화면은 증빙 감사 체인의 무결성 검증(AUD-003)과 타임라인 이벤트 조회만 수행하며, 금전 거래(amount/price/fee 등 Decimal 대상)를 포함하지 않음. `useVerifyAuditChain` 훅의 `mutationFn`은 `tenantId` 문자열만 받고(`useEvidence.ts:24`), `verify.data.verified`는 boolean 판정만 반환. 타임라인 이벤트의 `outcome` 필드는 `StatusBadge`로 시각화할 뿐 금전 값 없음(`EvidenceChainPage.tsx:108`). |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
@@ -86,10 +86,10 @@
 <!-- BLOCK:J6-EvidenceChainPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyForbidden` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:18`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:18`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:19`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:21`) | TODO | TODO | TODO |
+| `classifyForbidden` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:18`) | `classifyForbidden`은 함수 호출 — 사용자 문구 없음. `error instanceof ApiError && error.statusCode === 403` 판정. [확인: `shared-types`의 `classifyForbidden` 구현] | 403 응답 감지 시 `ForbiddenNotice` 컴포넌트 렌더로 전달(`EvidenceChainPage.tsx:18`). [확인: `EvidenceActionError` 정의 `:17-29`] | 노출 없음. |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:18`) | `이 작업을 수행할 권한이 없습니다.` (i18n 키 미확인 — `ForbiddenNotice` 컴포넌트 내부 고정 문구). [확인: `ForbiddenNotice` 컴포넌트 정의 위치 미확인] | 재시도 버튼 없음. 사용자가 다른 액션으로 복귀 필요(예: 다른 admin 페이지 이동 또는 관리자 문의). [확인: `ForbiddenNotice` 구현에서 onRetry prop 없음] | 노출 없음. |
+| `routeApiError` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:19`) | `routeApiError`는 내부 라우팅 함수 — 사용자 문구 없음. error 객체를 분석해 fatal, backoff_retry, unknown 등으로 분류. [확인: `shared-types/src/serverError.ts` 또는 유사 모듈] | 분류 결과에 따라 `ErrorMessage`에 적절한 prop 전달(traceId 또는 retryAfterSec). [확인: `EvidenceActionError` 정의 `:19-26`] | 함수 자체는 노출 안 함. |
+| `ErrorMessage` (`frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:21`) | 서버 오류 분류에 따른 동적 문구. `apiError.ts EXACT_MESSAGES`에서 `errorCode` 매핑. [확인: `ErrorMessage` 컴포넌트 정의 위치 미확인] | fatal 라우트(500/502): traceId 표시, 재시도 버튼 없음. backoff_retry(429/503): retryAfterSec 카운트다운 후 재시도 버튼 활성화. unknown: error.message 표시, 재시도 버튼 없음. [확인: `EvidenceActionError` 정의 `:21-27`] | `error instanceof ApiError ? error.traceId : undefined`로 traceId 전달(`EvidenceChainPage.tsx:24`). ApiError가 아니면 traceId undefined. |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
@@ -97,10 +97,10 @@
 <!-- BLOCK:J6-EvidenceChainPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | 버튼에 `type="button"` 명시(`EvidenceChainPage.tsx:79,124,132`). `loading` prop으로 비활성화 시 시각적 피드백. [확인: `Button` 컴포넌트의 `loading` prop 처리] StatusBadge가 `status` prop으로 SUCCESS/ERROR 구분 — 색상 외 의미 부가 필요(WCAG 2.2 AA 1.4.1). `EmptyState`/`LoadingState`에 aria-label prop 전달 여부 미확인. [확인: `ui-web`의 EmptyState/LoadingState 정의] | `StatusBadge`의 SUCCESS/ERROR가 색상만으로 구분될 경우 1.4.1 위반 — `aria-label` 또는 아이콘 부가 필요. `EvidenceActionError` 렌더 시 `role="alert"` 또는 `aria-live` 속성 부가 필요(동적 에러 메시지 알림). Input 필드에 `aria-describedby` 또는 label 미확인(`EvidenceChainPage.tsx:72-78`). |
+| i18n/지역화 | 모든 사용자-facing 텍스트가 `t("legacy.evidenceChainPage.*")` i18n 키로 감싸짐. [확인: `EvidenceChainPage.tsx:65,68,70,74,80,84,95,114,119,130,138`] 키는 facts 시트에 ko/en 번역 모두 기록됨. [확인: `EvidenceChainPage.facts.md:10-22`] `new Date(event.occurredAt).toLocaleString()` — 로케일 의존적 날짜 표시. [확인: `EvidenceChainPage.tsx:111`] | `toLocaleString()`은 브라우저 로케일에 따라 날짜 형식 변경 — 감사 기록의 일관성 위해 ISO 8601 고정 형식 또는 `t()` 키 권장. `legacy.` 접두사 — i18n 키 네임스페이스가 레거시 모듈에 속함(마이그레이션 필요성 미확인). [확인: `EvidenceChainPage.tsx:65`] |
+| 성능 예산 | `useCursorPage`는 비 네트워크 훅 — 상태 관리만 담당(`hooks/useCursorPage.ts:25`). `useAuditTimeline`은 React Query 캐시 — 동일 cursor로 재조회 시 네트워크 호출 없음. [확인: `useEvidence.ts:15-19`] `items.map()`으로 렌더 — 이벤트 수 제한(limit: 20)으로 최대 20 Li 렌더. [확인: `EvidenceChainPage.tsx:44,102`] `committed` 상태 동기화(line 46-51)는 `timeline.data` 변경 시만 `setCommitted` 호출 — unnecessary re-render 최소화. | `items.map()`에서 key로 `event.id` 사용 — 안정적(idempotent) ID 사용 적절. [확인: `EvidenceChainPage.tsx:102`] `new Date(event.occurredAt).toLocaleString()` 매 렌더에서 실행 — pre-formatting으로 최적화 가능(미확인: React memoization 사용 여부). [확인: `EvidenceChainPage.tsx:111`] 성능 측정 테스트 존재(`EvidenceChainPage.depth1.test.tsx:218-223`), budget < 500ms. |
+| 텔레메트리 | 페이지별 telemetry(화면 조회, 에러 추적) 코드가 EvidenceChainPage.tsx에서 직접 호출되지 않음. [확인: `frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:1` 전체] React Query의 `onError` 콜백이나 `useQuery` 옵션에서 telemetry 등록 여부 미확인. [확인: `useEvidence.ts:15-19`] | 명시적 telemetry(화면 조회, 에러 발생 횟수 등)가 없음. `react-query` observer 패턴으로 간접 수집될 가능성 있으나 명시적 추적 없음. [확인: `frontend/apps/web/src/routes/admin/EvidenceChainPage.tsx:1`] |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
@@ -108,9 +108,9 @@
 <!-- BLOCK:J6-EvidenceChainPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | 체인 검증 버튼 클릭 시 `useVerifyAuditChain.mutate()`가 `tenantId.trim() || undefined`로 호출된다. [확인: `EvidenceChainPage.tsx:57`] | `frontend/apps/web/src/routes/admin/EvidenceChainPage.test.tsx` — "테넌트 ID 없이 클릭하면 undefined로 mutate를 호출한다", "테넌트 ID를 입력하면 그 값으로 mutate를 호출한다" (line 181-196). |
+| A2 | 타임라인 조회 실패(500) 시 EmptyState가 아닌 `ErrorMessage`를 표시하고, 403 시 `ForbiddenNotice`를 표시한다. [확인: `EvidenceActionError` 정의 `:17-29`] | `frontend/apps/web/src/routes/admin/EvidenceChainPage.test.tsx` — "negative: 타임라인 조회가 500으로 실패하면 ErrorMessage", "negative: 타임라인 조회가 403으로 실패하면 ForbiddenNotice" (line 106-136). |
+| A3 | 페이지네이션 버튼(prev/next)은 `pager.hasPrev/hasNext`와 `timeline.isFetching`이 모두 조건이 되어 활성화/비활성화된다. [확인: `EvidenceChainPage.tsx:128,136`] | `frontend/apps/web/src/routes/admin/EvidenceChainPage.test.tsx` — "next 버튼이 활성화된다"(line 176), "negative: 타임라인 로딩 중 next 버튼이 비활성화된다"(line 159-167). |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -118,9 +118,9 @@
 <!-- BLOCK:J6-EvidenceChainPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 타임라인 조회 실패(isError) 시 에러 배너 표시 — EmptyState와 구분 필요. [요구: AUD-003 오류 가시성] | `timeline.isError` 조건문이 없음. `EvidenceChainPage.tsx:96-98`에서 `<EvidenceActionError>` 렌더는 있으나, `timeline.isError`가 true일 때만 렌더됨. [확인: `EvidenceChainPage.tsx:96`] | 중 — 5xx 에러와 빈 데이터를 EmptyState로 혼동 가능. | 구현됨. `EvidenceChainPage.tsx:96-97`에서 `timeline.isError ? <EvidenceActionError ... />` 분기 확인. |
+| G2 | 날짜 표시가 로케일 독립적이어야 함(감사 기록). | `new Date(event.occurredAt).toLocaleString()` 사용 — 브라우저 로케일에 의존. [확인: `EvidenceChainPage.tsx:111`] | 저 — 감사 기록의 일관성 측면에서 권장 수준. | 개선 필요. `t()` 키 또는 ISO 8601 고정 형식 권장. |
+| G3 | `EvidenceActionError` 컴포넌트가 `onRetry` prop을 `verify.isError` 케이스에 전달하지 않음. | `EvidenceChainPage.tsx:89` — `<EvidenceActionError error={verify.error} />`로 `onRetry` 미전달. 네트워크 실패 시 재시도 버튼 없음. [확인: `EvidenceChainPage.tsx:87-91`] | 저 — 네트워크 복구 후 페이지 새로고침으로 대체 가능. | 개선 옵션. `onRetry={() => timeline.refetch()}`를 `verify` 케이스에도 전달 가능. |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
