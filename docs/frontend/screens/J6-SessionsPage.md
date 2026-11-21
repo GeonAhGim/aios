@@ -67,8 +67,8 @@
 <!-- BLOCK:J6-SessionsPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/settings/SessionsPage.tsx:105`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/settings/SessionsPage.tsx:182`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/settings/SessionsPage.tsx:105`) — 폐기 | `view.canRevoke` true(`SessionsPage.tsx:104`), 현재 세션 아님(`isCurrentSession` false). `disabled` false(`SessionsPage.tsx:104`, `pendingId !== view.sessionId`). | `window.confirm` 확인 후 `handleRevoke(view)`(`SessionsPage.tsx:142-163`) — `client.revoke(view.sessionId)`(`SessionsPage.tsx:146`). 성공 시 `setPendingId(view.sessionId)`(`SessionsPage.tsx:148`) → `queryClient.invalidateQueries({queryKey:["sessions"]})`(`SessionsPage.tsx:157`)로 목록 갱신. 현재 세션이면 `navigate("/login",{replace:true})`(`SessionsPage.tsx:154`). | `client.revoke`가 예외 던짐 → `actionError`에 저장(`SessionsPage.tsx:159`) → `ErrorBanner(error={actionError})`(`SessionsPage.tsx:188`) 표시. `setPendingId(null)`(`SessionsPage.tsx:161`)로 버튼 비활성화 해제. | 동일 화면(`SessionsPage.tsx:188` 에러 표시 후 대기). |
+| `<Button>` (`frontend/apps/web/src/routes/settings/SessionsPage.tsx:182`) — 전체 로그아웃 | 사용자가 "전체 로그아웃" 버튼 클릭. `pendingAll` false(`SessionsPage.tsx:182`, `loading={pendingAll}`으로 로딩 가드). | `window.confirm` 확인(`SessionsPage.tsx:169`) → `client.revokeAll()`(`SessionsPage.tsx:172`) → `logoutClient.logoutAll()`(`SessionsPage.tsx:173`, best-effort) → `navigate("/login",{replace:true})`(`SessionsPage.tsx:173`). | `logoutAll`은 best-effort이므로 실패 분기 없음(`SessionsPage.tsx:173`). 무조건 `/login`으로 리다이렉트. | `/login`(`SessionsPage.tsx:173`) — `replace:true`로 뒤로가기 불가. |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
