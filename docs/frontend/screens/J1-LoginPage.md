@@ -115,7 +115,7 @@
 <!-- BLOCK:J1-LoginPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | MFA hint 텍스트가 i18n 키로 번역되어야 함 — `frontend/packages/shared-types/src/errorRouting.ts:41~67`의 `RoutedApiError`가 아닌, UI 텍스트이므로 i18n catalog에 등록 | `LoginPage.tsx:88`에서 `hint="설정한 경우만 입력"`이 하드코딩 한글. `catalog.ko.legacyB.ts`에 해당 키 없음 | 중 | `legacy.loginPage.hint1` 키 추가 후 `hint={t("legacy.loginPage.hint1")}`으로 변경 |
+| G1 | MFA hint 텍스트가 i18n 키로 번역되어야 함 — `frontend/packages/shared-types/src/errorRouting.ts:41~67`의 `RoutedApiError`가 아닌, UI 텍스트이므로 i18n catalog에 등록 | `LoginPage.tsx:88`에서 `hint="설정한 경우만 입력"`이 하드코딩 한글. `catalog.ko.legacyB.ts`에 해당 키 없음 | 중 | legacy.loginPage.hint1 키 추가 후 `hint={t("legacy.loginPage.hint1")}`으로 변경 |
 | G2 | MFA(TOTP) 입력 필드에 `autoComplete="one-time-code"` 속성이 있어야 함 — WCAG 2.2 AA 1.3.5(입력 목적 인식) 및 자동완성 도구 호환성 | `LoginPage.tsx:89~96`의 `Input`에 `autoComplete` 속성 누락. 이메일(:71)·비밀번호(:82)는 설정됨 | 중 | `Input`에 `autoComplete="one-time-code"` 추가 |
 | G3 | `useLogin` 훅의 `retry` 옵션 명시 — 네트워크 오류 시 자동 재시도 여부를 명세서에 기록하고 코드에 명시 | `useAuth.ts:32~41`의 `useLogin`이 `useMutation`을 `retry` 옵션 없이 호출. React Query mutation 기본값은 `retry: false`이나 코드에 명시되지 않음 | 저 | `useLogin`의 `useMutation` 옵션에 `retry: false` 명시 추가 |
 <!-- /BLOCK -->
