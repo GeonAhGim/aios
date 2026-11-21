@@ -94,10 +94,10 @@
 <!-- BLOCK:J4-SafetyControlsPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyForbidden` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:35`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:35`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:36`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:38`) | TODO | TODO | TODO |
+| `classifyForbidden` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:35`) | 순수 분류기 — 사용자 문구 없음. 403 응답을 "mfa_required"/"tenant_mismatch"/"policy"/"forbidden" 중 하나로 수렴. 문구 생성은 `ForbiddenNotice`가 전담. | — | 아니요. 분류기 자체는 trace_id를 읽지 않음(`frontend/packages/shared-types/src/forbidden.ts:31`) |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:35`) | `getApiErrorMessage()`로 `EXACT_MESSAGES` 매핑 재사용(공통 에러 매핑). MFA 갈래일 때만 `legacy.forbiddenNotice.t1`("step-up 인증" / "Step-up authentication") 버튼 문구. 정책 갈래는 `DenialReasons`가 `describeReasonCode()`로 사유 목록 표시. | mfa_required: "step-up 인증" 버튼 클릭 시 `onStepUp` 호출(이 페이지에서는 prop 전달 안 함 → 버튼 미노출). 나머지 갈래: 메시지만 표시, 재시도 버튼 없음(재시도 시 동일 결과 반복). | 아니요. `ForbiddenNotice`는 trace_id를 렌더링하지 않음(`frontend/apps/web/src/components/ForbiddenNotice.tsx:38-48`) |
+| `routeApiError` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:36`) | 순수 라우터 — 사용자 문구 없음. `RoutedApiError` 구조체로 24개 error_code를 갈래별 타입으로 분해. `SafetyControlActionError`에서는 `routed.kind === "backoff_retry"`로 재시도 타이머 여부만 판정. | — | 아니요. 이 호출 행에서는 trace_id를 추출하지 않음(`frontend/packages/shared-types/src/errorRouting.ts:86`). trace_id는 `classifyServerError` 내부에서만 `server_fatal` 갈래에 담김 |
+| `ErrorMessage` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:38`) | `getApiErrorMessage(errorCode, message)`로 메시지 결정. 재시도 가능 시: `legacy.errorMessage.t1`("Support code: {{traceId}}"), `legacy.errorMessage.t2`("Retry available in {{remainingSec}}s"), `legacy.errorMessage.t3`("Retry"). | classifyRetry(kind)가 "none" 아닐 때만 재시도 버튼 노출. "backoff"(RATE_LIMIT_EXCEEDED): countdown 후 버튼 활성화. "refetch"(STATE_CONCURRENCY_CONFLICT): 즉시 활성화. 버튼 클릭 시 실제 재시도는 호출부 책임(`frontend/apps/web/src/components/ErrorMessage.tsx:38-40`). | 예. `error instanceof ApiError`일 때 `error.traceId`를 `traceId` prop으로 전달. `traceId`가 truthy이면 "Support code: {traceId}" 표시(`frontend/apps/web/src/components/ErrorMessage.tsx:60`) |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
