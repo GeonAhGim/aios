@@ -76,7 +76,7 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. 이 화면은 승인/거절 요청의 상태 전환만 처리하며, 금액(amount/price/fee)을 표시하거나 연산하지 않는다. `ApprovalRequest` 타입 필드(`requestedAction`, `scope`, `approvalMode`, `createdAt`, `mandatoryWaitSeconds`, `firstApproverId`)에 금액 관련 필드 없음(shared-types의 ApprovalRequest 타입 참조). 금액 조작은 FD-10.1 요청 생성 시점(별도 화면)에서 이미 완료됨. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
@@ -84,10 +84,10 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyForbidden` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:25`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:25`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:26`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:29`) | TODO | TODO | TODO |
+| `classifyForbidden` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:25`, `frontend/apps/web/src/components/ForbiddenNotice.tsx:19`) | 403 응답을 네 갈래(mfa_required/tenant_mismatch/policy/forbidden)로 분류. `shared-types/forbidden.ts:31-41`의 순수 함수. statusCode===403이고 errorCode별 갈래 매핑. | `RequestActionError`가 `<ForbiddenNotice>` 렌더링. 403이 아니면 null 반환 → `ErrorMessage`로 폴백. | trace_id 노출 없음. `ForbiddenNotice` 내부에서 `extractErrorCode`(ForbiddenNotice.tsx:19)로 errorCode만 추출(20-22줄). |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:25`) | 403 응답을 `Alert tone="danger"` 배너로 표시. `ForbiddenNotice.tsx:31-49`. policy 갈래면 `DenialReasons` 추가 표시(41줄). mfa_required일 때 `onStepUp` 버튼(t("legacy.forbiddenNotice.t1")) 표시(42-46줄). | 문구는 `getApiErrorMessage`로 shared-types에서 조회(apiError.ts EXACT_MESSAGES). `Alert` 컴포넌트 렌더링. | trace_id 노출 없음. |
+| `routeApiError` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:26`) | `shared-types/errorRouting.ts:84-133`의 단일 진입점. 10단계 우선순위(idempotency→forbidden→stateConflict→data_coverage→wallet_drift→serverError→retry→notFound→lockout→sessionExpired→unknown)로 error_code를 18개 갈래 중 하나로 분류. | `RoutedApiError` 반환(kind + 부가 데이터). 호출부(RequestActionError)가 kind별로 `ErrorMessage` props 구성. | trace_id 노출: `server_fatal` 갈래일 때 `traceId` 전달(MyApprovalRequestsPage.tsx:32). |
+| `ErrorMessage` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:29`) | `ErrorMessage.tsx:27-72`. `getApiErrorMessage`로 문구 조회. `classifyRetry`로 재시도 가능 여부 판정(kind: refetch/backoff/none). backoff일 때 `retryAfterSec` 카운트다운(49-53줄). fieldErrors 있으면 렌더링 생략(55줄). | `Alert tone="danger"` 배너. traceId 있으면 t("legacy.errorMessage.t1")로 노출. 재시도 가능하면 버튼 + 카운트다운. | trace_id: `ErrorMessage.tsx:60`에서 `{traceId && <p>...t("legacy.errorMessage.t1", { traceId })</p>}`. backoff_retry일 때 `retryAfterSec` 전달(MyApprovalRequestsPage.tsx:33). |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
@@ -95,10 +95,10 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:quality -->
 | 영역 | 확인한 사실 | 갭 |
 |---|---|---|
-| 접근성(WCAG 2.2 AA) | TODO | TODO |
-| i18n/지역화 | TODO | TODO |
-| 성능 예산 | TODO | TODO |
-| 텔레메트리 | TODO | TODO |
+| 접근성(WCAG 2.2 AA) | `Button` 요소 사용(81, 90줄) — `type="button"` 명시(82, 91줄). `loading` prop으로 비활성화 상태 표시. 승인 버튼은 `remaining > 0` 시 disabled(84줄). `aria-label`/`aria-disabled` 명시 없음(미확인). `PageHeader` 컴포넌트가 `<h1>` 시맨틱 태그 제공 여부 미확인. `RequestCard`의 `<li>`가 `<ul>` 내的正确 위치(117-120줄). 키보드 네비게이션 테스트 없음. | `aria-label` 누락. `aria-live` 영역으로 새로고침 알림 없음. |
+| i18n/지역화 | 5개 i18n 키 사용: `legacy.myApprovalRequestsPage.t1`(요청 ID), `t2`(거절), `t3`(title3=페이지 제목), `t4`(설명 문구), `t5`(빈 상태), `t6`(실패 문구). Facts 시트 확인. 모든 하드코딩 문자열은 i18n 키로 감싸짐(MyApprovalRequestsPage.tsx:76, 88, 96, 109, 111, 123). 한국어/영어 이중 제공(facts 시트 확인). | `remaining` 카운트다운 텍스트(MyApprovalRequestsPage.tsx:88: `` `승인 (${remaining}초 대기)` ``) — i18n 키가 아닌 템플릿 문자열. 초 단위 단위명("초")이 하드코딩됨. |
+| 성능 예산 | 데이터 조회: `useMyApprovalRequests`는 mount 시 1회 조회(폴링 없음). 승인/거부 mutation은 `mutateAsync`로 동기 처리. `onSuccess`에서 `invalidateQueries`로 목록 자동 갱신. 타이머: 각 `RequestCard`가 `setInterval`(1초 간격)으로 `remaining` 갱신(51-55줄). unmount 시 `clearInterval`로 정리. `requests.length`개의 카드가 각각 독립 타이머 보유 — N개 카드 시 N개의 interval 동시 실행. | 카드 수가 많을 때 타이머 오버헤드. 폴링/optimistic update 없음(보통 경로). |
+| 텔레메트리 | 페이지 진입/나선 추적, 승인/거절 버튼 클릭 횟수, 에러 발생 횟수 등 텔레메트리 추적 코드 없음(MyApprovalRequestsPage.tsx 전체 스캔). `Observability` 컴포넌트(import 없음). React Query의 `onSuccess`/`onError` 콜백에 로깅 없음. | 텔레메트리 미구현. |
 <!-- /BLOCK -->
 
 ### 11. 수용 기준
@@ -106,9 +106,9 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:accept -->
 | # | 수용 기준(테스트로 검증 가능한 문장) | 검증 수단 |
 |---|---|---|
-| A1 | TODO | TODO |
-| A2 | TODO | TODO |
-| A3 | TODO | TODO |
+| A1 | `/approval-requests` 라우트로 접근 시 로그인 세션이 없으면 `/login?next=/approval-requests`로 리다이렉트된다. | `ProtectedRoute.tsx:20-21`의 `!token` 분기 + router 테스트 |
+| A2 | 승인/거절 버튼 클릭 시 mutation이 호출되고, 성공 시 목록이 `invalidateQueries`로 자동 갱신되며, 실패 시 `RequestActionError`가 해당 카드 내부에 렌더링된다. | `MyApprovalRequestsPage.test.tsx`의 mutation trigger + error surface 테스트 |
+| A3 | 강제 대기시간(`mandatoryWaitSeconds`) 경과 전에는 승인 버튼이 비활성화(disabled)되고 카운트다운 텍스트를 표시하며, 경과 후 활성화된다. | `waitRemainingSeconds` 함수(MyApprovalRequestsPage.tsx:39-42) + 타이머 갱신 로직(MyApprovalRequestsPage.tsx:51-55) 검증 |
 <!-- /BLOCK -->
 
 ### 12. 구현 대비 갭 표
@@ -116,9 +116,9 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:gap -->
 | # | 명세(기대) | 현재 구현(근거) | 심각도 | 처리 |
 |---|---|---|---|---|
-| G1 | TODO | TODO | TODO | TODO |
-| G2 | TODO | TODO | TODO | TODO |
-| G3 | TODO | TODO | TODO | TODO |
+| G1 | 승인/거절 후 목록의 해당 항목이 자동으로 제거되거나 상태 업데이트되어야 함 | mutation `onSuccess` 훅(useApprovals.ts:16,24)이 `invalidateQueries`로 전체 목록을 갱신하지만, 해당 항목의 상태 변경을 직접 처리하지 않음 — 백엔드가 승인/거절 후 해당 요청을 목록에서 제외하는지 여부에 의존 | 하 | 기존 구현으로 충분(백엔드 정책 확인 필요) |
+| G2 | 대기 시간 카운트다운 텍스트가 i18n으로 제공되어야 함 | `remaining` 카운트다운(`MyApprovalRequestsPage.tsx:88`: `` `승인 (${remaining}초 대기)` ``)이 i18n 키가 아닌 템플릿 문자열. "초" 단위명이 하드코딩됨 | 중 | i18n 키 추출 필요 (별도 리프) |
+| G3 | `RequestCard` 내 `setInterval` 타이머가 unmount 시 정리되어야 함 | `useEffect` cleanup에 `clearInterval(timer)` 포함(MyApprovalRequestsPage.tsx:54). N개 카드 동시 렌더 시 N개 interval 생성·정리. | 하 | 구현됨 |
 <!-- /BLOCK -->
 
 ### 13. 미규정 액션 후보
