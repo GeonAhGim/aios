@@ -87,12 +87,16 @@
 <!-- BLOCK:J5-PerformanceStatementsPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `Alert` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:16`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:189`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:317`) | TODO | TODO | TODO |
-| `isResourceNotFound` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:396`) | TODO | TODO | TODO |
-| `NotFoundState` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:397`) | TODO | TODO | TODO |
-| `classifyServerError` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:407`) | TODO | TODO | TODO |
+| `Alert` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:160`) | `performanceStatementsPage.identityMismatch` (residual 변수 포함) [확인: catalog.ko.extra.ts:74, catalog.en.ts:477] | 구성 요소 합계와 순손익 불일치 — 정정 요청(correct) 가능 또는 무시. trace_id 없음. | 아니요 |
+| `Alert` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:325`) | `common.performanceNotGuaranteed` [확인: catalog.ko.ts:25, catalog.en.ts:32] | 성과 지표 공시 고지 (정보성). 별도 행동 없음. | 아니요 |
+| `ErrorMessage` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:189`) | `getApiErrorMessage(errorCode, message)` + `legacy.errorMessage.t1`(trace_id), `legacy.errorMessage.t2`(retry 카운트다운), `legacy.errorMessage.t3`(재시도 버튼) [확인: ErrorMessage.tsx:36,60,64,67] | 정정 요청 실패 — 재시도 버튼 없음(onRetry 미전달). 원인 수정 후 재전송 필요. | 예 (ApiError.traceId) |
+| `ErrorMessage` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:266`) | 동일 (legacy.errorMessage.t1/t2/t3) [확인: ErrorMessage.tsx:36,60,64,67] | 명세서 계산 실패 — 재시도 버튼 없음. 기간/범위 확인 후 재시도. | 예 (ApiError.traceId) |
+| `ErrorMessage` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:360`) | 동일 + `retryAfterSec` (backoff_retry 시 카운트다운) [확인: ErrorMessage.tsx:36,60,64,67] | 명세서 목록 조회 실패 — backoff_retry면 카운트다운 후 버튼 활성화, refetch_retry면 즉시 활성화. | 예 (ApiError.traceId) |
+| `routeApiError` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:317`) | 내부 유틸리티 — 사용자 문구 없음. kind 반환(refetch_retry/backoff_retry/other) [확인: routes/portfolio/PerformanceStatementsPage.tsx:317-318] | listQuery 오류 분류. ErrorMessage 렌더링 여부 결정. | 아니요 (분류만 수행) |
+| `isResourceNotFound` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:396`) | 내부 유틸리티 — 사용자 문구 없음. boolean 반환 [확인: routes/portfolio/PerformanceStatementsPage.tsx:396] | 404 여부 판정. true면 NotFoundState, false면 ErrorMessage 렌더링. | 아니요 |
+| `NotFoundState` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:397`) | `performanceStatementsPage.notFoundTitle`, `performanceStatementsPage.notFoundDescription` [확인: catalog.ko.extra.ts:79-80, catalog.en.ts:482-483] | 명세서 404 — "명세서를 찾을 수 없습니다". 별도 행동 없음. | 아니요 |
+| `ErrorMessage` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:402`) | 동일 (legacy.errorMessage.t1/t2/t3) [확인: ErrorMessage.tsx:36,60,64,67] | 상세 조회 실패 (404 외) — classifyServerError(kind==="retryable")면 onRetry로 refetch 가능. | 예 (ApiError.traceId) |
+| `classifyServerError` (`frontend/apps/web/src/routes/portfolio/PerformanceStatementsPage.tsx:407`) | 내부 유틸리티 — 사용자 문구 없음. `{kind: "retryable"|"non-retryable"}` 반환 [확인: routes/portfolio/PerformanceStatementsPage.tsx:407] | detailQuery 오류 재시도 가능 여부 판정. 재시도 버튼 표시 결정. | 아니요 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
