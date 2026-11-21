@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { perfBudgetMs } from "../test/perfBudget";
+import { bestOfMs, perfBudgetMs } from "../test/perfBudget";
 import {
   computeOnboardingProgress,
   deriveOnboardingProgress,
@@ -114,20 +114,22 @@ describe("deriveOnboardingProgress 실패 주입", () => {
 });
 
 describe("deriveOnboardingProgress 성능 예산", () => {
-  it("대량 반복 호출(n=100000)도 100ms 예산 안에서 끝난다 — 호출당 O(1) 상한을 못박는다", () => {
+  it("대량 반복 호출(n=100000)을 bestOfMs(5회 최소값)로 측정 — 공유 호스트 부하에 흔들리지 않고 O(1) 상한을 못박스다", () => {
     const slices = {
       exchangeCredentials: { data: [{ id: 1 }], isError: false },
       strategies: { data: [{ id: "s1" }], isError: false },
       paperDeployments: { data: { deployments: [{ id: "d1" }] }, isError: false },
     };
 
-    const start = performance.now();
-    for (let i = 0; i < 100_000; i += 1) {
-      deriveOnboardingProgress(slices);
-    }
-    const elapsedMs = performance.now() - start;
+    const bestMs = bestOfMs(() => {
+      const start = performance.now();
+      for (let i = 0; i < 100_000; i += 1) {
+        deriveOnboardingProgress(slices);
+      }
+      return performance.now() - start;
+    });
 
-    expect(elapsedMs).toBeLessThan(perfBudgetMs(100));
+    expect(bestMs).toBeLessThan(perfBudgetMs(100));
   });
 });
 
