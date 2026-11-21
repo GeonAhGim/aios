@@ -73,12 +73,12 @@
 <!-- BLOCK:J4-SafetyControlsPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:138`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:179`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:230`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:233`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:305`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:331`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:138`) [handleActivate] | 관리자 페이지 진입(`AdminRoute.tsx:45`는 `me.isPlatformAdmin` 체크). 범위 선택(`SAFETY_SCOPES`, `:27`), scope_ref(선택, `:126–128`), 사유 입력(필수, `:133–135`) | `useActivateSafetyControl`(`shared-hooks/src/useRiskGate.ts:42`) mutation 호출. 성공 시 `qc.invalidateQueries(["safetyControls"])`(`:46`)로 목록 갱신 | `onError` 콜백(`:109`)이 `setAdminActionError`(`:249`) 호출 → `SafetyControlActionError`(`:358`) 표시. `classifyForbidden`(`:35`)로 403 판정 시 `ForbiddenNotice`, 그 외 `ErrorMessage` | 동일 화면(목록 자동 갱신) |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:179`) [handleEvaluate] | 관리자 페이지 진입. 게이트 종류 선택(`GATE_KINDS`, `:28`), connectionId(선택, `:174–176`) | `useEvaluateRiskGate`(`shared-hooks/src/useRiskGate.ts:50`) mutation 호출. 성공 시 `onSuccess`(`:157`)로 `result` 상태 저장 → `RiskEvaluationSummary`(`:183`) 표시 | `onError` 콜백(`:157`)이 `setAdminActionError` 호출 → 동일 에러 경로(`:358`) | 동일 화면(평가 결과 표시) |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:230`) [handleApprove] | 관리자 페이지 진입. bundleId 입력(필수, `:218–220`), approval_ref 입력(필수, `:225–227`) | `useApproveRuleBundle`(`shared-hooks/src/useRiskGate.ts:56`) mutation 호출. 성공 시 캐시 무효화 없음(`:57–60`) | `onError` 콜백(`:200`)이 `setAdminActionError` 호출 → 동일 에러 경로 | 동일 화면 |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:233`) [handleActivate(ruleBundle)] | 관리자 페이지 진입. bundleId 입력(`:218–220`) | `useActivateRuleBundle`(`shared-hooks/src/useRiskGate.ts:63`) mutation 호출. 성공 시 `onSuccess`(`:207`)로 `bundle` 상태 저장 → `RuleBundleSummary`(`:237`) 표시 | `onError` 콜백(`:209`)이 `setAdminActionError` 호출 → 동일 에러 경로 | 동일 화면(활성화 결과 표시) |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:305`) [handleDeactivate] | 안전 통제 상태가 `ACTIVE`(`:286` — `isActive` 참). 해당 컨트롤 ID | `useDeactivateSafetyControl`(`shared-hooks/src/useRiskGate.ts:19`) mutation 호출. 성공 시 `qc.invalidateQueries(["safetyControls"])`(`:23`)로 목록 갱신. 컨트롤 UI 제거 | `onError` 콜백(`:265`)이 `setActionError`(`:248`) 호출 → `SafetyControlActionError`(`:342–345`) 표시. 동일 에러 라우팅 | 동일 화면(목록에서 해당 컨트롤 제거) |
+| `<Button>` (`frontend/apps/web/src/routes/admin/SafetyControlsPage.tsx:331`) [handleEvaluateRecovery] | 안전 통제 상태가 `ACTIVE`. approvalId(숫자, 필수 검증 `:270–273`), evidenceRef(선택, `:326–328`) | `useEvaluateRecovery`(`shared-hooks/src/useRiskGate.ts:27`) mutation 호출. 성공 시 `qc.invalidateQueries(["safetyControls"])`(`:37`) + `onSuccess`(`:279`)로 `recoveryDecisions` 상태 저장 → `RecoveryDecisionSummary`(`:341`) 표시 | validation 실패(approvalId 비숫자): `new Error("승인 요청 ID를 숫자로 입력하세요.")` 직접 발생(`:272`). mutation 실패: `onError`(`:280`)로 `setActionError` 호출 → 동일 에러 경로 | 동일 화면(복구 평가 결과 표시) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
