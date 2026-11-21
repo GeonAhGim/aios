@@ -82,12 +82,12 @@
 <!-- BLOCK:J4-ReconciliationPage:err -->
 | 오류 범주 | 사용자 문구(i18n 키) | 다음 행동 안내 | trace_id 노출 |
 |---|---|---|---|
-| `classifyBadRequest` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:4`) | TODO | TODO | TODO |
-| `classifyForbidden` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:5`) | TODO | TODO | TODO |
-| `routeApiError` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:6`) | TODO | TODO | TODO |
-| `BadRequestNotice` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:26`) | TODO | TODO | TODO |
-| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:27`) | TODO | TODO | TODO |
-| `ErrorMessage` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:30`) | TODO | TODO | TODO |
+| `classifyBadRequest` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:4`) | 없음 — 순수 분류 함수(classification only). `shared-types/badRequest.ts:34` 참조. | `ReconciliationActionError`가 400 응답을 `BadRequestNotice`로 라우팅하는지 결정. 400이 아니면 `null` 반환 후 다음 경로(classifyForbidden)로 넘김. | 없음 |
+| `classifyForbidden` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:5`) | 없음 — 순수 분류 함수. `shared-types/forbidden.ts:31` 참조. | `ReconciliationActionError`가 403 응답을 `ForbiddenNotice`로 라우팅하는지 결정. 403이 아니면 `null` 반환 후 다음 경로(routeApiError)로 넘김. | 없음 |
+| `routeApiError` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:6`) | 없음 — 순수 라우팅 함수. 400/403 이외의 모든 에러를 `{kind: "error", afterSec?: number}`로 감싸 `ErrorMessage` props에 전달. | 400/403 분기 후 나머지 에러를 `ErrorMessage`로 보냄. `kind === "backoff_retry"`일 때 `afterSec`을 `ErrorMessage.retryAfterSec`에 전달해 카운트다운 재시도 버튼 활성화. | 없음 — trace_id는 호출부(`ReconciliationActionError:33`)가 `ApiError.traceId`에서 직접 추출해 `ErrorMessage` props에 넘김 |
+| `BadRequestNotice` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:26`) | `getApiErrorMessage()` 사용 — `shared-types/apiError.ts:106`. 알려진 errorCode면 `EXACT_MESSAGES`(한국어 고정), 모르면 `PREFIX_MESSAGES` 또는 `DEFAULT_API_ERROR_MESSAGE`. i18n 키 아님. | `disclosure_retired`: `legacy.badRequestNotice.t1`("내용 다시 불러오기") 버튼 표시. `mfa_invalid`: `legacy.badRequestNotice.t2`("MFA 코드 입력란으로 이동") 버튼 표시. 나머지 갈래: 액션 버튼 없음(재시도해도 동일 결과). | 없음 |
+| `ForbiddenNotice` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:27`) | `getApiErrorMessage()` 사용 — `shared-types/apiError.ts:106`. 알려진 errorCode면 `EXACT_MESSAGES`(한국어 고정), 모르면 `PREFIX_MESSAGES` 또는 `DEFAULT_API_ERROR_MESSAGE`. i18n 키 아님. | `mfa_required`: `legacy.forbiddenNotice.t1`("추가 인증") 버튼 표시(onStepUp). `policy`: `DenialReasons` 컴포넌트로 `reasonCodes` 상세 표시. 나머지 갈래: 액션 버튼 없음. | 없음 |
+| `ErrorMessage` (`frontend/apps/web/src/routes/admin/ReconciliationPage.tsx:30`) | `getApiErrorMessage()` 사용 — `shared-types/apiError.ts:106`. 알려진 errorCode면 `EXACT_MESSAGES`(한국어 고정), 모르면 `PREFIX_MESSAGES` 또는 `DEFAULT_API_ERROR_MESSAGE`. i18n 키 아님. | `traceId`가 있으면 `legacy.errorMessage.t1`("trace_id: {traceId}")로 하위 표시. `canRetry` && `onRetry`이면 `legacy.errorMessage.t3`("다시 시도") 버튼 + `legacy.errorMessage.t2`("{remainingSec}초 후 재시도 가능") 카운트다운 표시. | **노함** — `traceId`가 `ApiError.traceId`에서 전달되어 `ErrorMessage:60`에서 `legacy.errorMessage.t1` i18n 키와 함께 `<p className="mt-1 text-xs text-fg-muted">`로 표시됨 |
 <!-- /BLOCK -->
 
 ### 7·8·9·10. 접근성·i18n·성능·관측
