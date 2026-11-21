@@ -86,7 +86,11 @@
 <!-- BLOCK:J4-SafetyControlsPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당. 본 화면은 안전 통제 개통/해제(상태 변경)와 룰번들 승인/활성화(상태 변경)를 포함 — 위임장 변경·출금은 없음 |
+| 금전·위험 행동 목록 | 1) 안전 통제 개통(`SafetyControlsPage.tsx:107-110`, `useRiskGate.ts:42-47`) — `POST /admin/safety-controls/activate`. 2) 안전 통제 해제(`SafetyControlsPage.tsx:265`, `useRiskGate.ts:19-25`) — `POST /safety-controls/:controlId/deactivate`. 3) 룰번들 승인(`SafetyControlsPage.tsx:198-201`, `useRiskGate.ts:56-61`) — `POST /rule-bundles/:bundleId/approve`. 4) 룰번들 활성화(`SafetyControlsPage.tsx:206-209`, `useRiskGate.ts:63-67`) — `POST /rule-bundles/:bundleId/activate`. 평가(Evaluate Risk Gate `:155`, Evaluate Recovery `:276`)는 읽기 전용 판단이며 상태 변경 없음 |
+| 확인 절차 | 모든 개통/해제/승인/활성화 mutation은 `onError` 콜백(`SafetyControlsPage.tsx:109`, `:157`, `:200`, `:208`, `:265`)을 통해 `SafetyControlActionError`(`SafetyControlsPage.tsx:34-46`)로 에러 라우팅. `classifyForbidden`(`shared-types/src/forbidden.ts:31`)으로 403 판정 → `ForbiddenNotice`(`:35-36`) 또는 `ErrorMessage`(`:38`). 버튼 `loading` 상태로 `isPending` 표시(`SafetyControlsPage.tsx:138`, `:180`, `:231`, `:234`) |
+| 멱등성 | 미구현. 모든 mutation이 `postEnvelope`(일반 POST) 사용 — `httpIdempotent.ts`의 `postEnvelopeIdempotent` 아님. `Idempotency-Key` 헤더 미첨부. 중복 클릭 시 재전송 가능(`handleActivate` `:105-111`, `handleApprove` `:196-202`, `handleDeactivate` `:263-266` 모두 `onError(null)`만 호출하고 기존 요청 취소 없음) |
+| 불확실 결과 표시 | 예. 각 버튼에 `loading={activate.isPending}` 등으로 제출 중 상태 표시(`:138`, `:180`, `:231`, `:234`). 평가 결과는 `RiskEvaluationSummary`(`:183`)·`RuleBundleSummary`(`:237`)·`RecoveryDecisionSummary`(`:341`)에서 `<StatusBadge>`로 outcome 표시. 개통/해제/승인 결과는 로컬 상태 저장 없음 — 목록(`useSafetyControls`)이 `invalidateQueries`로 갱신(`:23`, `:46`) |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
