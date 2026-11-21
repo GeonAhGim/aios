@@ -55,10 +55,10 @@
 <!-- BLOCK:J6-ApprovalSettingsPage:st-c -->
 | 상태 | 조건 | 사용자가 보는 것 | 가능한 행동 | 구현 여부 |
 |---|---|---|---|---|
-| 잠김/속도 제한(423/429) | TODO | TODO | TODO | TODO |
-| 서버 오류(5xx) | TODO | TODO | TODO | TODO |
-| 네트워크 단절 | TODO | TODO | TODO | TODO |
-| 부분 실패(일부 데이터만 실패) | TODO | TODO | TODO | TODO |
+| 잠김/속도 제한(423/429) | 서버가 429(RATE_LIMIT_EXCEEDED) 또는 423(LOCKED) 반환. `frontend/packages/api-client/src/http.ts:83` — `buildApiError`가 `ApiError` 던짐. 429 응답에는 봉투에 `retry_after_seconds` 포함(`frontend/packages/api-client/src/envelope.ts:59-60`). | 429: ApprovalSettingsPage.tsx의 UpdateSettingsError 함수(`:30-42`)가 `routeApiError(error)`로 분류 → `ErrorMessage`(`:35-41`)가 `classifyRetry`로 "backoff" 판정. `retryAfterSec` 카운트다운 + 재시도 버튼(`ErrorMessage.tsx:49-53`). 423: `classifyRetry`가 "none" → 재시도 버튼 없이 traceId만 표시(`ErrorMessage.tsx:60`). | 429 — `ErrorMessage.tsx:66` 재시도 버튼(카운트다운 0 후 활성화). 423 — 재시도 불가(버튼 없음). | 429 구현됨(`http.ts:83`, `envelope.ts:60`, `ErrorMessage.tsx:41-53`). 423 구현됨(`ErrorMessage.tsx:39` "none" 분기). |
+| 서버 오류(5xx) | 서버가 5xx 상태 코드 반환. `http.ts:83` — `buildApiError`가 `ApiError` 던짐. `frontend/packages/api-client/src/http.ts:79-83` — 5xx 응답도 `buildApiError`로 `ApiError` 던짐. | ApprovalSettingsPage.tsx의 UpdateSettingsError 함수(`:30-42`)가 `routeApiError(error)`로 분류 → `ErrorMessage`(`:35-41`)가 `classifyRetry`로 "server_fatal" 판정. `<Alert tone="danger">` + `<p>{text}</p>` + traceId(`ErrorMessage.tsx:58-60`). 재시도 버튼 없음(`classifyRetry` "none" 분기). | 없음(재시도 불가 — 서버 재발생 전까지 의미 있는 재시도 없음). | 구현됨(`http.ts:83`, `ErrorMessage.tsx:38-39` "server_fatal" → "none"). |
+| 네트워크 단절 | fetch 또는 네트워크 연결 실패. `http.ts:92` — `handleRequestFailure`가 예외 캐치. `ApprovalSettingsPage.tsx:71-85` — `catch`에서 `err instanceof ApiError`가 false → `new Error(t("legacy.approvalSettingsPage.t9"))`로 감싸서 `setError`. | `ErrorMessage`(`:132`)가 `<Alert tone="danger">` + `<p>{text}</p>` 렌더링. 문구는 `legacy.approvalSettingsPage.t9`("설정 변경에 실패했습니다.")(`:84`). traceId 없음(`:38` undefined). 재시도 버튼 없음(`classifyRetry` "none"). | 없음(재시도 버튼 없음). | 구현됨(`ApprovalSettingsPage.tsx:83-85`, `ErrorMessage.tsx:38-39`). |
+| 부분 실패(일부 데이터만 실패) | `useApprovalSettings`(GET)는 성공했으나 `useUpdateApprovalSettings`(mutation)이 실패한 경우, 또는 그 반대. `ApprovalSettingsPage.tsx:46` — `useApprovalSettings` 훅의 `error`는 구조분해 없이 무시됨(`:97-98`에서 `isLoading`만 확인). | GET 실패 시: `settings`가 `undefined` → `:128` `{settings && ...}` 숨김. 폼은 SOLO 기본값(`:48`)으로 표시. 전용 에러 UI 없음. mutation 실패 시: `UpdateSettingsError`(`:132`)가 해당 오류 범주(400/403/그 외)로 분기. | GET 실패 — 페이지 재방문 또는 수동 refetch. mutation 실패 — `UpdateSettingsError` 경로로 분기. | GET 실패 미구현(에러 무시, 기본값 노출 — `:46` 구조분해에서 `error` 누락). mutation 실패 구현됨(`:71-85`, `:132`). |
 <!-- /BLOCK -->
 
 ### 4. 사용자 행동과 전이
