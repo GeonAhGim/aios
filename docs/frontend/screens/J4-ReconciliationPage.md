@@ -74,7 +74,7 @@
 <!-- BLOCK:J4-ReconciliationPage:money -->
 | 항목 | 내용 |
 |---|---|
-| 해당 여부와 이유(없으면 '해당 없음' + 이유) | TODO |
+| 해당 여부와 이유(없으면 '해당 없음' + 이유) | 해당 없음. 이 화면은 대사(Reconciliation) 불일치 상태 조회 및 해소 사유 입력 전용 화면이다. 주문·실행 생성·LIVE 전환·위임장 변경·출금 등 금전·위험 행동이 없다. 단일 액션 `useResolveReconciliation`(`ReconciliationPage.tsx:43`)은 POST `/reconciliation/resolve/:targetRef`(`reconciliation.ts:24`)로 `reason` 문자열만 전달하며(`ReconciliationPage.tsx:60`), 금액·자산·계정 변경이 없다. |
 <!-- /BLOCK -->
 
 ### 6. 오류 문구와 복구 안내
