@@ -67,7 +67,9 @@
 <!-- BLOCK:J5-ReportsPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| TODO | | | |
+| 시작일 변경 (Input, ReportsPage.tsx:49) | 페이지 로딩 완료 또는 기존 기간 표시 중 (`periodStart` state 존재, ReportsPage.tsx:37) | `periodStart` state 업데이트(ReportsPage.tsx:37 `setPeriodStart`); `useReport`의 `enabled: !!periodStart && !!periodEnd`(usePortfolio.ts:33)에 따라 쿼리 키(`["report", periodStart, periodEnd, executionId]`, usePortfolio.ts:31) 변경 → 새 데이터 조회; 로딩 중이면 `LoadingState`(ReportsPage.tsx:59-60) | 기간 입력값이 유효한 날짜 형식이어야 함(HTML5 date input 검증); 유효하지 않으면 브라우저 기본 검증 메시지 표시, 조회 트리거되지 않음 | 동일 화면 (`/reports`, router.tsx:140) |
+| 종료일 변경 (Input, ReportsPage.tsx:53) | 페이지 로딩 완료 또는 기존 기간 표시 중 (`periodEnd` state 존재, ReportsPage.tsx:38) | `periodEnd` state 업데이트(ReportsPage.tsx:38 `setPeriodEnd`); `useReport` 쿼리 키 변경 → 새 데이터 조회; 로딩 중이면 `LoadingState`(ReportsPage.tsx:59-60) | 기간 입력값이 유효한 날짜 형식이어야 함(HTML5 date input 검증); 유효하지 않으면 브라우저 기본 검증 메시지 표시, 조회 트리거되지 않음 | 동일 화면 (`/reports`, router.tsx:140) |
+| 재조회 버튼 클릭 (ReportError → onRetry, ReportsPage.tsx:58) | `isError` true且且(`routed.kind === "refetch_retry"` 또는 `"backoff_retry"`, ReportsPage.tsx:23); `onRetry={() => refetch()}` 전달(ReportsPage.tsx:58) | `useReport`의 `refetch()` 호출 → 새 데이터 조회; 성공 시 정상 상태 표시(ReportsPage.tsx:61-118) | `canRetry` false(`routed.kind`가 위 두 가지 아님)이면 재시도 버튼 표시 안 함(ReportsPage.tsx:30 `onRetry={canRetry ? onRetry : undefined}`); `backoff_retry`일 때 `retryAfterSec` 초과 전에는 재시도 비활성 | 동일 화면 (`/reports`, router.tsx:140) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
