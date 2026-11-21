@@ -67,8 +67,8 @@
 <!-- BLOCK:J6-MyApprovalRequestsPage:act -->
 | 행동(요소) | 전제 | 결과(성공) | 결과(실패) | 다음 화면 |
 |---|---|---|---|---|
-| `<Button>` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:81`) | TODO | TODO | TODO | TODO |
-| `<Button>` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:90`) | TODO | TODO | TODO | TODO |
+| `<Button>` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:81`) | `remaining > 0` 시 disabled(대기시간 경과 전). `approve.isPending` 시 loading. 대기시간: `waitRemainingSeconds(request)` — `createdAt + mandatoryWaitSeconds * 1000 - Date.now()`(MyApprovalRequestsPage.tsx:39-42). 타이머: `setInterval` 1초 간격으로 `remaining` 갱신(MyApprovalRequestsPage.tsx:51-55). | `handle("approve")` 호출(MyApprovalRequestsPage.tsx:86) → `approve.mutateAsync(request.id)`(useApprovals.ts:12 mutation). `onSuccess` 훅(useApprovals.ts:16): `qc.invalidateQueries({ queryKey: ["myApprovalRequests"] })`로 목록 자동 갱신. | `catch`(MyApprovalRequestsPage.tsx:62-64): `setError(err)`. `RequestActionError` 렌더링(MyApprovalRequestsPage.tsx:79). `classifyForbidden(error)` false → `routeApiError(error)` 분류 → `ErrorMessage` 표시(MyApprovalRequestsPage.tsx:26-35). | 동일 화면 (목록 자동 갱신) |
+| `<Button>` (`frontend/apps/web/src/routes/approvals/MyApprovalRequestsPage.tsx:90`) | disabled 없음(거절은 항상 활성화). `reject.isPending` 시 loading(MyApprovalRequestsPage.tsx:93). | `handle("reject")` 호출(MyApprovalRequestsPage.tsx:94) → `reject.mutateAsync(request.id)`(useApprovals.ts:20 mutation). `onSuccess` 훅(useApprovals.ts:24): `qc.invalidateQueries({ queryKey: ["myApprovalRequests"] })`로 목록 자동 갱신. | 승인 버튼과 동일 처리(MyApprovalRequestsPage.tsx:62-64). `error` state 저장 → `RequestActionError` 렌더링(MyApprovalRequestsPage.tsx:79). | 동일 화면 (목록 자동 갱신) |
 <!-- /BLOCK -->
 
 ### 5. 금전·위험 행동 규칙
